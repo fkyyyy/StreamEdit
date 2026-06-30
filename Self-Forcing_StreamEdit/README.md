@@ -1,11 +1,11 @@
-# Self Forcing & StreamGVE
+# Self Forcing & StreamEdit
 
-This folder contains the StreamGVE implementation built on [Self Forcing](https://github.com/guandeh17/Self-Forcing) codebase.
+This folder contains the StreamEdit implementation built on [Self Forcing](https://github.com/guandeh17/Self-Forcing) codebase.
 
-Most files are inherited from the upstream Self Forcing repository. The implementation of StreamGVE is mainly located in:
+Most files are inherited from the upstream Self Forcing repository. The implementation of StreamEdit is mainly located in:
 
-- `inference_edit_streamgve.py`: command-line entry point for StreamGVE video editing.
-- `inference_edit_streamgve.sh`: example editing commands.
+- `inference_edit_streamedit.py`: command-line entry point for StreamEdit video editing.
+- `inference_edit_streamedit.sh`: example editing commands.
 - `pipeline/edit_causal_inference.py`: dual-branch editing pipeline, attention bridge, grounding/boosting, source-oriented guidance, and visual prompting logic.
 - `pipeline/__init__.py`: exposes `EditCausalInferencePipeline`.
 - `wan/modules/model.py` and `wan/modules/causal_model.py`: attention-level support for grounding, boosting, query/key blending, source KV injection, and mask-aware cache usage.
@@ -25,7 +25,7 @@ python setup.py develop
 Run the provided editing examples:
 
 ```bash
-bash inference_edit_streamgve.sh
+bash inference_edit_streamedit.sh
 ```
 
 Refer to [Self Forcing Issue 2](https://github.com/guandeh17/Self-Forcing/issues/2), we implemented rollout-based long-video editing for Self Forcing, which is different from LongLive's natural adaptation to any length.
