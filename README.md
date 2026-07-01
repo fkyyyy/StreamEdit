@@ -103,7 +103,7 @@ If you find this work useful, please consider citing, thanks!
 @inproceedings{jiao2026streamedit,
       title={StreamEdit: Training-Free Video Editing via Few-Step Streaming Video Generation}, 
       author={Guanlong Jiao and Chenyangguang Zhang and Jia Jun Cheng Xian and Zewei Zhang and Renjie Liao},
-      booktitle = {Proceedings of the European Conference on Computer Vision (ECCV)},
+      booktitle={Proceedings of the European Conference on Computer Vision (ECCV)},
       year={2026}
 }
 ```
