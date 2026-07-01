@@ -100,13 +100,10 @@ This repository builds on the excellent open-source work of [Self Forcing](https
 If you find this work useful, please consider citing, thanks!
 
 ```bibtex
-@misc{jiao2026streamgvetrainingfreevideoediting,
-      title={StreamGVE: Training-Free Video Editing via Few-Step Streaming Video Generation}, 
+@inproceedings{jiao2026streamedit,
+      title={StreamEdit: Training-Free Video Editing via Few-Step Streaming Video Generation}, 
       author={Guanlong Jiao and Chenyangguang Zhang and Jia Jun Cheng Xian and Zewei Zhang and Renjie Liao},
-      year={2026},
-      eprint={2605.21466},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2605.21466}, 
+      booktitle = {Proceedings of the European Conference on Computer Vision (ECCV)},
+      year={2026}
 }
 ```
