@@ -306,6 +306,36 @@ class EditCausalInferencePipeline(torch.nn.Module):
             )
             if save_role_dir is not None:
                 os.makedirs(save_role_dir, exist_ok=True)
+        # #region debug-point B:network-reporter
+        def _debug_report(hypothesis_id, location, msg, data):
+            try:
+                import json
+                import time
+                import urllib.request
+                url = os.environ.get(
+                    "DEBUG_SERVER_URL",
+                    "http://10.74.55.101:7777/event",
+                )
+                payload = {
+                    "sessionId": os.environ.get(
+                        "DEBUG_SESSION_ID", "oracle-edit-collapse"
+                    ),
+                    "runId": os.environ.get("DEBUG_RUN_ID", "pre-fix"),
+                    "hypothesisId": hypothesis_id,
+                    "location": location,
+                    "msg": f"[DEBUG] {msg}",
+                    "data": data,
+                    "ts": int(time.time() * 1000),
+                }
+                request = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode(),
+                    headers={"Content-Type": "application/json"},
+                )
+                urllib.request.urlopen(request, timeout=0.2).read()
+            except Exception:
+                pass
+        # #endregion
         if not independent_first_frame or (independent_first_frame and trg_initial_latent is not None):
             # If the first frame is independent and the first frame is provided, then the number of frames in the
             # noise should still be a multiple of num_frame_per_block
@@ -520,6 +550,39 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         for name, coverage in role_coverage.items()
                     )
                 )
+                # #region debug-point C:role-kv-mask-alignment
+                debug_role_tokens = F.max_pool2d(
+                    current_roles.edit_weight, kernel_size=2, stride=2
+                ).bool().reshape(batch_size, -1)
+                debug_src_tokens = src_fg_mask_bin.bool()
+                debug_intersection = (
+                    debug_role_tokens & debug_src_tokens
+                ).float().sum()
+                debug_union = (
+                    debug_role_tokens | debug_src_tokens
+                ).float().sum()
+                _debug_report(
+                    "C",
+                    "edit_causal_inference.py:oracle-role-block",
+                    "Oracle role and source KV mask alignment",
+                    {
+                        "block": current_start_frame // self.num_frame_per_block,
+                        "role_edit_coverage": current_roles.edit_weight.mean().item(),
+                        "kv_mask_coverage": debug_src_tokens.float().mean().item(),
+                        "iou": (
+                            debug_intersection / debug_union.clamp_min(1)
+                        ).item(),
+                        "role_recall": (
+                            debug_intersection
+                            / debug_role_tokens.float().sum().clamp_min(1)
+                        ).item(),
+                        "kv_precision": (
+                            debug_intersection
+                            / debug_src_tokens.float().sum().clamp_min(1)
+                        ).item(),
+                    },
+                )
+                # #endregion
                 if save_role_dir is not None:
                     self._save_role_state(
                         save_role_dir,
@@ -586,6 +649,38 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 t_i = current_timestep / 1000
                 v_src, v_trg = velocity_pred.chunk(2, dim=0)
                 v_gt = fwd_noise - src_input
+                # #region debug-point B:velocity-collapse
+                if current_roles is not None and index in {
+                    0,
+                    len(denoising_step_list) // 2,
+                    len(denoising_step_list) - 1,
+                }:
+                    debug_edit_mask = current_roles.edit_weight.bool().unsqueeze(2)
+                    debug_edit_mask = debug_edit_mask.expand_as(v_trg)
+                    debug_edit_count = debug_edit_mask.sum().clamp_min(1)
+                    _debug_report(
+                        "B",
+                        "edit_causal_inference.py:denoising-velocity",
+                        "Target velocity separation inside oracle edit roles",
+                        {
+                            "block": current_start_frame // self.num_frame_per_block,
+                            "step": index,
+                            "timestep": float(current_timestep),
+                            "target_source_gap": (
+                                (v_trg - v_src).abs()[debug_edit_mask].sum()
+                                / debug_edit_count
+                            ).item(),
+                            "target_exact_source_gap": (
+                                (v_trg - v_gt).abs()[debug_edit_mask].sum()
+                                / debug_edit_count
+                            ).item(),
+                            "target_velocity_abs": (
+                                v_trg.abs()[debug_edit_mask].sum()
+                                / debug_edit_count
+                            ).item(),
+                        },
+                    )
+                # #endregion
                 
                 if routing_mode == "oracle_role_flow":
                     v_t, _, _ = role_flow_router(
@@ -618,6 +713,30 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     inloop_trg_fg_mask_bin = inloop_src_trg_fg_mask_bin.chunk(2, dim=0)[1]
                     # inject union of origin src and in-processing trg masks to kv_cache
                     inloop_trg_fg_mask = inloop_trg_fg_mask_bin | src_fg_mask_bin
+                    # #region debug-point D:target-mask-union
+                    if current_roles is not None:
+                        debug_target_tokens = inloop_trg_fg_mask_bin.bool()
+                        debug_union_tokens = inloop_trg_fg_mask.bool()
+                        debug_target_intersection = (
+                            debug_target_tokens & debug_role_tokens
+                        ).float().sum()
+                        _debug_report(
+                            "D",
+                            "edit_causal_inference.py:target-mask-union",
+                            "Mid-step target mask union",
+                            {
+                                "block": current_start_frame // self.num_frame_per_block,
+                                "target_coverage": debug_target_tokens.float().mean().item(),
+                                "union_coverage": debug_union_tokens.float().mean().item(),
+                                "target_role_iou": (
+                                    debug_target_intersection
+                                    / (
+                                        debug_target_tokens | debug_role_tokens
+                                    ).float().sum().clamp_min(1)
+                                ).item(),
+                            },
+                        )
+                    # #endregion
                     self._inject_masks_to_kv_cache(
                         kv_cache_dual, trg_fg_mask_cache, inloop_trg_fg_mask, 
                     )
@@ -637,6 +756,42 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 crossattn_cache=crossattn_cache_trg,
                 current_start=current_start_frame * self.frame_seq_length,
             )
+            # #region debug-point B:target-kv-write
+            if current_roles is not None:
+                debug_num_tokens = kv_cache_trg[0]["num_new_tokens"]
+                debug_src_end = kv_cache_src[0]["local_end_index"].item()
+                debug_trg_end = kv_cache_trg[0]["local_end_index"].item()
+                debug_src_key = kv_cache_src[0]["k"][
+                    :, debug_src_end - debug_num_tokens:debug_src_end
+                ]
+                debug_trg_key = kv_cache_trg[0]["k"][
+                    :, debug_trg_end - debug_num_tokens:debug_trg_end
+                ]
+                debug_src_value = kv_cache_src[0]["v"][
+                    :, debug_src_end - debug_num_tokens:debug_src_end
+                ]
+                debug_trg_value = kv_cache_trg[0]["v"][
+                    :, debug_trg_end - debug_num_tokens:debug_trg_end
+                ]
+                _debug_report(
+                    "B",
+                    "edit_causal_inference.py:target-kv-write",
+                    "Source and target KV similarity after target write",
+                    {
+                        "block": current_start_frame // self.num_frame_per_block,
+                        "key_cosine": F.cosine_similarity(
+                            debug_src_key.float(),
+                            debug_trg_key.float(),
+                            dim=-1,
+                        ).mean().item(),
+                        "value_cosine": F.cosine_similarity(
+                            debug_src_value.float(),
+                            debug_trg_value.float(),
+                            dim=-1,
+                        ).mean().item(),
+                    },
+                )
+            # #endregion
             #✨ store clean target kv cache, and obtain clean target mask
             _, trg_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_trg)
             current_trg_fg_mask = trg_fg_mask_bin | src_fg_mask_bin

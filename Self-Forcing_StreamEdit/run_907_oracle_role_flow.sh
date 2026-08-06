@@ -12,6 +12,11 @@ STEP="${STEP:-15}"
 CUDA_DEVICE="${CUDA_DEVICE:-0}"
 
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICE"
+# #region debug-point B:runtime-log-routing
+export DEBUG_SERVER_URL="${DEBUG_SERVER_URL:-http://10.74.55.101:7777/event}"
+export DEBUG_SESSION_ID="${DEBUG_SESSION_ID:-oracle-edit-collapse}"
+export DEBUG_RUN_ID="${DEBUG_RUN_ID:-pre-fix}"
+# #endregion
 mkdir -p "$OUTDIR/roles"
 cd "$SCRIPT_DIR"
 
