@@ -7,15 +7,16 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 DATA_PATH="${DATA_PATH:-$REPO_ROOT/source_video.mp4}"
 OBJECT_MASK="${OBJECT_MASK:-$REPO_ROOT/bottle_mask.mp4}"
 HAND_MASK="${HAND_MASK:-$REPO_ROOT/hand_mask.mp4}"
-OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/egoedit_907_oracle_role_flow}"
+OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/egoedit_907_oracle_role_flow_kv}"
 STEP="${STEP:-15}"
 CUDA_DEVICE="${CUDA_DEVICE:-0}"
+ROUTING_MODE="${ROUTING_MODE:-oracle_role_flow_kv}"
 
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICE"
 # #region debug-point B:runtime-log-routing
 export DEBUG_SERVER_URL="${DEBUG_SERVER_URL:-http://10.74.55.101:7777/event}"
 export DEBUG_SESSION_ID="${DEBUG_SESSION_ID:-oracle-edit-collapse}"
-export DEBUG_RUN_ID="${DEBUG_RUN_ID:-pre-fix}"
+export DEBUG_RUN_ID="${DEBUG_RUN_ID:-post-fix}"
 # #endregion
 mkdir -p "$OUTDIR/roles"
 cd "$SCRIPT_DIR"
@@ -24,9 +25,9 @@ python inference_edit_streamedit.py \
   --data_path "$DATA_PATH" \
   --object_mask_video "$OBJECT_MASK" \
   --hand_mask_video "$HAND_MASK" \
-  --save_path "$OUTDIR/907-oracle-role-flow.mp4" \
+  --save_path "$OUTDIR/907-oracle-role-flow-kv.mp4" \
   --save_role_dir "$OUTDIR/roles" \
-  --routing_mode oracle_role_flow \
+  --routing_mode "$ROUTING_MODE" \
   --role_boundary_radius 1 \
   --mask_white_threshold 245 \
   --object_min_latent_coverage 0.001 \

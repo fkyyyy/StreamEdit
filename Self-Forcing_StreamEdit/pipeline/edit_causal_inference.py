@@ -280,9 +280,18 @@ class EditCausalInferencePipeline(torch.nn.Module):
         independent_first_frame = independent_first_frame or self.independent_first_frame
         
         batch_size, num_frames, num_channels, height, width = src_video.shape
-        if routing_mode not in {"dynamic_sog", "oracle_role_flow"}:
+        oracle_role_enabled = routing_mode in {
+            "oracle_role_flow",
+            "oracle_role_flow_kv",
+        }
+        oracle_kv_enabled = routing_mode == "oracle_role_flow_kv"
+        if routing_mode not in {
+            "dynamic_sog",
+            "oracle_role_flow",
+            "oracle_role_flow_kv",
+        }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
-        if routing_mode == "oracle_role_flow":
+        if oracle_role_enabled:
             if oracle_object_mask is None or oracle_hand_mask is None:
                 raise ValueError(
                     "oracle_role_flow requires oracle object and hand masks"
@@ -521,16 +530,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 current_start=current_start_frame * self.frame_seq_length,
             )
             _, src_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_src)
-            # inject to kv_cache
-            self._inject_masks_to_kv_cache(
-                kv_cache_dual, trg_fg_mask_cache, src_fg_mask_bin, 
-            )
-            src_fg_mask_map = self._mask_reshape(
-                src_fg_mask_bin, size=(current_num_frames, height, width)
-            )
-            inloop_trg_fg_mask = src_fg_mask_bin
             current_roles = None
-            if routing_mode == "oracle_role_flow":
+            role_edit_tokens = None
+            if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
                 role_right = role_left + current_num_frames
                 current_roles = build_oracle_roles(
@@ -551,15 +553,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     )
                 )
                 # #region debug-point C:role-kv-mask-alignment
-                debug_role_tokens = F.max_pool2d(
+                role_edit_tokens = F.max_pool2d(
                     current_roles.edit_weight, kernel_size=2, stride=2
                 ).bool().reshape(batch_size, -1)
                 debug_src_tokens = src_fg_mask_bin.bool()
                 debug_intersection = (
-                    debug_role_tokens & debug_src_tokens
+                    role_edit_tokens & debug_src_tokens
                 ).float().sum()
                 debug_union = (
-                    debug_role_tokens | debug_src_tokens
+                    role_edit_tokens | debug_src_tokens
                 ).float().sum()
                 _debug_report(
                     "C",
@@ -574,7 +576,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         ).item(),
                         "role_recall": (
                             debug_intersection
-                            / debug_role_tokens.float().sum().clamp_min(1)
+                            / role_edit_tokens.float().sum().clamp_min(1)
                         ).item(),
                         "kv_precision": (
                             debug_intersection
@@ -589,6 +591,19 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         current_start_frame // self.num_frame_per_block,
                         current_roles,
                     )
+            effective_src_fg_mask = (
+                role_edit_tokens if oracle_kv_enabled else src_fg_mask_bin
+            )
+            self._inject_masks_to_kv_cache(
+                kv_cache_dual,
+                trg_fg_mask_cache,
+                effective_src_fg_mask,
+            )
+            src_fg_mask_map = self._mask_reshape(
+                effective_src_fg_mask,
+                size=(current_num_frames, height, width),
+            )
+            inloop_trg_fg_mask = effective_src_fg_mask
             
             # Step 3.1: Spatial denoising loop
             noisy_pred_input = None
@@ -682,7 +697,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     )
                 # #endregion
                 
-                if routing_mode == "oracle_role_flow":
+                if oracle_role_enabled:
                     v_t, _, _ = role_flow_router(
                         target_velocity=v_trg,
                         source_reconstruction_velocity=v_gt,
@@ -718,7 +733,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         debug_target_tokens = inloop_trg_fg_mask_bin.bool()
                         debug_union_tokens = inloop_trg_fg_mask.bool()
                         debug_target_intersection = (
-                            debug_target_tokens & debug_role_tokens
+                            debug_target_tokens & role_edit_tokens
                         ).float().sum()
                         _debug_report(
                             "D",
@@ -731,12 +746,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 "target_role_iou": (
                                     debug_target_intersection
                                     / (
-                                        debug_target_tokens | debug_role_tokens
+                                        debug_target_tokens | role_edit_tokens
                                     ).float().sum().clamp_min(1)
                                 ).item(),
                             },
                         )
                     # #endregion
+                    if oracle_kv_enabled:
+                        inloop_trg_fg_mask = role_edit_tokens
                     self._inject_masks_to_kv_cache(
                         kv_cache_dual, trg_fg_mask_cache, inloop_trg_fg_mask, 
                     )
@@ -794,7 +811,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
             # #endregion
             #✨ store clean target kv cache, and obtain clean target mask
             _, trg_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_trg)
-            current_trg_fg_mask = trg_fg_mask_bin | src_fg_mask_bin
+            current_trg_fg_mask = (
+                role_edit_tokens
+                if oracle_kv_enabled
+                else trg_fg_mask_bin | src_fg_mask_bin
+            )
             self._update_trg_fg_mask_cache(trg_fg_mask_cache, current_trg_fg_mask, kv_cache_trg)
             self._kv_cache_to(kv_cache_trg, 'cpu', low_memory)
 

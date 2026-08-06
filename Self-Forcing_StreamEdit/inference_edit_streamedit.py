@@ -161,7 +161,11 @@ if __name__ == '__main__':
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument(
         "--routing_mode",
-        choices=["dynamic_sog", "oracle_role_flow"],
+        choices=[
+            "dynamic_sog",
+            "oracle_role_flow",
+            "oracle_role_flow_kv",
+        ],
         default="dynamic_sog",
     )
     parser.add_argument("--object_mask_video", type=str, default=None)
@@ -173,7 +177,11 @@ if __name__ == '__main__':
     parser.add_argument("--role_boundary_radius", type=int, default=1)
     parser.add_argument("--save_role_dir", type=str, default=None)
     args = parser.parse_args()
-    if args.routing_mode == "oracle_role_flow" and (
+    oracle_role_enabled = args.routing_mode in {
+        "oracle_role_flow",
+        "oracle_role_flow_kv",
+    }
+    if oracle_role_enabled and (
         args.object_mask_video is None or args.hand_mask_video is None
     ):
         parser.error(
@@ -220,7 +228,7 @@ if __name__ == '__main__':
     ).to(device=device, dtype=torch.bfloat16)
     object_latent_mask = None
     hand_latent_mask = None
-    if args.routing_mode == "oracle_role_flow":
+    if oracle_role_enabled:
         _, object_latent_mask = build_white_mask(
             args.object_mask_video,
             src_video,
