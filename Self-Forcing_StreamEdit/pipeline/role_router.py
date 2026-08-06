@@ -129,3 +129,54 @@ class RoleFlowRouter:
             + preserve_weight * source_reconstruction_velocity
         )
         return routed_velocity, edit_weight, preserve_weight
+
+
+class ResidualRoleFlowRouter:
+    """Role-routed residual source guidance around the target field."""
+
+    @staticmethod
+    def _resize_weight(weight: torch.Tensor, spatial_size) -> torch.Tensor:
+        batch, frames, height, width = weight.shape
+        flat = weight.reshape(batch * frames, 1, height, width)
+        resized = F.interpolate(flat, size=spatial_size, mode="nearest")
+        return resized.reshape(batch, frames, 1, *spatial_size)
+
+    def __call__(
+        self,
+        target_velocity: torch.Tensor,
+        source_velocity: torch.Tensor,
+        source_reconstruction_velocity: torch.Tensor,
+        roles: RoleState,
+        contact_target_weight: float = 0.7,
+    ):
+        velocity_shapes = {
+            tuple(target_velocity.shape),
+            tuple(source_velocity.shape),
+            tuple(source_reconstruction_velocity.shape),
+        }
+        if len(velocity_shapes) != 1:
+            raise ValueError(
+                "Target, source, and source reconstruction velocities must "
+                f"have the same shape, got {sorted(velocity_shapes)}"
+            )
+        if not 0.0 <= contact_target_weight <= 1.0:
+            raise ValueError(
+                "contact_target_weight must lie in [0, 1], got "
+                f"{contact_target_weight}"
+            )
+
+        roles.validate()
+        correction_weight = (
+            roles.hand
+            + roles.background
+            + (1.0 - contact_target_weight) * roles.boundary
+        )
+        correction_weight = self._resize_weight(
+            correction_weight.to(target_velocity),
+            target_velocity.shape[-2:],
+        )
+        source_residual = (
+            source_reconstruction_velocity - source_velocity
+        )
+        routed_velocity = target_velocity + correction_weight * source_residual
+        return routed_velocity, correction_weight

@@ -165,6 +165,8 @@ if __name__ == '__main__':
             "dynamic_sog",
             "oracle_role_flow",
             "oracle_role_flow_kv",
+            "oracle_role_residual",
+            "oracle_role_residual_kv",
         ],
         default="dynamic_sog",
     )
@@ -175,19 +177,32 @@ if __name__ == '__main__':
         "--object_min_latent_coverage", type=float, default=0.001
     )
     parser.add_argument("--role_boundary_radius", type=int, default=1)
+    parser.add_argument(
+        "--contact_target_weight",
+        type=float,
+        default=0.7,
+        help=(
+            "Target-field weight for Oracle contact tokens in "
+            "Oracle residual modes; must be in [0, 1]."
+        ),
+    )
     parser.add_argument("--save_role_dir", type=str, default=None)
     args = parser.parse_args()
     oracle_role_enabled = args.routing_mode in {
         "oracle_role_flow",
         "oracle_role_flow_kv",
+        "oracle_role_residual",
+        "oracle_role_residual_kv",
     }
     if oracle_role_enabled and (
         args.object_mask_video is None or args.hand_mask_video is None
     ):
         parser.error(
-            "oracle_role_flow requires --object_mask_video and "
+            "Oracle role modes require --object_mask_video and "
             "--hand_mask_video"
         )
+    if not 0.0 <= args.contact_target_weight <= 1.0:
+        parser.error("--contact_target_weight must be in [0, 1]")
 
     pipeline, low_memory, device, local_rank = load_pipe(args)
 
@@ -312,6 +327,7 @@ if __name__ == '__main__':
             else hand_latent_mask.unsqueeze(0).to(device=device)
         ),
         role_boundary_radius=args.role_boundary_radius,
+        contact_target_weight=args.contact_target_weight,
         save_role_dir=args.save_role_dir,
     )
 

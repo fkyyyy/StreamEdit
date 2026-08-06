@@ -12,7 +12,11 @@ from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 
 from demo_utils.memory import gpu, get_cuda_free_memory_gb, DynamicSwapInstaller, move_model_to_device_with_memory_preservation
 from .utils import find_phrase_token_indices
-from .role_router import RoleFlowRouter, build_oracle_roles
+from .role_router import (
+    ResidualRoleFlowRouter,
+    RoleFlowRouter,
+    build_oracle_roles,
+)
 
 class EditCausalInferencePipeline(torch.nn.Module):
     def __init__(
@@ -92,6 +96,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         oracle_object_mask: Optional[torch.Tensor] = None,
         oracle_hand_mask: Optional[torch.Tensor] = None,
         role_boundary_radius: int = 1,
+        contact_target_weight: float = 0.7,
         save_role_dir: Optional[str] = None,
     ) -> torch.Tensor:
         expected_role_shape = (
@@ -137,6 +142,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 oracle_object_mask=oracle_object_mask,
                 oracle_hand_mask=oracle_hand_mask,
                 role_boundary_radius=role_boundary_radius,
+                contact_target_weight=contact_target_weight,
                 save_role_dir=save_role_dir,
             )
 
@@ -205,6 +211,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 oracle_object_mask=rollout_object_mask,
                 oracle_hand_mask=rollout_hand_mask,
                 role_boundary_radius=role_boundary_radius,
+                contact_target_weight=contact_target_weight,
                 save_role_dir=save_role_dir,
             )
 
@@ -274,6 +281,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         oracle_object_mask: Optional[torch.Tensor] = None,
         oracle_hand_mask: Optional[torch.Tensor] = None,
         role_boundary_radius: int = 1,
+        contact_target_weight: float = 0.7,
         save_role_dir: Optional[str] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
@@ -283,18 +291,30 @@ class EditCausalInferencePipeline(torch.nn.Module):
         oracle_role_enabled = routing_mode in {
             "oracle_role_flow",
             "oracle_role_flow_kv",
+            "oracle_role_residual",
+            "oracle_role_residual_kv",
         }
-        oracle_kv_enabled = routing_mode == "oracle_role_flow_kv"
+        oracle_kv_enabled = routing_mode in {
+            "oracle_role_flow_kv",
+            "oracle_role_residual_kv",
+        }
         if routing_mode not in {
             "dynamic_sog",
             "oracle_role_flow",
             "oracle_role_flow_kv",
+            "oracle_role_residual",
+            "oracle_role_residual_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
+        if not 0.0 <= contact_target_weight <= 1.0:
+            raise ValueError(
+                "contact_target_weight must lie in [0, 1], got "
+                f"{contact_target_weight}"
+            )
         if oracle_role_enabled:
             if oracle_object_mask is None or oracle_hand_mask is None:
                 raise ValueError(
-                    "oracle_role_flow requires oracle object and hand masks"
+                    "Oracle role modes require oracle object and hand masks"
                 )
             expected_role_shape = (batch_size, num_frames, height, width)
             if tuple(oracle_object_mask.shape) != expected_role_shape:
@@ -315,6 +335,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
             )
             if save_role_dir is not None:
                 os.makedirs(save_role_dir, exist_ok=True)
+        if routing_mode in {
+            "oracle_role_residual",
+            "oracle_role_residual_kv",
+        }:
+            print(
+                "ORACLE_ROLE_RESIDUAL "
+                f"mode={routing_mode} "
+                f"contact_target_weight={contact_target_weight:.3f}"
+            )
         # #region debug-point B:network-reporter
         def _debug_report(hypothesis_id, location, msg, data):
             try:
@@ -426,6 +455,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         # Initialize some helper
         self._initialize_noise_statistics(reuse_noise_temporal_mean)
         role_flow_router = RoleFlowRouter()
+        residual_role_flow_router = ResidualRoleFlowRouter()
 
         # get trigger token indices
         trans_tokenizer = self.text_encoder.tokenizer.tokenizer
@@ -697,7 +727,18 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     )
                 # #endregion
                 
-                if oracle_role_enabled:
+                if routing_mode in {
+                    "oracle_role_residual",
+                    "oracle_role_residual_kv",
+                }:
+                    v_t, _ = residual_role_flow_router(
+                        target_velocity=v_trg,
+                        source_velocity=v_src,
+                        source_reconstruction_velocity=v_gt,
+                        roles=current_roles,
+                        contact_target_weight=contact_target_weight,
+                    )
+                elif oracle_role_enabled:
                     v_t, _, _ = role_flow_router(
                         target_velocity=v_trg,
                         source_reconstruction_velocity=v_gt,
