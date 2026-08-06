@@ -1,5 +1,6 @@
 import argparse
 import torch
+import torch.nn.functional as F
 import os
 from pathlib import Path 
 
@@ -34,6 +35,50 @@ def find_closest_num_frame(x, a=4, b=3):
         if y <= x:
             return y
         max_m -= 1
+
+
+def build_white_mask(
+    mask_video_path,
+    source_frames,
+    latent_shape,
+    threshold,
+    min_latent_coverage=0.0,
+):
+    """Resample a white matte to source time and the Wan latent grid."""
+    mask_video = load_video(mask_video_path)
+    if not mask_video:
+        raise RuntimeError(f"No frames decoded from mask video: {mask_video_path}")
+    frame_indices = np.rint(
+        np.linspace(0, len(mask_video) - 1, len(source_frames))
+    ).astype(int)
+    raw_masks = []
+    for index in frame_indices:
+        rgb = np.asarray(mask_video[int(index)].convert("RGB"))
+        raw_masks.append(np.all(rgb >= threshold, axis=-1))
+    pixel_mask = torch.from_numpy(np.stack(raw_masks)).unsqueeze(1).float()
+    pixel_mask = F.interpolate(
+        pixel_mask, size=(480, 832), mode="nearest"
+    ) > 0.5
+
+    _, latent_frames, _, latent_height, latent_width = latent_shape
+    frame_groups = []
+    for index in range(latent_frames):
+        left = int(np.floor(index * len(source_frames) / latent_frames))
+        right = max(
+            left + 1,
+            int(np.floor((index + 1) * len(source_frames) / latent_frames)),
+        )
+        frame_groups.append(pixel_mask[left:right].amax(dim=0))
+    latent_mask = torch.stack(frame_groups).float()
+    latent_mask = F.interpolate(
+        latent_mask,
+        size=(latent_height, latent_width),
+        mode="nearest",
+    ) > 0.5
+    if min_latent_coverage > 0:
+        frame_coverage = latent_mask.float().mean(dim=(1, 2, 3))
+        latent_mask[frame_coverage < min_latent_coverage] = False
+    return pixel_mask.bool(), latent_mask.squeeze(1).bool()
 
 def load_pipe(args):
     
@@ -114,7 +159,27 @@ if __name__ == '__main__':
     parser.add_argument("--checkpoint_path", type=str, default='checkpoints/self_forcing_dmd.pt')
     parser.add_argument("--use_ema", action="store_true", default=True)
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
+    parser.add_argument(
+        "--routing_mode",
+        choices=["dynamic_sog", "oracle_role_flow"],
+        default="dynamic_sog",
+    )
+    parser.add_argument("--object_mask_video", type=str, default=None)
+    parser.add_argument("--hand_mask_video", type=str, default=None)
+    parser.add_argument("--mask_white_threshold", type=int, default=245)
+    parser.add_argument(
+        "--object_min_latent_coverage", type=float, default=0.001
+    )
+    parser.add_argument("--role_boundary_radius", type=int, default=1)
+    parser.add_argument("--save_role_dir", type=str, default=None)
     args = parser.parse_args()
+    if args.routing_mode == "oracle_role_flow" and (
+        args.object_mask_video is None or args.hand_mask_video is None
+    ):
+        parser.error(
+            "oracle_role_flow requires --object_mask_video and "
+            "--hand_mask_video"
+        )
 
     pipeline, low_memory, device, local_rank = load_pipe(args)
 
@@ -153,6 +218,37 @@ if __name__ == '__main__':
     video_latents = pipeline.vae.encode_to_latent(
         src_video_tensor.to(device=device, dtype=torch.bfloat16)
     ).to(device=device, dtype=torch.bfloat16)
+    object_latent_mask = None
+    hand_latent_mask = None
+    if args.routing_mode == "oracle_role_flow":
+        _, object_latent_mask = build_white_mask(
+            args.object_mask_video,
+            src_video,
+            tuple(video_latents.shape),
+            args.mask_white_threshold,
+            min_latent_coverage=args.object_min_latent_coverage,
+        )
+        _, hand_latent_mask = build_white_mask(
+            args.hand_mask_video,
+            src_video,
+            tuple(video_latents.shape),
+            args.mask_white_threshold,
+        )
+        role_input_path = Path(args.save_path).with_suffix(
+            ".oracle_role_inputs.npz"
+        )
+        np.savez_compressed(
+            role_input_path,
+            object_latent_mask=object_latent_mask.numpy(),
+            hand_latent_mask=hand_latent_mask.numpy(),
+            white_threshold=np.array(args.mask_white_threshold),
+        )
+        print(
+            "ORACLE_ROLE_INPUT "
+            f"object={object_latent_mask.float().mean().item():.4f} "
+            f"hand={hand_latent_mask.float().mean().item():.4f} "
+            f"artifact={role_input_path}"
+        )
 
     # first frame condition
     independent_first_frame = False
@@ -196,6 +292,19 @@ if __name__ == '__main__':
 
         rollout_chunk_size=args.rollout_chunk_size,
         rollout_overlap_block_num=args.rollout_overlap_block_num,
+        routing_mode=args.routing_mode,
+        oracle_object_mask=(
+            None
+            if object_latent_mask is None
+            else object_latent_mask.unsqueeze(0).to(device=device)
+        ),
+        oracle_hand_mask=(
+            None
+            if hand_latent_mask is None
+            else hand_latent_mask.unsqueeze(0).to(device=device)
+        ),
+        role_boundary_radius=args.role_boundary_radius,
+        save_role_dir=args.save_role_dir,
     )
 
     # Clear VAE cache
@@ -205,4 +314,3 @@ if __name__ == '__main__':
         rearrange(edit_video[0], 't c h w -> t h w c').cpu() * 255, 
         fps=16
     )
-

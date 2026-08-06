@@ -12,6 +12,7 @@ from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 
 from demo_utils.memory import gpu, get_cuda_free_memory_gb, DynamicSwapInstaller, move_model_to_device_with_memory_preservation
 from .utils import find_phrase_token_indices
+from .role_router import RoleFlowRouter, build_oracle_roles
 
 class EditCausalInferencePipeline(torch.nn.Module):
     def __init__(
@@ -87,7 +88,25 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
         rollout_chunk_size: int = 21,
         rollout_overlap_block_num: int = 1,
+        routing_mode: str = "dynamic_sog",
+        oracle_object_mask: Optional[torch.Tensor] = None,
+        oracle_hand_mask: Optional[torch.Tensor] = None,
+        role_boundary_radius: int = 1,
+        save_role_dir: Optional[str] = None,
     ) -> torch.Tensor:
+        expected_role_shape = (
+            src_video.shape[0], src_video.shape[1],
+            src_video.shape[-2], src_video.shape[-1],
+        )
+        for name, mask in (
+            ("oracle_object_mask", oracle_object_mask),
+            ("oracle_hand_mask", oracle_hand_mask),
+        ):
+            if mask is not None and tuple(mask.shape) != expected_role_shape:
+                raise ValueError(
+                    f"{name} must have shape {expected_role_shape}, "
+                    f"got {tuple(mask.shape)}"
+                )
         if rollout_chunk_size < 0:
             # for testing local attn
             return self.inference(
@@ -114,6 +133,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 fg_boost_factor=fg_boost_factor,
 
                 blend_power=blend_power,
+                routing_mode=routing_mode,
+                oracle_object_mask=oracle_object_mask,
+                oracle_hand_mask=oracle_hand_mask,
+                role_boundary_radius=role_boundary_radius,
+                save_role_dir=save_role_dir,
             )
 
         rollout_overlap = rollout_overlap_block_num * self.num_frame_per_block 
@@ -130,8 +154,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
             if start_idx == 0:
                 rollout_src_video = src_video[:, start_idx: chunk_right_idx]
+                rollout_object_mask = (
+                    None if oracle_object_mask is None
+                    else oracle_object_mask[:, start_idx:chunk_right_idx]
+                )
+                rollout_hand_mask = (
+                    None if oracle_hand_mask is None
+                    else oracle_hand_mask[:, start_idx:chunk_right_idx]
+                )
             else:
                 rollout_src_video = src_video[:, start_idx + rollout_overlap: chunk_right_idx]
+                rollout_object_mask = (
+                    None if oracle_object_mask is None
+                    else oracle_object_mask[:, start_idx + rollout_overlap:chunk_right_idx]
+                )
+                rollout_hand_mask = (
+                    None if oracle_hand_mask is None
+                    else oracle_hand_mask[:, start_idx + rollout_overlap:chunk_right_idx]
+                )
 
             # inference
             _, rollout_latent = self.inference(
@@ -161,6 +201,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 fg_boost_factor=fg_boost_factor,
 
                 blend_power=blend_power,
+                routing_mode=routing_mode,
+                oracle_object_mask=rollout_object_mask,
+                oracle_hand_mask=rollout_hand_mask,
+                role_boundary_radius=role_boundary_radius,
+                save_role_dir=save_role_dir,
             )
 
             # store results
@@ -225,11 +270,42 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
         fg_scale=1.0,
         reuse_noise_temporal_mean=True,
+        routing_mode: str = "dynamic_sog",
+        oracle_object_mask: Optional[torch.Tensor] = None,
+        oracle_hand_mask: Optional[torch.Tensor] = None,
+        role_boundary_radius: int = 1,
+        save_role_dir: Optional[str] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
         independent_first_frame = independent_first_frame or self.independent_first_frame
         
         batch_size, num_frames, num_channels, height, width = src_video.shape
+        if routing_mode not in {"dynamic_sog", "oracle_role_flow"}:
+            raise ValueError(f"Unsupported routing_mode: {routing_mode}")
+        if routing_mode == "oracle_role_flow":
+            if oracle_object_mask is None or oracle_hand_mask is None:
+                raise ValueError(
+                    "oracle_role_flow requires oracle object and hand masks"
+                )
+            expected_role_shape = (batch_size, num_frames, height, width)
+            if tuple(oracle_object_mask.shape) != expected_role_shape:
+                raise ValueError(
+                    f"oracle_object_mask must have shape {expected_role_shape}, "
+                    f"got {tuple(oracle_object_mask.shape)}"
+                )
+            if tuple(oracle_hand_mask.shape) != expected_role_shape:
+                raise ValueError(
+                    f"oracle_hand_mask must have shape {expected_role_shape}, "
+                    f"got {tuple(oracle_hand_mask.shape)}"
+                )
+            oracle_object_mask = oracle_object_mask.to(
+                device=src_video.device, dtype=torch.bool
+            )
+            oracle_hand_mask = oracle_hand_mask.to(
+                device=src_video.device, dtype=torch.bool
+            )
+            if save_role_dir is not None:
+                os.makedirs(save_role_dir, exist_ok=True)
         if not independent_first_frame or (independent_first_frame and trg_initial_latent is not None):
             # If the first frame is independent and the first frame is provided, then the number of frames in the
             # noise should still be a multiple of num_frame_per_block
@@ -310,6 +386,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         )
         # Initialize some helper
         self._initialize_noise_statistics(reuse_noise_temporal_mean)
+        role_flow_router = RoleFlowRouter()
 
         # get trigger token indices
         trans_tokenizer = self.text_encoder.tokenizer.tokenizer
@@ -422,6 +499,33 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 src_fg_mask_bin, size=(current_num_frames, height, width)
             )
             inloop_trg_fg_mask = src_fg_mask_bin
+            current_roles = None
+            if routing_mode == "oracle_role_flow":
+                role_left = current_start_frame - num_input_frames
+                role_right = role_left + current_num_frames
+                current_roles = build_oracle_roles(
+                    oracle_object_mask[:, role_left:role_right],
+                    oracle_hand_mask[:, role_left:role_right],
+                    boundary_radius=role_boundary_radius,
+                )
+                role_coverage = {
+                    name: value.mean().item()
+                    for name, value in current_roles.as_dict().items()
+                }
+                print(
+                    "ORACLE_ROLE_FLOW "
+                    f"block={current_start_frame // self.num_frame_per_block} "
+                    + " ".join(
+                        f"{name}={coverage:.4f}"
+                        for name, coverage in role_coverage.items()
+                    )
+                )
+                if save_role_dir is not None:
+                    self._save_role_state(
+                        save_role_dir,
+                        current_start_frame // self.num_frame_per_block,
+                        current_roles,
+                    )
             
             # Step 3.1: Spatial denoising loop
             noisy_pred_input = None
@@ -483,13 +587,27 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 v_src, v_trg = velocity_pred.chunk(2, dim=0)
                 v_gt = fwd_noise - src_input
                 
-                #✨ source-oriented guidance
-                fg_mask = (v_trg - v_src).abs().mean(dim=2, keepdim=True)     # [B, F, 1, H, W]
-                data_dims = list(range(fg_mask.ndim))[1: ]
-                fg_mask = (fg_mask - fg_mask.amin(dim=data_dims, keepdim=True)) / \
-                    (fg_mask.amax(dim=data_dims, keepdim=True) - fg_mask.amin(dim=data_dims, keepdim=True) + 1e-7)
-                bg_mask = 1 - fg_mask
-                v_t = v_trg + bg_mask * (v_gt - v_src)
+                if routing_mode == "oracle_role_flow":
+                    v_t, _, _ = role_flow_router(
+                        target_velocity=v_trg,
+                        source_reconstruction_velocity=v_gt,
+                        roles=current_roles,
+                    )
+                else:
+                    # Original source-oriented guidance.
+                    fg_mask = (v_trg - v_src).abs().mean(
+                        dim=2, keepdim=True
+                    )
+                    data_dims = list(range(fg_mask.ndim))[1:]
+                    fg_mask = (
+                        fg_mask - fg_mask.amin(dim=data_dims, keepdim=True)
+                    ) / (
+                        fg_mask.amax(dim=data_dims, keepdim=True)
+                        - fg_mask.amin(dim=data_dims, keepdim=True)
+                        + 1e-7
+                    )
+                    bg_mask = 1 - fg_mask
+                    v_t = v_trg + bg_mask * (v_gt - v_src)
                 denoised_pred = noisy_pred_input - t_i * v_t
 
                 #✨ target mask grounding
@@ -573,6 +691,32 @@ class EditCausalInferencePipeline(torch.nn.Module):
             return video, output
         else:
             return video
+
+    @staticmethod
+    def _save_role_state(save_dir, block_index, roles):
+        arrays = {
+            **roles.as_dict(),
+            "edit_weight": roles.edit_weight,
+            "preserve_weight": roles.preserve_weight,
+        }
+        np.savez_compressed(
+            os.path.join(save_dir, f"block_{block_index:03d}_roles.npz"),
+            **{
+                name: value.detach().float().cpu().numpy()
+                for name, value in arrays.items()
+            },
+        )
+        for name, value in arrays.items():
+            strip = value[0].detach().float().cpu().numpy()
+            strip = np.concatenate(list((strip * 255).astype(np.uint8)), axis=0)
+            Image.fromarray(strip, mode="L").resize(
+                (832, strip.shape[0] * 8),
+                Image.Resampling.NEAREST,
+            ).save(
+                os.path.join(
+                    save_dir, f"block_{block_index:03d}_{name}.png"
+                )
+            )
 
 
     def _initialize_kv_cache(self, batch_size, dtype, device):
