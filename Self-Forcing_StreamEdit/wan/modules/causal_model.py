@@ -1,4 +1,7 @@
 from wan.modules.attention import attention
+from wan.modules.contact_graph_attention import (
+    apply_contact_graph_residual,
+)
 from wan.modules.model import (
     WanRMSNorm,
     rope_apply,
@@ -369,9 +372,46 @@ class CausalWanSelfAttention(nn.Module):
 
                     #✨ query blending
                     b_query = trg_query[b_idx] * blender_rate + src_query[b_idx] * (1 - blender_rate)
-                    x_list.append(
-                        attention(b_query.unsqueeze(0), b_trg_key.unsqueeze(0), b_trg_value.unsqueeze(0))
+                    b_target_output = attention(
+                        b_query.unsqueeze(0),
+                        b_trg_key.unsqueeze(0),
+                        b_trg_value.unsqueeze(0),
                     )
+                    shared_dict = kv_cache["shared_dict"]
+                    contact_graph_mode = shared_dict.get(
+                        "contact_graph_mode",
+                        "no_graph",
+                    )
+                    contact_graphs = shared_dict.get("contact_graphs")
+                    layer_index = kv_cache.get("layer_index", -1)
+                    layer_start = shared_dict.get(
+                        "contact_graph_layer_start",
+                        0,
+                    )
+                    layer_end = shared_dict.get(
+                        "contact_graph_layer_end",
+                        0,
+                    )
+                    if (
+                        contact_graph_mode != "no_graph"
+                        and contact_graphs is not None
+                        and layer_start <= layer_index < layer_end
+                    ):
+                        b_target_output = apply_contact_graph_residual(
+                            target_output=b_target_output,
+                            source_query=src_query[b_idx],
+                            target_query=trg_query[b_idx],
+                            source_key=src_current_key[b_idx],
+                            target_key=trg_current_key[b_idx],
+                            source_value=src_current_value[b_idx],
+                            target_value=trg_current_value[b_idx],
+                            graph=contact_graphs[b_idx],
+                            mode=contact_graph_mode,
+                            strength=shared_dict[
+                                "contact_graph_strength"
+                            ],
+                        )
+                    x_list.append(b_target_output)
                 x = torch.cat(x_list, dim=0)
 
             kv_cache["global_end_index"].fill_(current_end)

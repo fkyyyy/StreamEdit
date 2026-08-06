@@ -186,6 +186,40 @@ if __name__ == '__main__':
             "Oracle residual modes; must be in [0, 1]."
         ),
     )
+    parser.add_argument(
+        "--contact_graph_mode",
+        choices=[
+            "no_graph",
+            "distance_only",
+            "shuffled",
+            "source_qk",
+        ],
+        default="no_graph",
+        help="Oracle contact-relation ablation applied in self-attention.",
+    )
+    parser.add_argument("--contact_graph_topk", type=int, default=4)
+    parser.add_argument("--contact_graph_radius", type=float, default=2.5)
+    parser.add_argument(
+        "--contact_graph_min_confidence",
+        type=float,
+        default=0.05,
+    )
+    parser.add_argument(
+        "--contact_graph_strength",
+        type=float,
+        default=0.25,
+    )
+    parser.add_argument(
+        "--contact_graph_layer_start",
+        type=int,
+        default=10,
+    )
+    parser.add_argument(
+        "--contact_graph_layer_end",
+        type=int,
+        default=20,
+    )
+    parser.add_argument("--contact_graph_seed", type=int, default=0)
     parser.add_argument("--save_role_dir", type=str, default=None)
     args = parser.parse_args()
     oracle_role_enabled = args.routing_mode in {
@@ -203,6 +237,34 @@ if __name__ == '__main__':
         )
     if not 0.0 <= args.contact_target_weight <= 1.0:
         parser.error("--contact_target_weight must be in [0, 1]")
+    if (
+        args.contact_graph_mode != "no_graph"
+        and args.routing_mode != "oracle_role_residual_kv"
+    ):
+        parser.error(
+            "Contact graph modes require "
+            "--routing_mode oracle_role_residual_kv"
+        )
+    if args.contact_graph_topk <= 0:
+        parser.error("--contact_graph_topk must be positive")
+    if args.contact_graph_radius <= 0:
+        parser.error("--contact_graph_radius must be positive")
+    if not 0.0 <= args.contact_graph_min_confidence <= 1.0:
+        parser.error(
+            "--contact_graph_min_confidence must be in [0, 1]"
+        )
+    if args.contact_graph_strength < 0:
+        parser.error("--contact_graph_strength must be non-negative")
+    if not (
+        0
+        <= args.contact_graph_layer_start
+        < args.contact_graph_layer_end
+        <= 30
+    ):
+        parser.error(
+            "Contact graph layer range must satisfy "
+            "0 <= start < end <= 30"
+        )
 
     pipeline, low_memory, device, local_rank = load_pipe(args)
 
@@ -328,6 +390,16 @@ if __name__ == '__main__':
         ),
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,
+        contact_graph_mode=args.contact_graph_mode,
+        contact_graph_topk=args.contact_graph_topk,
+        contact_graph_radius=args.contact_graph_radius,
+        contact_graph_min_confidence=(
+            args.contact_graph_min_confidence
+        ),
+        contact_graph_strength=args.contact_graph_strength,
+        contact_graph_layer_start=args.contact_graph_layer_start,
+        contact_graph_layer_end=args.contact_graph_layer_end,
+        contact_graph_seed=args.contact_graph_seed,
         save_role_dir=args.save_role_dir,
     )
 

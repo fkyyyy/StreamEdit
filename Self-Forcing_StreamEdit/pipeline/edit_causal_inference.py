@@ -12,6 +12,11 @@ from utils.wan_wrapper import WanDiffusionWrapper, WanTextEncoder, WanVAEWrapper
 
 from demo_utils.memory import gpu, get_cuda_free_memory_gb, DynamicSwapInstaller, move_model_to_device_with_memory_preservation
 from .utils import find_phrase_token_indices
+from .contact_graph import (
+    CONTACT_GRAPH_MODES,
+    build_oracle_contact_graphs,
+    contact_graph_stats,
+)
 from .role_router import (
     ResidualRoleFlowRouter,
     RoleFlowRouter,
@@ -97,6 +102,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
         oracle_hand_mask: Optional[torch.Tensor] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
+        contact_graph_mode: str = "no_graph",
+        contact_graph_topk: int = 4,
+        contact_graph_radius: float = 2.5,
+        contact_graph_min_confidence: float = 0.05,
+        contact_graph_strength: float = 0.25,
+        contact_graph_layer_start: int = 10,
+        contact_graph_layer_end: int = 20,
+        contact_graph_seed: int = 0,
         save_role_dir: Optional[str] = None,
     ) -> torch.Tensor:
         expected_role_shape = (
@@ -143,6 +156,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 oracle_hand_mask=oracle_hand_mask,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
+                contact_graph_mode=contact_graph_mode,
+                contact_graph_topk=contact_graph_topk,
+                contact_graph_radius=contact_graph_radius,
+                contact_graph_min_confidence=contact_graph_min_confidence,
+                contact_graph_strength=contact_graph_strength,
+                contact_graph_layer_start=contact_graph_layer_start,
+                contact_graph_layer_end=contact_graph_layer_end,
+                contact_graph_seed=contact_graph_seed,
                 save_role_dir=save_role_dir,
             )
 
@@ -212,6 +233,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 oracle_hand_mask=rollout_hand_mask,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
+                contact_graph_mode=contact_graph_mode,
+                contact_graph_topk=contact_graph_topk,
+                contact_graph_radius=contact_graph_radius,
+                contact_graph_min_confidence=contact_graph_min_confidence,
+                contact_graph_strength=contact_graph_strength,
+                contact_graph_layer_start=contact_graph_layer_start,
+                contact_graph_layer_end=contact_graph_layer_end,
+                contact_graph_seed=contact_graph_seed,
                 save_role_dir=save_role_dir,
             )
 
@@ -282,6 +311,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
         oracle_hand_mask: Optional[torch.Tensor] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
+        contact_graph_mode: str = "no_graph",
+        contact_graph_topk: int = 4,
+        contact_graph_radius: float = 2.5,
+        contact_graph_min_confidence: float = 0.05,
+        contact_graph_strength: float = 0.25,
+        contact_graph_layer_start: int = 10,
+        contact_graph_layer_end: int = 20,
+        contact_graph_seed: int = 0,
         save_role_dir: Optional[str] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
@@ -310,6 +347,38 @@ class EditCausalInferencePipeline(torch.nn.Module):
             raise ValueError(
                 "contact_target_weight must lie in [0, 1], got "
                 f"{contact_target_weight}"
+            )
+        if contact_graph_mode not in CONTACT_GRAPH_MODES:
+            raise ValueError(
+                f"Unsupported contact_graph_mode: {contact_graph_mode}"
+            )
+        if (
+            contact_graph_mode != "no_graph"
+            and routing_mode != "oracle_role_residual_kv"
+        ):
+            raise ValueError(
+                "Contact graph modes require "
+                "routing_mode=oracle_role_residual_kv"
+            )
+        if contact_graph_topk <= 0:
+            raise ValueError("contact_graph_topk must be positive")
+        if contact_graph_radius <= 0:
+            raise ValueError("contact_graph_radius must be positive")
+        if not 0.0 <= contact_graph_min_confidence <= 1.0:
+            raise ValueError(
+                "contact_graph_min_confidence must be in [0, 1]"
+            )
+        if contact_graph_strength < 0:
+            raise ValueError("contact_graph_strength must be non-negative")
+        if not (
+            0
+            <= contact_graph_layer_start
+            < contact_graph_layer_end
+            <= self.num_transformer_blocks
+        ):
+            raise ValueError(
+                "Contact graph layer range must satisfy "
+                f"0 <= start < end <= {self.num_transformer_blocks}"
             )
         if oracle_role_enabled:
             if oracle_object_mask is None or oracle_hand_mask is None:
@@ -562,6 +631,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             _, src_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_src)
             current_roles = None
             role_edit_tokens = None
+            contact_graphs = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
                 role_right = role_left + current_num_frames
@@ -582,6 +652,26 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         for name, coverage in role_coverage.items()
                     )
                 )
+                if contact_graph_mode != "no_graph":
+                    block_index = (
+                        current_start_frame // self.num_frame_per_block
+                    )
+                    contact_graphs = build_oracle_contact_graphs(
+                        current_roles,
+                        mode=contact_graph_mode,
+                        topk=contact_graph_topk,
+                        radius=contact_graph_radius,
+                        min_confidence=contact_graph_min_confidence,
+                        shuffle_seed=contact_graph_seed + block_index,
+                    )
+                    graph_stats = contact_graph_stats(contact_graphs)
+                    print(
+                        "ORACLE_CONTACT_GRAPH "
+                        f"block={block_index} "
+                        f"mode={contact_graph_mode} "
+                        f"object_nodes={graph_stats['object_nodes']} "
+                        f"valid_edges={graph_stats['valid_edges']}"
+                    )
                 # #region debug-point C:role-kv-mask-alignment
                 role_edit_tokens = F.max_pool2d(
                     current_roles.edit_weight, kernel_size=2, stride=2
@@ -621,6 +711,20 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         current_start_frame // self.num_frame_per_block,
                         current_roles,
                     )
+                    if contact_graphs is not None:
+                        self._save_contact_graphs(
+                            save_role_dir,
+                            current_start_frame // self.num_frame_per_block,
+                            contact_graphs,
+                            contact_graph_mode,
+                        )
+            shared_dict_dual.update({
+                "contact_graph_mode": contact_graph_mode,
+                "contact_graphs": contact_graphs,
+                "contact_graph_strength": contact_graph_strength,
+                "contact_graph_layer_start": contact_graph_layer_start,
+                "contact_graph_layer_end": contact_graph_layer_end,
+            })
             effective_src_fg_mask = (
                 role_edit_tokens if oracle_kv_enabled else src_fg_mask_bin
             )
@@ -935,6 +1039,30 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 )
             )
 
+    @staticmethod
+    def _save_contact_graphs(
+        save_dir,
+        block_index,
+        graphs,
+        mode,
+    ):
+        arrays = {"mode": np.array(mode)}
+        for batch_index, graph in enumerate(graphs):
+            for name, value in graph.items():
+                tensor = value.detach()
+                if torch.is_floating_point(tensor):
+                    tensor = tensor.float()
+                arrays[f"batch_{batch_index}_{name}"] = (
+                    tensor.cpu().numpy()
+                )
+        np.savez_compressed(
+            os.path.join(
+                save_dir,
+                f"block_{block_index:03d}_contact_graph.npz",
+            ),
+            **arrays,
+        )
+
 
     def _initialize_kv_cache(self, batch_size, dtype, device):
         """
@@ -1033,6 +1161,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "global_end_index": index_kvc[b_idx]["global_end_index"].clone(),
                 "local_end_index": index_kvc[b_idx]["local_end_index"].clone(),
                 "shared_dict": shared_dict,
+                "layer_index": b_idx,
             })
         return kv_cache1
 
