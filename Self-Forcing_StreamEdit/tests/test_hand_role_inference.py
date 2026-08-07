@@ -140,3 +140,76 @@ def test_query_affinity_propagates_previous_object_posterior():
 
     assert result.debug["temporal_posterior"][:, 1].max() > 0
     assert result.debug["temporal_confidence"][:, 1].max() > 0
+
+
+def test_zero_field_disagreement_preserves_prior():
+    inferencer = hand_role.HandRoleInferencer()
+    prior = inferencer(_attention(), _hand())
+    velocity = torch.zeros((1, 1, 4, 8, 8))
+
+    refined = inferencer.refine_with_field(
+        prior,
+        source_velocity=velocity,
+        target_velocity=velocity,
+        hand_mask=_hand(),
+    )
+
+    assert torch.allclose(
+        refined.token_edit_confidence,
+        prior.token_edit_confidence,
+    )
+    assert torch.count_nonzero(refined.debug["field_score"]) == 0
+
+
+def test_bfloat16_field_refinement_is_finite_and_spatially_limited():
+    inferencer = hand_role.HandRoleInferencer(
+        field_candidate_radius=1,
+        max_object_coverage=0.25,
+    )
+    prior = inferencer(_attention(), _hand())
+    source_velocity = torch.zeros(
+        (1, 1, 4, 8, 8),
+        dtype=torch.bfloat16,
+    )
+    target_velocity = torch.linspace(
+        0.0,
+        2.0,
+        8 * 8,
+        dtype=torch.bfloat16,
+    ).reshape(1, 1, 1, 8, 8).expand_as(source_velocity)
+
+    refined = inferencer.refine_with_field(
+        prior,
+        source_velocity=source_velocity,
+        target_velocity=target_velocity,
+        hand_mask=_hand().to(torch.bfloat16),
+    )
+
+    posterior = refined.debug["object_posterior"]
+    candidate = refined.debug["field_candidate"].bool()
+    prior_support = prior.debug["object_posterior"] > 0
+    allowed = hand_role._dilate(prior_support, 1).bool()
+    assert posterior.dtype == torch.float32
+    assert torch.isfinite(posterior).all()
+    assert torch.count_nonzero(candidate & ~allowed) == 0
+    assert (posterior > 0).float().mean() <= 0.25
+
+
+def test_empty_hand_cannot_be_activated_by_field():
+    inferencer = hand_role.HandRoleInferencer()
+    hand = torch.zeros_like(_hand())
+    prior = inferencer(_attention(), hand)
+
+    refined = inferencer.refine_with_field(
+        prior,
+        source_velocity=torch.zeros((1, 1, 4, 8, 8)),
+        target_velocity=torch.randn((1, 1, 4, 8, 8)),
+        hand_mask=hand,
+    )
+
+    assert torch.count_nonzero(refined.token_edit_confidence) == 0
+    assert torch.count_nonzero(refined.roles.edit_weight) == 0
+    assert torch.allclose(
+        refined.roles.background,
+        torch.ones_like(refined.roles.background),
+    )

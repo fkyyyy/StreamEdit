@@ -112,6 +112,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_temporal_weight: float = 0.45,
         hand_query_similarity_threshold: float = 0.65,
         hand_query_layers: Iterable = (8, 12, 16, 20),
+        hand_field_quantile_low: float = 0.50,
+        hand_field_quantile_high: float = 0.95,
+        hand_field_power: float = 1.5,
+        hand_field_weight: float = 0.65,
+        hand_field_candidate_radius: int = 2,
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -178,6 +183,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     hand_query_similarity_threshold
                 ),
                 hand_query_layers=hand_query_layers,
+                hand_field_quantile_low=hand_field_quantile_low,
+                hand_field_quantile_high=hand_field_quantile_high,
+                hand_field_power=hand_field_power,
+                hand_field_weight=hand_field_weight,
+                hand_field_candidate_radius=hand_field_candidate_radius,
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
                 contact_graph_radius=contact_graph_radius,
@@ -276,6 +286,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     hand_query_similarity_threshold
                 ),
                 hand_query_layers=hand_query_layers,
+                hand_field_quantile_low=hand_field_quantile_low,
+                hand_field_quantile_high=hand_field_quantile_high,
+                hand_field_power=hand_field_power,
+                hand_field_weight=hand_field_weight,
+                hand_field_candidate_radius=hand_field_candidate_radius,
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
                 contact_graph_radius=contact_graph_radius,
@@ -363,6 +378,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_temporal_weight: float = 0.45,
         hand_query_similarity_threshold: float = 0.65,
         hand_query_layers: Iterable = (8, 12, 16, 20),
+        hand_field_quantile_low: float = 0.50,
+        hand_field_quantile_high: float = 0.95,
+        hand_field_power: float = 1.5,
+        hand_field_weight: float = 0.65,
+        hand_field_candidate_radius: int = 2,
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -428,6 +448,23 @@ class EditCausalInferencePipeline(torch.nn.Module):
         ):
             raise ValueError(
                 "hand_query_layers must contain valid transformer layers"
+            )
+        if not (
+            0.0
+            <= hand_field_quantile_low
+            < hand_field_quantile_high
+            <= 1.0
+        ):
+            raise ValueError(
+                "hand field quantiles must satisfy 0 <= low < high <= 1"
+            )
+        if hand_field_power <= 0:
+            raise ValueError("hand_field_power must be positive")
+        if not 0.0 <= hand_field_weight <= 1.0:
+            raise ValueError("hand_field_weight must be in [0, 1]")
+        if hand_field_candidate_radius < 0:
+            raise ValueError(
+                "hand_field_candidate_radius must be non-negative"
             )
         if contact_graph_mode not in CONTACT_GRAPH_MODES:
             raise ValueError(
@@ -520,6 +557,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 f"propagation_steps={hand_propagation_steps} "
                 f"visibility_ratio={hand_visibility_ratio:.3f} "
                 f"temporal_weight={hand_temporal_weight:.3f} "
+                f"field_weight={hand_field_weight:.3f} "
                 f"query_layers={hand_query_layers}"
             )
         # #region debug-point B:network-reporter
@@ -643,6 +681,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
             query_similarity_threshold=(
                 hand_query_similarity_threshold
             ),
+            field_quantile_low=hand_field_quantile_low,
+            field_quantile_high=hand_field_quantile_high,
+            field_power=hand_field_power,
+            field_weight=hand_field_weight,
+            field_candidate_radius=hand_field_candidate_radius,
         )
 
         # get trigger token indices
@@ -767,6 +810,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             role_edit_tokens = None
             contact_graphs = None
             hand_role_debug = None
+            hand_role_inference = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
                 role_right = role_left + current_num_frames
@@ -856,15 +900,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
             elif hand_role_enabled:
                 role_left = current_start_frame - num_input_frames
                 role_right = role_left + current_num_frames
-                inferred = hand_role_inferencer(
+                hand_role_inference = hand_role_inferencer(
                     source_attention=src_fg_mask_soft,
                     hand_mask=hand_only_mask[:, role_left:role_right],
                     source_features=source_query_features,
                 )
-                current_roles = inferred.roles
-                hand_role_debug = inferred.debug
+                current_roles = hand_role_inference.roles
+                hand_role_debug = hand_role_inference.debug
                 role_edit_tokens = (
-                    inferred.token_edit_confidence
+                    hand_role_inference.token_edit_confidence
                     >= hand_posterior_threshold
                 )
                 role_coverage = {
@@ -978,6 +1022,59 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 t_i = current_timestep / 1000
                 v_src, v_trg = velocity_pred.chunk(2, dim=0)
                 v_gt = fwd_noise - src_input
+                if (
+                    hand_role_enabled
+                    and index == 0
+                    and hand_field_weight > 0.0
+                ):
+                    hand_role_inference = (
+                        hand_role_inferencer.refine_with_field(
+                            prior=hand_role_inference,
+                            source_velocity=v_src.detach(),
+                            target_velocity=v_trg.detach(),
+                            hand_mask=hand_only_mask[
+                                :, role_left:role_right
+                            ],
+                        )
+                    )
+                    current_roles = hand_role_inference.roles
+                    hand_role_debug = hand_role_inference.debug
+                    role_edit_tokens = (
+                        hand_role_inference.token_edit_confidence
+                        >= hand_posterior_threshold
+                    )
+                    inloop_trg_fg_mask = role_edit_tokens
+                    src_fg_mask_map = self._mask_reshape(
+                        role_edit_tokens,
+                        size=(current_num_frames, height, width),
+                    )
+                    self._inject_masks_to_kv_cache(
+                        kv_cache_dual,
+                        trg_fg_mask_cache,
+                        role_edit_tokens,
+                    )
+                    print(
+                        "HAND_ROLE_FIELD "
+                        f"block={current_start_frame // self.num_frame_per_block} "
+                        f"edit_tokens={role_edit_tokens.float().mean().item():.4f} "
+                        f"field={hand_role_debug['field_score'].mean().item():.4f} "
+                        f"observation={hand_role_debug['field_observation'].mean().item():.4f}"
+                    )
+                    if save_role_dir is not None:
+                        block_index = (
+                            current_start_frame
+                            // self.num_frame_per_block
+                        )
+                        self._save_role_state(
+                            save_role_dir,
+                            block_index,
+                            current_roles,
+                        )
+                        self._save_hand_role_debug(
+                            save_role_dir,
+                            block_index,
+                            hand_role_debug,
+                        )
                 # #region debug-point B:velocity-collapse
                 if current_roles is not None and index in {
                     0,

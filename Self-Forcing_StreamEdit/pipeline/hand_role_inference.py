@@ -91,6 +91,11 @@ class HandRoleInferencer:
         temporal_weight: float = 0.45,
         query_similarity_threshold: float = 0.65,
         query_temperature: float = 0.07,
+        field_quantile_low: float = 0.50,
+        field_quantile_high: float = 0.95,
+        field_power: float = 1.5,
+        field_weight: float = 0.65,
+        field_candidate_radius: int = 2,
         eps: float = 1e-6,
     ):
         if not (
@@ -119,6 +124,18 @@ class HandRoleInferencer:
             )
         if query_temperature <= 0:
             raise ValueError("query_temperature must be positive")
+        if not (
+            0.0 <= field_quantile_low < field_quantile_high <= 1.0
+        ):
+            raise ValueError(
+                "Field quantiles must satisfy 0 <= low < high <= 1"
+            )
+        if field_power <= 0:
+            raise ValueError("field_power must be positive")
+        if not 0.0 <= field_weight <= 1.0:
+            raise ValueError("field_weight must be in [0, 1]")
+        if field_candidate_radius < 0:
+            raise ValueError("field_candidate_radius must be non-negative")
 
         self.attention_quantile_low = attention_quantile_low
         self.attention_quantile_high = attention_quantile_high
@@ -132,10 +149,156 @@ class HandRoleInferencer:
         self.temporal_weight = temporal_weight
         self.query_similarity_threshold = query_similarity_threshold
         self.query_temperature = query_temperature
+        self.field_quantile_low = field_quantile_low
+        self.field_quantile_high = field_quantile_high
+        self.field_power = field_power
+        self.field_weight = field_weight
+        self.field_candidate_radius = field_candidate_radius
         self.eps = eps
         self.previous_features = None
         self.previous_posterior = None
         self.reference_interaction_support = None
+
+    @staticmethod
+    def _build_roles(
+        posterior: torch.Tensor,
+        hand_mask: torch.Tensor,
+    ) -> RoleState:
+        batch, frames, height, width = hand_mask.shape
+        token_height, token_width = posterior.shape[-2:]
+        posterior_latent = F.interpolate(
+            posterior.reshape(
+                batch * frames, 1, token_height, token_width
+            ),
+            size=(height, width),
+            mode="bilinear",
+            align_corners=False,
+        ).reshape(batch, frames, height, width).clamp(0.0, 1.0)
+        hand_latent = hand_mask.float().clamp(0.0, 1.0)
+        hand_band = _dilate(hand_latent, 1).clamp(0.0, 1.0)
+
+        contact = posterior_latent * hand_band
+        object_core = posterior_latent * (1.0 - hand_band)
+        hand_core = (1.0 - posterior_latent) * hand_latent
+        background = (1.0 - posterior_latent) * (1.0 - hand_latent)
+        roles = RoleState(
+            object=object_core,
+            boundary=contact,
+            hand=hand_core,
+            background=background,
+        )
+        roles.validate()
+        return roles
+
+    def refine_with_field(
+        self,
+        prior: HandRoleInferenceResult,
+        source_velocity: torch.Tensor,
+        target_velocity: torch.Tensor,
+        hand_mask: torch.Tensor,
+    ) -> HandRoleInferenceResult:
+        """Refine a role prior with one source-target field observation."""
+        if source_velocity.shape != target_velocity.shape:
+            raise ValueError(
+                "source_velocity and target_velocity must share a shape"
+            )
+        if source_velocity.ndim != 5:
+            raise ValueError(
+                "Velocities must have shape [B,T,C,H,W], got "
+                f"{tuple(source_velocity.shape)}"
+            )
+        if hand_mask.ndim != 4:
+            raise ValueError("hand_mask must have shape [B,T,H,W]")
+        batch, frames, _, height, width = source_velocity.shape
+        if tuple(hand_mask.shape) != (batch, frames, height, width):
+            raise ValueError(
+                "Velocity and hand-mask grids differ: "
+                f"{tuple(source_velocity.shape)} vs {tuple(hand_mask.shape)}"
+            )
+
+        prior_posterior = prior.debug["object_posterior"].float()
+        source_attention = prior.debug["source_attention"].float()
+        object_visible = prior.debug["object_visible"].float()
+        token_height, token_width = prior_posterior.shape[-2:]
+        expected_tokens = frames * token_height * token_width
+        if prior.token_edit_confidence.shape != (batch, expected_tokens):
+            raise ValueError("Prior posterior has an inconsistent token grid")
+
+        field_latent = (
+            target_velocity.float() - source_velocity.float()
+        ).abs().mean(dim=2)
+        field_latent = _quantile_normalize(
+            field_latent,
+            self.field_quantile_low,
+            self.field_quantile_high,
+            self.eps,
+        )
+        field_score = F.avg_pool2d(
+            field_latent.reshape(batch * frames, 1, height, width),
+            kernel_size=2,
+            stride=2,
+        ).reshape(batch, frames, token_height, token_width)
+
+        hand_probability = F.avg_pool2d(
+            hand_mask.reshape(batch * frames, 1, height, width).float(),
+            kernel_size=2,
+            stride=2,
+        ).reshape(batch, frames, token_height, token_width)
+        semantic_threshold = torch.quantile(
+            source_attention.flatten(2),
+            self.candidate_quantile,
+            dim=-1,
+            keepdim=True,
+        ).reshape(batch, frames, 1, 1)
+        semantic_candidate = source_attention >= semantic_threshold
+        prior_candidate = _dilate(
+            prior_posterior > 0,
+            self.field_candidate_radius,
+        ).bool()
+        field_candidate = (
+            semantic_candidate
+            & prior_candidate
+            & (hand_probability < 0.95)
+            & object_visible.bool()
+        )
+        semantic_gate = 0.25 + 0.75 * source_attention
+        field_observation = (
+            field_score.pow(self.field_power)
+            * semantic_gate
+            * field_candidate.float()
+            * (1.0 - hand_probability)
+        )
+        posterior = torch.maximum(
+            prior_posterior,
+            self.field_weight * field_observation,
+        )
+        coverage_threshold = torch.quantile(
+            posterior.flatten(2),
+            1.0 - self.max_object_coverage,
+            dim=-1,
+            keepdim=True,
+        ).reshape(batch, frames, 1, 1)
+        posterior = (
+            posterior
+            * (posterior >= coverage_threshold).float()
+            * object_visible
+        ).clamp(0.0, 1.0)
+
+        self.previous_posterior = posterior[:, -1].detach()
+        debug = dict(prior.debug)
+        debug.update({
+            "object_posterior_prior": prior_posterior,
+            "field_score_latent": field_latent,
+            "field_score": field_score,
+            "field_candidate": field_candidate.float(),
+            "field_observation": field_observation,
+            "object_posterior": posterior,
+        })
+        return HandRoleInferenceResult(
+            roles=self._build_roles(posterior, hand_mask),
+            token_edit_confidence=posterior.reshape(batch, -1),
+            debug=debug,
+        )
 
     def _query_affinity_propagation(
         self,
@@ -375,31 +538,8 @@ class HandRoleInferencer:
             self.previous_features = source_features[:, -1].detach()
             self.previous_posterior = posterior[:, -1].detach()
 
-        posterior_latent = F.interpolate(
-            posterior.reshape(
-                batch * frames, 1, token_height, token_width
-            ),
-            size=(height, width),
-            mode="bilinear",
-            align_corners=False,
-        ).reshape(batch, frames, height, width).clamp(0.0, 1.0)
-        hand_latent = hand_mask.float().clamp(0.0, 1.0)
-        hand_band = _dilate(hand_latent, 1).clamp(0.0, 1.0)
-
-        contact = posterior_latent * hand_band
-        object_core = posterior_latent * (1.0 - hand_band)
-        hand_core = (1.0 - posterior_latent) * hand_latent
-        background = (1.0 - posterior_latent) * (1.0 - hand_latent)
-        roles = RoleState(
-            object=object_core,
-            boundary=contact,
-            hand=hand_core,
-            background=background,
-        )
-        roles.validate()
-
         return HandRoleInferenceResult(
-            roles=roles,
+            roles=self._build_roles(posterior, hand_mask),
             token_edit_confidence=posterior.reshape(batch, -1),
             debug={
                 "source_attention": attention,

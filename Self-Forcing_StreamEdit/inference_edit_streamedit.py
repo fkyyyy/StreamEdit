@@ -226,6 +226,36 @@ if __name__ == '__main__':
         default=[8, 12, 16, 20],
         help="Transformer layers used to form clean-source query features.",
     )
+    parser.add_argument(
+        "--hand_field_quantile_low",
+        type=float,
+        default=0.50,
+        help="Lower per-frame quantile for field-disagreement normalization.",
+    )
+    parser.add_argument(
+        "--hand_field_quantile_high",
+        type=float,
+        default=0.95,
+        help="Upper per-frame quantile for field-disagreement normalization.",
+    )
+    parser.add_argument(
+        "--hand_field_power",
+        type=float,
+        default=1.5,
+        help="Power applied to normalized vector-field disagreement.",
+    )
+    parser.add_argument(
+        "--hand_field_weight",
+        type=float,
+        default=0.65,
+        help="Weight of the post-forward field observation; zero disables it.",
+    )
+    parser.add_argument(
+        "--hand_field_candidate_radius",
+        type=int,
+        default=2,
+        help="Prior-neighborhood radius allowed for field posterior expansion.",
+    )
     parser.add_argument("--role_boundary_radius", type=int, default=1)
     parser.add_argument(
         "--contact_target_weight",
@@ -313,6 +343,23 @@ if __name__ == '__main__':
     ):
         parser.error(
             "--hand_query_layers must contain values in [0, 29]"
+        )
+    if not (
+        0.0
+        <= args.hand_field_quantile_low
+        < args.hand_field_quantile_high
+        <= 1.0
+    ):
+        parser.error(
+            "hand field quantiles must satisfy 0 <= low < high <= 1"
+        )
+    if args.hand_field_power <= 0:
+        parser.error("--hand_field_power must be positive")
+    if not 0.0 <= args.hand_field_weight <= 1.0:
+        parser.error("--hand_field_weight must be in [0, 1]")
+    if args.hand_field_candidate_radius < 0:
+        parser.error(
+            "--hand_field_candidate_radius must be non-negative"
         )
     if (
         args.contact_graph_mode != "no_graph"
@@ -498,6 +545,11 @@ if __name__ == '__main__':
             args.hand_query_similarity_threshold
         ),
         hand_query_layers=args.hand_query_layers,
+        hand_field_quantile_low=args.hand_field_quantile_low,
+        hand_field_quantile_high=args.hand_field_quantile_high,
+        hand_field_power=args.hand_field_power,
+        hand_field_weight=args.hand_field_weight,
+        hand_field_candidate_radius=args.hand_field_candidate_radius,
         contact_graph_mode=args.contact_graph_mode,
         contact_graph_topk=args.contact_graph_topk,
         contact_graph_radius=args.contact_graph_radius,

@@ -6,7 +6,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 DATA_PATH="${DATA_PATH:-$REPO_ROOT/source_video.mp4}"
 HAND_MASK="${HAND_MASK:-$REPO_ROOT/hand_mask.mp4}"
-OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/907_hand_role_query_visibility}"
+OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/907_hand_role_field}"
 STEP="${STEP:-15}"
 CUDA_DEVICE="${CUDA_DEVICE:-0}"
 POSTERIOR_THRESHOLD="${POSTERIOR_THRESHOLD:-0.20}"
@@ -16,6 +16,11 @@ PROPAGATION_STEPS="${PROPAGATION_STEPS:-2}"
 VISIBILITY_RATIO="${VISIBILITY_RATIO:-0.40}"
 TEMPORAL_WEIGHT="${TEMPORAL_WEIGHT:-0.45}"
 QUERY_SIMILARITY_THRESHOLD="${QUERY_SIMILARITY_THRESHOLD:-0.65}"
+FIELD_QUANTILE_LOW="${FIELD_QUANTILE_LOW:-0.50}"
+FIELD_QUANTILE_HIGH="${FIELD_QUANTILE_HIGH:-0.95}"
+FIELD_POWER="${FIELD_POWER:-1.5}"
+FIELD_WEIGHT="${FIELD_WEIGHT:-0.65}"
+FIELD_CANDIDATE_RADIUS="${FIELD_CANDIDATE_RADIUS:-2}"
 
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICE"
 mkdir -p "$OUTDIR/roles"
@@ -24,7 +29,7 @@ cd "$SCRIPT_DIR"
 python inference_edit_streamedit.py \
   --data_path "$DATA_PATH" \
   --hand_mask_video "$HAND_MASK" \
-  --save_path "$OUTDIR/907-hand-role-query-visibility.mp4" \
+  --save_path "$OUTDIR/907-hand-role-field.mp4" \
   --save_role_dir "$OUTDIR/roles" \
   --routing_mode hand_role_residual_kv \
   --contact_target_weight 1.0 \
@@ -37,6 +42,11 @@ python inference_edit_streamedit.py \
   --hand_temporal_weight "$TEMPORAL_WEIGHT" \
   --hand_query_similarity_threshold "$QUERY_SIMILARITY_THRESHOLD" \
   --hand_query_layers 8 12 16 20 \
+  --hand_field_quantile_low "$FIELD_QUANTILE_LOW" \
+  --hand_field_quantile_high "$FIELD_QUANTILE_HIGH" \
+  --hand_field_power "$FIELD_POWER" \
+  --hand_field_weight "$FIELD_WEIGHT" \
+  --hand_field_candidate_radius "$FIELD_CANDIDATE_RADIUS" \
   --mask_white_threshold 245 \
   --src_prompt "A person is holding a white plastic seasoning shaker with a blue cap in a kitchen." \
   --trg_prompt "A person is holding a ribbed silver aluminum can with horizontal ribs in a kitchen." \
