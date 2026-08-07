@@ -256,6 +256,15 @@ if __name__ == '__main__':
         default=2,
         help="Prior-neighborhood radius allowed for field posterior expansion.",
     )
+    parser.add_argument(
+        "--hand_field_update_mode",
+        choices=["off", "diagnostic", "posterior"],
+        default="diagnostic",
+        help=(
+            "Use field disagreement only for diagnostics by default; "
+            "'posterior' enables the experimental posterior expansion."
+        ),
+    )
     parser.add_argument("--role_boundary_radius", type=int, default=1)
     parser.add_argument(
         "--contact_target_weight",
@@ -550,6 +559,7 @@ if __name__ == '__main__':
         hand_field_power=args.hand_field_power,
         hand_field_weight=args.hand_field_weight,
         hand_field_candidate_radius=args.hand_field_candidate_radius,
+        hand_field_update_mode=args.hand_field_update_mode,
         contact_graph_mode=args.contact_graph_mode,
         contact_graph_topk=args.contact_graph_topk,
         contact_graph_radius=args.contact_graph_radius,

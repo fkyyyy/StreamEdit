@@ -117,6 +117,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_field_power: float = 1.5,
         hand_field_weight: float = 0.65,
         hand_field_candidate_radius: int = 2,
+        hand_field_update_mode: str = "diagnostic",
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -188,6 +189,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 hand_field_power=hand_field_power,
                 hand_field_weight=hand_field_weight,
                 hand_field_candidate_radius=hand_field_candidate_radius,
+                hand_field_update_mode=hand_field_update_mode,
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
                 contact_graph_radius=contact_graph_radius,
@@ -291,6 +293,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 hand_field_power=hand_field_power,
                 hand_field_weight=hand_field_weight,
                 hand_field_candidate_radius=hand_field_candidate_radius,
+                hand_field_update_mode=hand_field_update_mode,
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
                 contact_graph_radius=contact_graph_radius,
@@ -383,6 +386,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_field_power: float = 1.5,
         hand_field_weight: float = 0.65,
         hand_field_candidate_radius: int = 2,
+        hand_field_update_mode: str = "diagnostic",
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -465,6 +469,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
         if hand_field_candidate_radius < 0:
             raise ValueError(
                 "hand_field_candidate_radius must be non-negative"
+            )
+        if hand_field_update_mode not in {
+            "off",
+            "diagnostic",
+            "posterior",
+        }:
+            raise ValueError(
+                "hand_field_update_mode must be one of "
+                "{'off', 'diagnostic', 'posterior'}"
             )
         if contact_graph_mode not in CONTACT_GRAPH_MODES:
             raise ValueError(
@@ -558,6 +571,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 f"visibility_ratio={hand_visibility_ratio:.3f} "
                 f"temporal_weight={hand_temporal_weight:.3f} "
                 f"field_weight={hand_field_weight:.3f} "
+                f"field_mode={hand_field_update_mode} "
                 f"query_layers={hand_query_layers}"
             )
         # #region debug-point B:network-reporter
@@ -1025,7 +1039,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 if (
                     hand_role_enabled
                     and index == 0
-                    and hand_field_weight > 0.0
+                    and hand_field_update_mode != "off"
                 ):
                     hand_role_inference = (
                         hand_role_inferencer.refine_with_field(
@@ -1035,27 +1049,32 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             hand_mask=hand_only_mask[
                                 :, role_left:role_right
                             ],
+                            apply_update=(
+                                hand_field_update_mode == "posterior"
+                            ),
                         )
                     )
-                    current_roles = hand_role_inference.roles
                     hand_role_debug = hand_role_inference.debug
-                    role_edit_tokens = (
-                        hand_role_inference.token_edit_confidence
-                        >= hand_posterior_threshold
-                    )
-                    inloop_trg_fg_mask = role_edit_tokens
-                    src_fg_mask_map = self._mask_reshape(
-                        role_edit_tokens,
-                        size=(current_num_frames, height, width),
-                    )
-                    self._inject_masks_to_kv_cache(
-                        kv_cache_dual,
-                        trg_fg_mask_cache,
-                        role_edit_tokens,
-                    )
+                    if hand_field_update_mode == "posterior":
+                        current_roles = hand_role_inference.roles
+                        role_edit_tokens = (
+                            hand_role_inference.token_edit_confidence
+                            >= hand_posterior_threshold
+                        )
+                        inloop_trg_fg_mask = role_edit_tokens
+                        src_fg_mask_map = self._mask_reshape(
+                            role_edit_tokens,
+                            size=(current_num_frames, height, width),
+                        )
+                        self._inject_masks_to_kv_cache(
+                            kv_cache_dual,
+                            trg_fg_mask_cache,
+                            role_edit_tokens,
+                        )
                     print(
                         "HAND_ROLE_FIELD "
                         f"block={current_start_frame // self.num_frame_per_block} "
+                        f"mode={hand_field_update_mode} "
                         f"edit_tokens={role_edit_tokens.float().mean().item():.4f} "
                         f"field={hand_role_debug['field_score'].mean().item():.4f} "
                         f"observation={hand_role_debug['field_observation'].mean().item():.4f}"

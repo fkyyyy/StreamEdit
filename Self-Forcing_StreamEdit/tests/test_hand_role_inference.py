@@ -213,3 +213,25 @@ def test_empty_hand_cannot_be_activated_by_field():
         refined.roles.background,
         torch.ones_like(refined.roles.background),
     )
+
+
+def test_diagnostic_field_observation_does_not_change_roles():
+    inferencer = hand_role.HandRoleInferencer()
+    prior = inferencer(_attention(), _hand())
+
+    observed = inferencer.refine_with_field(
+        prior,
+        source_velocity=torch.zeros((1, 1, 4, 8, 8)),
+        target_velocity=torch.randn((1, 1, 4, 8, 8)) * 10,
+        hand_mask=_hand(),
+        apply_update=False,
+    )
+
+    assert torch.equal(
+        observed.token_edit_confidence,
+        prior.token_edit_confidence,
+    )
+    for name, value in prior.roles.as_dict().items():
+        assert torch.equal(observed.roles.as_dict()[name], value)
+    assert "field_score" in observed.debug
+    assert "field_observation" in observed.debug

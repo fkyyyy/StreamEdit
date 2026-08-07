@@ -196,8 +196,9 @@ class HandRoleInferencer:
         source_velocity: torch.Tensor,
         target_velocity: torch.Tensor,
         hand_mask: torch.Tensor,
+        apply_update: bool = True,
     ) -> HandRoleInferenceResult:
-        """Refine a role prior with one source-target field observation."""
+        """Measure field disagreement and optionally refine a role prior."""
         if source_velocity.shape != target_velocity.shape:
             raise ValueError(
                 "source_velocity and target_velocity must share a shape"
@@ -268,23 +269,26 @@ class HandRoleInferencer:
             * field_candidate.float()
             * (1.0 - hand_probability)
         )
-        posterior = torch.maximum(
-            prior_posterior,
-            self.field_weight * field_observation,
-        )
-        coverage_threshold = torch.quantile(
-            posterior.flatten(2),
-            1.0 - self.max_object_coverage,
-            dim=-1,
-            keepdim=True,
-        ).reshape(batch, frames, 1, 1)
-        posterior = (
-            posterior
-            * (posterior >= coverage_threshold).float()
-            * object_visible
-        ).clamp(0.0, 1.0)
+        if apply_update:
+            posterior = torch.maximum(
+                prior_posterior,
+                self.field_weight * field_observation,
+            )
+            coverage_threshold = torch.quantile(
+                posterior.flatten(2),
+                1.0 - self.max_object_coverage,
+                dim=-1,
+                keepdim=True,
+            ).reshape(batch, frames, 1, 1)
+            posterior = (
+                posterior
+                * (posterior >= coverage_threshold).float()
+                * object_visible
+            ).clamp(0.0, 1.0)
+            self.previous_posterior = posterior[:, -1].detach()
+        else:
+            posterior = prior_posterior
 
-        self.previous_posterior = posterior[:, -1].detach()
         debug = dict(prior.debug)
         debug.update({
             "object_posterior_prior": prior_posterior,
