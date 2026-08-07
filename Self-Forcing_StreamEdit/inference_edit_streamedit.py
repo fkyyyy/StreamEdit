@@ -168,6 +168,7 @@ if __name__ == '__main__':
             "oracle_role_residual",
             "oracle_role_residual_kv",
             "hand_role_residual_kv",
+            "hand_role_adaptive_kv",
         ],
         default="dynamic_sog",
     )
@@ -317,7 +318,10 @@ if __name__ == '__main__':
         "oracle_role_residual",
         "oracle_role_residual_kv",
     }
-    hand_role_enabled = args.routing_mode == "hand_role_residual_kv"
+    hand_role_enabled = args.routing_mode in {
+        "hand_role_residual_kv",
+        "hand_role_adaptive_kv",
+    }
     if oracle_role_enabled and (
         args.object_mask_video is None or args.hand_mask_video is None
     ):
@@ -327,7 +331,7 @@ if __name__ == '__main__':
         )
     if hand_role_enabled and args.hand_mask_video is None:
         parser.error(
-            "hand_role_residual_kv requires --hand_mask_video"
+            f"{args.routing_mode} requires --hand_mask_video"
         )
     if not 0.0 <= args.contact_target_weight <= 1.0:
         parser.error("--contact_target_weight must be in [0, 1]")

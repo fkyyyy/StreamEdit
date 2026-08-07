@@ -127,6 +127,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         contact_graph_layer_end: int = 20,
         contact_graph_seed: int = 0,
         save_role_dir: Optional[str] = None,
+        _hand_role_inferencer: Optional[HandRoleInferencer] = None,
     ) -> torch.Tensor:
         expected_role_shape = (
             src_video.shape[0], src_video.shape[1],
@@ -201,7 +202,30 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 save_role_dir=save_role_dir,
             )
 
-        rollout_overlap = rollout_overlap_block_num * self.num_frame_per_block 
+        rollout_overlap = rollout_overlap_block_num * self.num_frame_per_block
+        rollout_hand_role_inferencer = _hand_role_inferencer
+        if (
+            rollout_hand_role_inferencer is None
+            and routing_mode == "hand_role_adaptive_kv"
+        ):
+            rollout_hand_role_inferencer = HandRoleInferencer(
+                hand_proximity_radius=hand_proximity_radius,
+                propagation_steps=hand_propagation_steps,
+                max_object_coverage=hand_max_object_coverage,
+                visibility_ratio=hand_visibility_ratio,
+                temporal_weight=hand_temporal_weight,
+                query_similarity_threshold=(
+                    hand_query_similarity_threshold
+                ),
+                field_quantile_low=hand_field_quantile_low,
+                field_quantile_high=hand_field_quantile_high,
+                field_power=hand_field_power,
+                field_weight=hand_field_weight,
+                field_candidate_radius=hand_field_candidate_radius,
+                adaptive=(
+                    routing_mode == "hand_role_adaptive_kv"
+                ),
+            )
 
         total_frame_num = src_video.shape[1]
         ret_latent_list = []
@@ -303,6 +327,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 contact_graph_layer_end=contact_graph_layer_end,
                 contact_graph_seed=contact_graph_seed,
                 save_role_dir=save_role_dir,
+                _hand_role_inferencer=rollout_hand_role_inferencer,
             )
 
             # store results
@@ -396,6 +421,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         contact_graph_layer_end: int = 20,
         contact_graph_seed: int = 0,
         save_role_dir: Optional[str] = None,
+        _hand_role_inferencer: Optional[HandRoleInferencer] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
         independent_first_frame = independent_first_frame or self.independent_first_frame
@@ -411,7 +437,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "oracle_role_flow_kv",
             "oracle_role_residual_kv",
         }
-        hand_role_enabled = routing_mode == "hand_role_residual_kv"
+        hand_role_enabled = routing_mode in {
+            "hand_role_residual_kv",
+            "hand_role_adaptive_kv",
+        }
+        adaptive_role_enabled = routing_mode == "hand_role_adaptive_kv"
         consistent_role_kv_enabled = oracle_kv_enabled or hand_role_enabled
         if routing_mode not in {
             "dynamic_sog",
@@ -420,6 +450,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "oracle_role_residual",
             "oracle_role_residual_kv",
             "hand_role_residual_kv",
+            "hand_role_adaptive_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
         if not 0.0 <= contact_target_weight <= 1.0:
@@ -539,7 +570,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             expected_role_shape = (batch_size, num_frames, height, width)
             if hand_only_mask is None:
                 raise ValueError(
-                    "hand_role_residual_kv requires hand_only_mask"
+                    f"{routing_mode} requires hand_only_mask"
                 )
             if tuple(hand_only_mask.shape) != expected_role_shape:
                 raise ValueError(
@@ -561,7 +592,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 f"mode={routing_mode} "
                 f"contact_target_weight={contact_target_weight:.3f}"
             )
-        if hand_role_enabled:
+        if adaptive_role_enabled:
+            print(
+                "HAND_ROLE_ADAPTIVE "
+                "online_radius=True online_visibility=True "
+                "online_temporal=True online_threshold=True "
+                "online_field_reliability=True"
+            )
+        elif hand_role_enabled:
             print(
                 "HAND_ROLE_RESIDUAL "
                 f"posterior_threshold={hand_posterior_threshold:.3f} "
@@ -686,21 +724,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
         self._initialize_noise_statistics(reuse_noise_temporal_mean)
         role_flow_router = RoleFlowRouter()
         residual_role_flow_router = ResidualRoleFlowRouter()
-        hand_role_inferencer = HandRoleInferencer(
-            hand_proximity_radius=hand_proximity_radius,
-            propagation_steps=hand_propagation_steps,
-            max_object_coverage=hand_max_object_coverage,
-            visibility_ratio=hand_visibility_ratio,
-            temporal_weight=hand_temporal_weight,
-            query_similarity_threshold=(
-                hand_query_similarity_threshold
-            ),
-            field_quantile_low=hand_field_quantile_low,
-            field_quantile_high=hand_field_quantile_high,
-            field_power=hand_field_power,
-            field_weight=hand_field_weight,
-            field_candidate_radius=hand_field_candidate_radius,
-        )
+        hand_role_inferencer = _hand_role_inferencer
+        if hand_role_inferencer is None:
+            hand_role_inferencer = HandRoleInferencer(
+                hand_proximity_radius=hand_proximity_radius,
+                propagation_steps=hand_propagation_steps,
+                max_object_coverage=hand_max_object_coverage,
+                visibility_ratio=hand_visibility_ratio,
+                temporal_weight=hand_temporal_weight,
+                query_similarity_threshold=(
+                    hand_query_similarity_threshold
+                ),
+                field_quantile_low=hand_field_quantile_low,
+                field_quantile_high=hand_field_quantile_high,
+                field_power=hand_field_power,
+                field_weight=hand_field_weight,
+                field_candidate_radius=hand_field_candidate_radius,
+                adaptive=adaptive_role_enabled,
+            )
 
         # get trigger token indices
         trans_tokenizer = self.text_encoder.tokenizer.tokenizer
@@ -921,24 +962,48 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 )
                 current_roles = hand_role_inference.roles
                 hand_role_debug = hand_role_inference.debug
-                role_edit_tokens = (
-                    hand_role_inference.token_edit_confidence
-                    >= hand_posterior_threshold
-                )
+                if adaptive_role_enabled:
+                    role_edit_tokens = (
+                        hand_role_debug["object_posterior"]
+                        >= hand_role_debug["posterior_threshold"]
+                    ).reshape(batch_size, -1)
+                else:
+                    role_edit_tokens = (
+                        hand_role_inference.token_edit_confidence
+                        >= hand_posterior_threshold
+                    )
                 role_coverage = {
                     name: value.mean().item()
                     for name, value in current_roles.as_dict().items()
                 }
+                adaptive_summary = ""
+                if adaptive_role_enabled:
+                    adaptive_summary = (
+                        " radius="
+                        f"{hand_role_debug['adaptive_hand_radius'].mean().item():.3f}"
+                        " attention_reliability="
+                        f"{hand_role_debug['adaptive_attention_reliability'].mean().item():.3f}"
+                        " threshold="
+                        f"{hand_role_debug['posterior_threshold'].mean().item():.3f}"
+                        " budget="
+                        f"{hand_role_debug['adaptive_coverage_budget'].mean().item():.3f}"
+                    )
                 print(
                     "HAND_ROLE_FLOW "
                     f"block={current_start_frame // self.num_frame_per_block} "
                     f"edit_tokens={role_edit_tokens.float().mean().item():.4f} "
                     f"visible={hand_role_debug['object_visible'].mean().item():.4f} "
                     f"temporal={hand_role_debug['temporal_posterior'].mean().item():.4f} "
+                    + (
+                        "adaptive=1 "
+                        if adaptive_role_enabled
+                        else "adaptive=0 "
+                    )
                     + " ".join(
                         f"{name}={coverage:.4f}"
                         for name, coverage in role_coverage.items()
                     )
+                    + adaptive_summary
                 )
                 if save_role_dir is not None:
                     block_index = (
@@ -1039,7 +1104,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 if (
                     hand_role_enabled
                     and index == 0
-                    and hand_field_update_mode != "off"
+                    and (
+                        adaptive_role_enabled
+                        or hand_field_update_mode != "off"
+                    )
                 ):
                     hand_role_inference = (
                         hand_role_inferencer.refine_with_field(
@@ -1050,17 +1118,30 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 :, role_left:role_right
                             ],
                             apply_update=(
-                                hand_field_update_mode == "posterior"
+                                adaptive_role_enabled
+                                or hand_field_update_mode == "posterior"
                             ),
                         )
                     )
                     hand_role_debug = hand_role_inference.debug
-                    if hand_field_update_mode == "posterior":
+                    if (
+                        adaptive_role_enabled
+                        or hand_field_update_mode == "posterior"
+                    ):
                         current_roles = hand_role_inference.roles
-                        role_edit_tokens = (
-                            hand_role_inference.token_edit_confidence
-                            >= hand_posterior_threshold
-                        )
+                        if adaptive_role_enabled:
+                            role_edit_tokens = (
+                                hand_role_debug["object_posterior"]
+                                >= hand_role_debug[
+                                    "posterior_threshold"
+                                ]
+                            ).reshape(batch_size, -1)
+                        else:
+                            role_edit_tokens = (
+                                hand_role_inference
+                                .token_edit_confidence
+                                >= hand_posterior_threshold
+                            )
                         inloop_trg_fg_mask = role_edit_tokens
                         src_fg_mask_map = self._mask_reshape(
                             role_edit_tokens,
@@ -1073,11 +1154,19 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         )
                     print(
                         "HAND_ROLE_FIELD "
-                        f"block={current_start_frame // self.num_frame_per_block} "
-                        f"mode={hand_field_update_mode} "
+                        "block="
+                        f"{current_start_frame // self.num_frame_per_block} "
+                        "mode="
+                        f"{'adaptive' if adaptive_role_enabled else hand_field_update_mode} "
                         f"edit_tokens={role_edit_tokens.float().mean().item():.4f} "
                         f"field={hand_role_debug['field_score'].mean().item():.4f} "
                         f"observation={hand_role_debug['field_observation'].mean().item():.4f}"
+                        + (
+                            " reliability="
+                            f"{hand_role_debug['adaptive_field_reliability'].mean().item():.4f}"
+                            if adaptive_role_enabled
+                            else ""
+                        )
                     )
                     if save_role_dir is not None:
                         block_index = (
@@ -1131,6 +1220,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     "oracle_role_residual",
                     "oracle_role_residual_kv",
                     "hand_role_residual_kv",
+                    "hand_role_adaptive_kv",
                 }:
                     v_t, _ = residual_role_flow_router(
                         target_velocity=v_trg,

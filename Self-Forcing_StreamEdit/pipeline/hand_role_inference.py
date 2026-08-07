@@ -5,6 +5,7 @@ from typing import Dict
 import torch
 import torch.nn.functional as F
 
+from .adaptive_role_calibrator import AdaptiveRoleCalibrator
 from .role_router import RoleState
 
 
@@ -96,6 +97,7 @@ class HandRoleInferencer:
         field_power: float = 1.5,
         field_weight: float = 0.65,
         field_candidate_radius: int = 2,
+        adaptive: bool = False,
         eps: float = 1e-6,
     ):
         if not (
@@ -154,10 +156,14 @@ class HandRoleInferencer:
         self.field_power = field_power
         self.field_weight = field_weight
         self.field_candidate_radius = field_candidate_radius
+        self.adaptive = adaptive
         self.eps = eps
         self.previous_features = None
         self.previous_posterior = None
         self.reference_interaction_support = None
+        self.adaptive_calibrator = (
+            AdaptiveRoleCalibrator(eps=eps) if adaptive else None
+        )
 
     @staticmethod
     def _build_roles(
@@ -245,49 +251,83 @@ class HandRoleInferencer:
             kernel_size=2,
             stride=2,
         ).reshape(batch, frames, token_height, token_width)
-        semantic_threshold = torch.quantile(
-            source_attention.flatten(2),
-            self.candidate_quantile,
-            dim=-1,
-            keepdim=True,
-        ).reshape(batch, frames, 1, 1)
-        semantic_candidate = source_attention >= semantic_threshold
-        prior_candidate = _dilate(
-            prior_posterior > 0,
-            self.field_candidate_radius,
-        ).bool()
-        field_candidate = (
-            semantic_candidate
-            & prior_candidate
-            & (hand_probability < 0.95)
-            & object_visible.bool()
-        )
-        semantic_gate = 0.25 + 0.75 * source_attention
-        field_observation = (
-            field_score.pow(self.field_power)
-            * semantic_gate
-            * field_candidate.float()
-            * (1.0 - hand_probability)
-        )
-        if apply_update:
-            posterior = torch.maximum(
-                prior_posterior,
-                self.field_weight * field_observation,
+        if self.adaptive:
+            posterior, posterior_threshold, adaptive_debug = (
+                self.adaptive_calibrator.field_update(
+                    prior_posterior=prior_posterior,
+                    field_score=field_score,
+                    object_seed=prior.debug["object_seed"].float(),
+                    object_visible=object_visible,
+                    coverage_budget=prior.debug[
+                        "adaptive_coverage_budget"
+                    ].float(),
+                    prior_threshold=prior.debug[
+                        "posterior_threshold"
+                    ].float(),
+                )
             )
-            coverage_threshold = torch.quantile(
-                posterior.flatten(2),
-                1.0 - self.max_object_coverage,
+            field_candidate = prior_posterior > self.eps
+            field_observation = adaptive_debug[
+                "adaptive_field_likelihood"
+            ]
+            if not apply_update:
+                posterior = prior_posterior
+                posterior_threshold = prior.debug[
+                    "posterior_threshold"
+                ]
+        else:
+            semantic_threshold = torch.quantile(
+                source_attention.flatten(2),
+                self.candidate_quantile,
                 dim=-1,
                 keepdim=True,
             ).reshape(batch, frames, 1, 1)
-            posterior = (
-                posterior
-                * (posterior >= coverage_threshold).float()
-                * object_visible
-            ).clamp(0.0, 1.0)
+            semantic_candidate = source_attention >= semantic_threshold
+            prior_candidate = _dilate(
+                prior_posterior > 0,
+                self.field_candidate_radius,
+            ).bool()
+            field_candidate = (
+                semantic_candidate
+                & prior_candidate
+                & (hand_probability < 0.95)
+                & object_visible.bool()
+            )
+            semantic_gate = 0.25 + 0.75 * source_attention
+            field_observation = (
+                field_score.pow(self.field_power)
+                * semantic_gate
+                * field_candidate.float()
+                * (1.0 - hand_probability)
+            )
+            if apply_update:
+                posterior = torch.maximum(
+                    prior_posterior,
+                    self.field_weight * field_observation,
+                )
+                coverage_threshold = torch.quantile(
+                    posterior.flatten(2),
+                    1.0 - self.max_object_coverage,
+                    dim=-1,
+                    keepdim=True,
+                ).reshape(batch, frames, 1, 1)
+                posterior = (
+                    posterior
+                    * (posterior >= coverage_threshold).float()
+                    * object_visible
+                ).clamp(0.0, 1.0)
+            else:
+                posterior = prior_posterior
+            posterior_threshold = prior.debug.get(
+                "posterior_threshold",
+                posterior.new_full(
+                    (batch, frames, 1, 1),
+                    0.20,
+                ),
+            )
+
+        if apply_update:
             self.previous_posterior = posterior[:, -1].detach()
-        else:
-            posterior = prior_posterior
 
         debug = dict(prior.debug)
         debug.update({
@@ -297,7 +337,10 @@ class HandRoleInferencer:
             "field_candidate": field_candidate.float(),
             "field_observation": field_observation,
             "object_posterior": posterior,
+            "posterior_threshold": posterior_threshold,
         })
+        if self.adaptive:
+            debug.update(adaptive_debug)
         return HandRoleInferenceResult(
             roles=self._build_roles(posterior, hand_mask),
             token_edit_confidence=posterior.reshape(batch, -1),
@@ -323,19 +366,69 @@ class HandRoleInferencer:
             current_features.shape[1],
             -1,
         ).gather(2, top_index)
+        if self.adaptive:
+            best_similarity = top_similarity[..., 0]
+            similarity_low = torch.quantile(
+                best_similarity,
+                0.25,
+                dim=-1,
+                keepdim=True,
+            )
+            similarity_high = torch.quantile(
+                best_similarity,
+                0.75,
+                dim=-1,
+                keepdim=True,
+            )
+            temperature = (
+                similarity_high - similarity_low
+            ).clamp(0.03, 0.20).unsqueeze(-1)
+        else:
+            temperature = self.query_temperature
         affinity_weight = torch.softmax(
-            (
-                top_similarity - self.query_similarity_threshold
-            ) / self.query_temperature,
+            top_similarity / temperature,
             dim=-1,
         )
-        confidence = (
-            (
-                top_similarity[..., 0]
-                - self.query_similarity_threshold
+        if self.adaptive:
+            best_similarity = top_similarity[..., 0]
+            median_similarity = torch.quantile(
+                best_similarity,
+                0.50,
+                dim=-1,
+                keepdim=True,
             )
-            / (1.0 - self.query_similarity_threshold + self.eps)
-        ).clamp(0.0, 1.0)
+            high_similarity = torch.quantile(
+                best_similarity,
+                0.90,
+                dim=-1,
+                keepdim=True,
+            )
+            relative_confidence = (
+                (best_similarity - median_similarity)
+                / (
+                    high_similarity
+                    - median_similarity
+                    + self.eps
+                )
+            ).clamp(0.0, 1.0)
+            absolute_confidence = (
+                0.5 * (best_similarity + 1.0)
+            ).clamp(0.0, 1.0)
+            confidence = torch.sqrt(
+                relative_confidence * absolute_confidence
+            )
+        else:
+            confidence = (
+                (
+                    top_similarity[..., 0]
+                    - self.query_similarity_threshold
+                )
+                / (
+                    1.0
+                    - self.query_similarity_threshold
+                    + self.eps
+                )
+            ).clamp(0.0, 1.0)
         propagated = (
             affinity_weight * selected_posterior
         ).sum(dim=-1) * confidence
@@ -402,81 +495,106 @@ class HandRoleInferencer:
             kernel_size=2,
             stride=2,
         ).reshape(batch, frames, token_height, token_width)
-        hand_binary = hand_probability > 0.0
-        hand_coverage = hand_probability.flatten(2).mean(dim=-1)
-        hand_present = (
-            hand_binary.flatten(2).any(dim=-1)
-            & (hand_coverage < 0.95)
-        ).view(
-            batch, frames, 1, 1
-        )
-
-        proximity = torch.zeros_like(attention)
-        for radius in range(self.hand_proximity_radius + 1):
-            ring = _dilate(hand_binary, radius).bool()
-            if radius:
-                ring &= ~_dilate(hand_binary, radius - 1).bool()
-            proximity = torch.where(
-                ring,
-                proximity.new_tensor(
-                    math.exp(
-                        -float(radius)
-                        / max(float(self.hand_proximity_radius), 1.0)
-                    )
-                ),
-                proximity,
+        adaptive_debug = {}
+        adaptive_observation = None
+        if self.adaptive:
+            adaptive_observation = self.adaptive_calibrator.observe(
+                attention,
+                hand_probability,
             )
-        near_hand = _dilate(
-            hand_binary,
-            self.hand_proximity_radius,
-        ).bool()
-        interaction_prior = 0.25 + 0.75 * proximity
-        seed_score = attention.pow(1.5) * interaction_prior
-        seed_threshold = _masked_quantile(
-            seed_score,
-            near_hand,
-            self.seed_quantile,
-        )
-        seed = (
-            seed_score
-            * (seed_score >= seed_threshold).float()
-            * near_hand.float()
-            * hand_present.float()
-        )
-        seed_candidate = (
-            (seed_score >= seed_threshold)
-            & near_hand
-            & hand_present
-        )
-        interaction_support = (
-            seed_score * seed_candidate.float()
-        ).mean(dim=(2, 3), keepdim=True)
-        current_reference = interaction_support.amax(
-            dim=1,
-            keepdim=True,
-        ).detach()
-        if self.reference_interaction_support is None:
-            self.reference_interaction_support = current_reference
+            proximity = adaptive_observation.debug["hand_proximity"]
+            seed = adaptive_observation.seed
+            interaction_support = adaptive_observation.debug[
+                "interaction_support"
+            ]
+            visibility_threshold = adaptive_observation.debug[
+                "visibility_threshold"
+            ]
+            object_visible = adaptive_observation.object_visible
+            gate = adaptive_observation.gate
+            adaptive_debug = adaptive_observation.debug
         else:
-            self.reference_interaction_support = torch.maximum(
-                self.reference_interaction_support,
-                current_reference,
+            hand_binary = hand_probability > 0.0
+            hand_coverage = hand_probability.flatten(2).mean(dim=-1)
+            hand_present = (
+                hand_binary.flatten(2).any(dim=-1)
+                & (hand_coverage < 0.95)
+            ).view(
+                batch, frames, 1, 1
             )
-        visibility_threshold = (
-            self.reference_interaction_support * self.visibility_ratio
-        )
-        object_visible = (
-            (self.reference_interaction_support > self.eps)
-            & (interaction_support >= visibility_threshold)
-        )
 
-        candidate_threshold = torch.quantile(
-            attention.flatten(2),
-            self.candidate_quantile,
-            dim=-1,
-            keepdim=True,
-        ).reshape(batch, frames, 1, 1)
-        gate = attention * (attention >= candidate_threshold).float()
+            proximity = torch.zeros_like(attention)
+            for radius in range(self.hand_proximity_radius + 1):
+                ring = _dilate(hand_binary, radius).bool()
+                if radius:
+                    ring &= ~_dilate(hand_binary, radius - 1).bool()
+                proximity = torch.where(
+                    ring,
+                    proximity.new_tensor(
+                        math.exp(
+                            -float(radius)
+                            / max(
+                                float(self.hand_proximity_radius),
+                                1.0,
+                            )
+                        )
+                    ),
+                    proximity,
+                )
+            near_hand = _dilate(
+                hand_binary,
+                self.hand_proximity_radius,
+            ).bool()
+            interaction_prior = 0.25 + 0.75 * proximity
+            seed_score = attention.pow(1.5) * interaction_prior
+            seed_threshold = _masked_quantile(
+                seed_score,
+                near_hand,
+                self.seed_quantile,
+            )
+            seed = (
+                seed_score
+                * (seed_score >= seed_threshold).float()
+                * near_hand.float()
+                * hand_present.float()
+            )
+            seed_candidate = (
+                (seed_score >= seed_threshold)
+                & near_hand
+                & hand_present
+            )
+            interaction_support = (
+                seed_score * seed_candidate.float()
+            ).mean(dim=(2, 3), keepdim=True)
+            current_reference = interaction_support.amax(
+                dim=1,
+                keepdim=True,
+            ).detach()
+            if self.reference_interaction_support is None:
+                self.reference_interaction_support = current_reference
+            else:
+                self.reference_interaction_support = torch.maximum(
+                    self.reference_interaction_support,
+                    current_reference,
+                )
+            visibility_threshold = (
+                self.reference_interaction_support
+                * self.visibility_ratio
+            )
+            object_visible = (
+                (self.reference_interaction_support > self.eps)
+                & (interaction_support >= visibility_threshold)
+            )
+
+            candidate_threshold = torch.quantile(
+                attention.flatten(2),
+                self.candidate_quantile,
+                dim=-1,
+                keepdim=True,
+            ).reshape(batch, frames, 1, 1)
+            gate = attention * (
+                attention >= candidate_threshold
+            ).float()
         posterior = seed
         for _ in range(self.propagation_steps):
             propagated = _neighbor_max(posterior)
@@ -489,6 +607,14 @@ class HandRoleInferencer:
 
         temporal_posterior = torch.zeros_like(posterior)
         temporal_confidence = torch.zeros_like(posterior)
+        adaptive_temporal_weight = torch.zeros(
+            batch,
+            frames,
+            1,
+            1,
+            device=posterior.device,
+            dtype=torch.float32,
+        )
         if source_features is not None:
             for frame_index in range(frames):
                 if frame_index == 0:
@@ -520,43 +646,79 @@ class HandRoleInferencer:
                 temporal_posterior[:, frame_index] = propagated
                 temporal_confidence[:, frame_index] = confidence
                 semantic_gate = 0.20 + 0.80 * attention[:, frame_index]
+                if self.adaptive:
+                    temporal_weight = (
+                        self.adaptive_calibrator.temporal_weight(
+                            propagated,
+                            confidence,
+                            adaptive_observation.attention_reliability[
+                                :, frame_index
+                            ],
+                        )
+                    )
+                    adaptive_temporal_weight[:, frame_index] = (
+                        temporal_weight
+                    )
+                else:
+                    temporal_weight = self.temporal_weight
                 posterior[:, frame_index] = torch.maximum(
                     posterior[:, frame_index],
-                    self.temporal_weight
+                    temporal_weight
                     * propagated
                     * semantic_gate,
                 ) * object_visible[:, frame_index].float()
 
-        coverage_threshold = torch.quantile(
-            posterior.flatten(2),
-            1.0 - self.max_object_coverage,
-            dim=-1,
-            keepdim=True,
-        ).reshape(batch, frames, 1, 1)
-        posterior = (
-            posterior
-            * (posterior >= coverage_threshold).float()
-            * object_visible.float()
-        ).clamp(0.0, 1.0)
+        if self.adaptive:
+            posterior = self.adaptive_calibrator.limit_posterior(
+                posterior,
+                adaptive_observation.coverage_budget,
+                object_visible,
+            )
+            posterior_threshold = (
+                self.adaptive_calibrator.posterior_threshold(posterior)
+            )
+        else:
+            coverage_threshold = torch.quantile(
+                posterior.flatten(2),
+                1.0 - self.max_object_coverage,
+                dim=-1,
+                keepdim=True,
+            ).reshape(batch, frames, 1, 1)
+            posterior = (
+                posterior
+                * (posterior >= coverage_threshold).float()
+                * object_visible.float()
+            ).clamp(0.0, 1.0)
+            posterior_threshold = posterior.new_full(
+                (batch, frames, 1, 1),
+                0.20,
+            )
         if source_features is not None:
             self.previous_features = source_features[:, -1].detach()
             self.previous_posterior = posterior[:, -1].detach()
 
+        debug = {
+            "source_attention": attention,
+            "hand_probability": hand_probability,
+            "hand_proximity": proximity,
+            "object_seed": seed,
+            "interaction_support": interaction_support,
+            "visibility_threshold": visibility_threshold.expand_as(
+                interaction_support
+            ),
+            "object_visible": object_visible.float(),
+            "temporal_posterior": temporal_posterior,
+            "temporal_confidence": temporal_confidence,
+            "object_posterior": posterior,
+            "posterior_threshold": posterior_threshold,
+        }
+        if self.adaptive:
+            debug["adaptive_temporal_weight"] = (
+                adaptive_temporal_weight
+            )
+        debug.update(adaptive_debug)
         return HandRoleInferenceResult(
             roles=self._build_roles(posterior, hand_mask),
             token_edit_confidence=posterior.reshape(batch, -1),
-            debug={
-                "source_attention": attention,
-                "hand_probability": hand_probability,
-                "hand_proximity": proximity,
-                "object_seed": seed,
-                "interaction_support": interaction_support,
-                "visibility_threshold": visibility_threshold.expand_as(
-                    interaction_support
-                ),
-                "object_visible": object_visible.float(),
-                "temporal_posterior": temporal_posterior,
-                "temporal_confidence": temporal_confidence,
-                "object_posterior": posterior,
-            },
+            debug=debug,
         )
