@@ -167,6 +167,7 @@ if __name__ == '__main__':
             "oracle_role_flow_kv",
             "oracle_role_residual",
             "oracle_role_residual_kv",
+            "hand_role_residual_kv",
         ],
         default="dynamic_sog",
     )
@@ -176,14 +177,38 @@ if __name__ == '__main__':
     parser.add_argument(
         "--object_min_latent_coverage", type=float, default=0.001
     )
+    parser.add_argument(
+        "--hand_posterior_threshold",
+        type=float,
+        default=0.20,
+        help="Boolean KV threshold for the soft hand-only object posterior.",
+    )
+    parser.add_argument(
+        "--hand_max_object_coverage",
+        type=float,
+        default=0.18,
+        help="Maximum per-frame active-object posterior coverage.",
+    )
+    parser.add_argument(
+        "--hand_proximity_radius",
+        type=int,
+        default=3,
+        help="Hand-proximity radius on the transformer token grid.",
+    )
+    parser.add_argument(
+        "--hand_propagation_steps",
+        type=int,
+        default=2,
+        help="Spatial propagation steps for hand-only object discovery.",
+    )
     parser.add_argument("--role_boundary_radius", type=int, default=1)
     parser.add_argument(
         "--contact_target_weight",
         type=float,
         default=0.7,
         help=(
-            "Target-field weight for Oracle contact tokens in "
-            "Oracle residual modes; must be in [0, 1]."
+            "Target-field weight for contact tokens in role residual modes; "
+            "must be in [0, 1]."
         ),
     )
     parser.add_argument(
@@ -228,6 +253,7 @@ if __name__ == '__main__':
         "oracle_role_residual",
         "oracle_role_residual_kv",
     }
+    hand_role_enabled = args.routing_mode == "hand_role_residual_kv"
     if oracle_role_enabled and (
         args.object_mask_video is None or args.hand_mask_video is None
     ):
@@ -235,8 +261,20 @@ if __name__ == '__main__':
             "Oracle role modes require --object_mask_video and "
             "--hand_mask_video"
         )
+    if hand_role_enabled and args.hand_mask_video is None:
+        parser.error(
+            "hand_role_residual_kv requires --hand_mask_video"
+        )
     if not 0.0 <= args.contact_target_weight <= 1.0:
         parser.error("--contact_target_weight must be in [0, 1]")
+    if not 0.0 <= args.hand_posterior_threshold <= 1.0:
+        parser.error("--hand_posterior_threshold must be in [0, 1]")
+    if not 0.0 < args.hand_max_object_coverage <= 1.0:
+        parser.error("--hand_max_object_coverage must be in (0, 1]")
+    if args.hand_proximity_radius < 0:
+        parser.error("--hand_proximity_radius must be non-negative")
+    if args.hand_propagation_steps < 0:
+        parser.error("--hand_propagation_steps must be non-negative")
     if (
         args.contact_graph_mode != "no_graph"
         and args.routing_mode != "oracle_role_residual_kv"
@@ -313,12 +351,14 @@ if __name__ == '__main__':
             args.mask_white_threshold,
             min_latent_coverage=args.object_min_latent_coverage,
         )
+    if oracle_role_enabled or hand_role_enabled:
         _, hand_latent_mask = build_white_mask(
             args.hand_mask_video,
             src_video,
             tuple(video_latents.shape),
             args.mask_white_threshold,
         )
+    if oracle_role_enabled:
         role_input_path = Path(args.save_path).with_suffix(
             ".oracle_role_inputs.npz"
         )
@@ -333,6 +373,20 @@ if __name__ == '__main__':
             f"object={object_latent_mask.float().mean().item():.4f} "
             f"hand={hand_latent_mask.float().mean().item():.4f} "
             f"artifact={role_input_path}"
+        )
+    elif hand_role_enabled:
+        hand_input_path = Path(args.save_path).with_suffix(
+            ".hand_role_input.npz"
+        )
+        np.savez_compressed(
+            hand_input_path,
+            hand_latent_mask=hand_latent_mask.float().cpu().numpy(),
+            white_threshold=np.array(args.mask_white_threshold),
+        )
+        print(
+            "HAND_ROLE_INPUT "
+            f"hand={hand_latent_mask.float().mean().item():.4f} "
+            f"artifact={hand_input_path}"
         )
 
     # first frame condition
@@ -385,11 +439,20 @@ if __name__ == '__main__':
         ),
         oracle_hand_mask=(
             None
-            if hand_latent_mask is None
+            if not oracle_role_enabled
+            else hand_latent_mask.unsqueeze(0).to(device=device)
+        ),
+        hand_only_mask=(
+            None
+            if not hand_role_enabled
             else hand_latent_mask.unsqueeze(0).to(device=device)
         ),
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,
+        hand_posterior_threshold=args.hand_posterior_threshold,
+        hand_max_object_coverage=args.hand_max_object_coverage,
+        hand_proximity_radius=args.hand_proximity_radius,
+        hand_propagation_steps=args.hand_propagation_steps,
         contact_graph_mode=args.contact_graph_mode,
         contact_graph_topk=args.contact_graph_topk,
         contact_graph_radius=args.contact_graph_radius,

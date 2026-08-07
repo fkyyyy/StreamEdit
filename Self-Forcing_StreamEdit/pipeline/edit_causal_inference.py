@@ -17,6 +17,7 @@ from .contact_graph import (
     build_oracle_contact_graphs,
     contact_graph_stats,
 )
+from .hand_role_inference import HandRoleInferencer
 from .role_router import (
     ResidualRoleFlowRouter,
     RoleFlowRouter,
@@ -100,8 +101,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
         routing_mode: str = "dynamic_sog",
         oracle_object_mask: Optional[torch.Tensor] = None,
         oracle_hand_mask: Optional[torch.Tensor] = None,
+        hand_only_mask: Optional[torch.Tensor] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
+        hand_posterior_threshold: float = 0.20,
+        hand_max_object_coverage: float = 0.18,
+        hand_proximity_radius: int = 3,
+        hand_propagation_steps: int = 2,
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -119,6 +125,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         for name, mask in (
             ("oracle_object_mask", oracle_object_mask),
             ("oracle_hand_mask", oracle_hand_mask),
+            ("hand_only_mask", hand_only_mask),
         ):
             if mask is not None and tuple(mask.shape) != expected_role_shape:
                 raise ValueError(
@@ -154,8 +161,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 routing_mode=routing_mode,
                 oracle_object_mask=oracle_object_mask,
                 oracle_hand_mask=oracle_hand_mask,
+                hand_only_mask=hand_only_mask,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
+                hand_posterior_threshold=hand_posterior_threshold,
+                hand_max_object_coverage=hand_max_object_coverage,
+                hand_proximity_radius=hand_proximity_radius,
+                hand_propagation_steps=hand_propagation_steps,
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
                 contact_graph_radius=contact_graph_radius,
@@ -189,6 +201,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     None if oracle_hand_mask is None
                     else oracle_hand_mask[:, start_idx:chunk_right_idx]
                 )
+                rollout_hand_only_mask = (
+                    None if hand_only_mask is None
+                    else hand_only_mask[:, start_idx:chunk_right_idx]
+                )
             else:
                 rollout_src_video = src_video[:, start_idx + rollout_overlap: chunk_right_idx]
                 rollout_object_mask = (
@@ -198,6 +214,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 rollout_hand_mask = (
                     None if oracle_hand_mask is None
                     else oracle_hand_mask[:, start_idx + rollout_overlap:chunk_right_idx]
+                )
+                rollout_hand_only_mask = (
+                    None if hand_only_mask is None
+                    else hand_only_mask[
+                        :, start_idx + rollout_overlap:chunk_right_idx
+                    ]
                 )
 
             # inference
@@ -231,8 +253,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 routing_mode=routing_mode,
                 oracle_object_mask=rollout_object_mask,
                 oracle_hand_mask=rollout_hand_mask,
+                hand_only_mask=rollout_hand_only_mask,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
+                hand_posterior_threshold=hand_posterior_threshold,
+                hand_max_object_coverage=hand_max_object_coverage,
+                hand_proximity_radius=hand_proximity_radius,
+                hand_propagation_steps=hand_propagation_steps,
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
                 contact_graph_radius=contact_graph_radius,
@@ -309,8 +336,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
         routing_mode: str = "dynamic_sog",
         oracle_object_mask: Optional[torch.Tensor] = None,
         oracle_hand_mask: Optional[torch.Tensor] = None,
+        hand_only_mask: Optional[torch.Tensor] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
+        hand_posterior_threshold: float = 0.20,
+        hand_max_object_coverage: float = 0.18,
+        hand_proximity_radius: int = 3,
+        hand_propagation_steps: int = 2,
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -335,12 +367,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "oracle_role_flow_kv",
             "oracle_role_residual_kv",
         }
+        hand_role_enabled = routing_mode == "hand_role_residual_kv"
+        consistent_role_kv_enabled = oracle_kv_enabled or hand_role_enabled
         if routing_mode not in {
             "dynamic_sog",
             "oracle_role_flow",
             "oracle_role_flow_kv",
             "oracle_role_residual",
             "oracle_role_residual_kv",
+            "hand_role_residual_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
         if not 0.0 <= contact_target_weight <= 1.0:
@@ -348,6 +383,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "contact_target_weight must lie in [0, 1], got "
                 f"{contact_target_weight}"
             )
+        if not 0.0 <= hand_posterior_threshold <= 1.0:
+            raise ValueError("hand_posterior_threshold must be in [0, 1]")
+        if not 0.0 < hand_max_object_coverage <= 1.0:
+            raise ValueError("hand_max_object_coverage must be in (0, 1]")
+        if hand_proximity_radius < 0:
+            raise ValueError("hand_proximity_radius must be non-negative")
+        if hand_propagation_steps < 0:
+            raise ValueError("hand_propagation_steps must be non-negative")
         if contact_graph_mode not in CONTACT_GRAPH_MODES:
             raise ValueError(
                 f"Unsupported contact_graph_mode: {contact_graph_mode}"
@@ -404,6 +447,23 @@ class EditCausalInferencePipeline(torch.nn.Module):
             )
             if save_role_dir is not None:
                 os.makedirs(save_role_dir, exist_ok=True)
+        if hand_role_enabled:
+            expected_role_shape = (batch_size, num_frames, height, width)
+            if hand_only_mask is None:
+                raise ValueError(
+                    "hand_role_residual_kv requires hand_only_mask"
+                )
+            if tuple(hand_only_mask.shape) != expected_role_shape:
+                raise ValueError(
+                    f"hand_only_mask must have shape {expected_role_shape}, "
+                    f"got {tuple(hand_only_mask.shape)}"
+                )
+            hand_only_mask = hand_only_mask.to(
+                device=src_video.device,
+                dtype=torch.bool,
+            )
+            if save_role_dir is not None:
+                os.makedirs(save_role_dir, exist_ok=True)
         if routing_mode in {
             "oracle_role_residual",
             "oracle_role_residual_kv",
@@ -412,6 +472,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "ORACLE_ROLE_RESIDUAL "
                 f"mode={routing_mode} "
                 f"contact_target_weight={contact_target_weight:.3f}"
+            )
+        if hand_role_enabled:
+            print(
+                "HAND_ROLE_RESIDUAL "
+                f"posterior_threshold={hand_posterior_threshold:.3f} "
+                f"max_object_coverage={hand_max_object_coverage:.3f} "
+                f"proximity_radius={hand_proximity_radius} "
+                f"propagation_steps={hand_propagation_steps}"
             )
         # #region debug-point B:network-reporter
         def _debug_report(hypothesis_id, location, msg, data):
@@ -525,6 +593,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
         self._initialize_noise_statistics(reuse_noise_temporal_mean)
         role_flow_router = RoleFlowRouter()
         residual_role_flow_router = ResidualRoleFlowRouter()
+        hand_role_inferencer = HandRoleInferencer(
+            hand_proximity_radius=hand_proximity_radius,
+            propagation_steps=hand_propagation_steps,
+            max_object_coverage=hand_max_object_coverage,
+        )
 
         # get trigger token indices
         trans_tokenizer = self.text_encoder.tokenizer.tokenizer
@@ -628,10 +701,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 crossattn_cache=crossattn_cache_src,
                 current_start=current_start_frame * self.frame_seq_length,
             )
-            _, src_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_src)
+            src_fg_mask_soft, src_fg_mask_bin, _, _ = (
+                self._aggregate_crossattn_mask(crossattn_cache_src)
+            )
             current_roles = None
             role_edit_tokens = None
             contact_graphs = None
+            hand_role_debug = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
                 role_right = role_left + current_num_frames
@@ -718,6 +794,46 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             contact_graphs,
                             contact_graph_mode,
                         )
+            elif hand_role_enabled:
+                role_left = current_start_frame - num_input_frames
+                role_right = role_left + current_num_frames
+                inferred = hand_role_inferencer(
+                    source_attention=src_fg_mask_soft,
+                    hand_mask=hand_only_mask[:, role_left:role_right],
+                )
+                current_roles = inferred.roles
+                hand_role_debug = inferred.debug
+                role_edit_tokens = (
+                    inferred.token_edit_confidence
+                    >= hand_posterior_threshold
+                )
+                role_coverage = {
+                    name: value.mean().item()
+                    for name, value in current_roles.as_dict().items()
+                }
+                print(
+                    "HAND_ROLE_FLOW "
+                    f"block={current_start_frame // self.num_frame_per_block} "
+                    f"edit_tokens={role_edit_tokens.float().mean().item():.4f} "
+                    + " ".join(
+                        f"{name}={coverage:.4f}"
+                        for name, coverage in role_coverage.items()
+                    )
+                )
+                if save_role_dir is not None:
+                    block_index = (
+                        current_start_frame // self.num_frame_per_block
+                    )
+                    self._save_role_state(
+                        save_role_dir,
+                        block_index,
+                        current_roles,
+                    )
+                    self._save_hand_role_debug(
+                        save_role_dir,
+                        block_index,
+                        hand_role_debug,
+                    )
             shared_dict_dual.update({
                 "contact_graph_mode": contact_graph_mode,
                 "contact_graphs": contact_graphs,
@@ -726,7 +842,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "contact_graph_layer_end": contact_graph_layer_end,
             })
             effective_src_fg_mask = (
-                role_edit_tokens if oracle_kv_enabled else src_fg_mask_bin
+                role_edit_tokens
+                if consistent_role_kv_enabled
+                else src_fg_mask_bin
             )
             self._inject_masks_to_kv_cache(
                 kv_cache_dual,
@@ -834,6 +952,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 if routing_mode in {
                     "oracle_role_residual",
                     "oracle_role_residual_kv",
+                    "hand_role_residual_kv",
                 }:
                     v_t, _ = residual_role_flow_router(
                         target_velocity=v_trg,
@@ -897,7 +1016,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             },
                         )
                     # #endregion
-                    if oracle_kv_enabled:
+                    if consistent_role_kv_enabled:
                         inloop_trg_fg_mask = role_edit_tokens
                     self._inject_masks_to_kv_cache(
                         kv_cache_dual, trg_fg_mask_cache, inloop_trg_fg_mask, 
@@ -958,7 +1077,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             _, trg_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_trg)
             current_trg_fg_mask = (
                 role_edit_tokens
-                if oracle_kv_enabled
+                if consistent_role_kv_enabled
                 else trg_fg_mask_bin | src_fg_mask_bin
             )
             self._update_trg_fg_mask_cache(trg_fg_mask_cache, current_trg_fg_mask, kv_cache_trg)
@@ -1036,6 +1155,38 @@ class EditCausalInferencePipeline(torch.nn.Module):
             ).save(
                 os.path.join(
                     save_dir, f"block_{block_index:03d}_{name}.png"
+                )
+            )
+
+    @staticmethod
+    def _save_hand_role_debug(
+        save_dir,
+        block_index,
+        debug,
+    ):
+        np.savez_compressed(
+            os.path.join(
+                save_dir,
+                f"block_{block_index:03d}_hand_role_debug.npz",
+            ),
+            **{
+                name: value.detach().float().cpu().numpy()
+                for name, value in debug.items()
+            },
+        )
+        for name, value in debug.items():
+            strip = value[0].detach().float().cpu().numpy()
+            strip = np.concatenate(
+                list((strip * 255).clip(0, 255).astype(np.uint8)),
+                axis=0,
+            )
+            Image.fromarray(strip, mode="L").resize(
+                (832, strip.shape[0] * 16),
+                Image.Resampling.NEAREST,
+            ).save(
+                os.path.join(
+                    save_dir,
+                    f"block_{block_index:03d}_{name}.png",
                 )
             )
 
