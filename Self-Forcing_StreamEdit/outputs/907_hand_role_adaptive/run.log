@@ -1,0 +1,142 @@
+Free VRAM 104.0135498046875 GB
+KV inference with 3 frames per block
+81 960 1280
+HAND_ROLE_INPUT hand=0.0590 artifact=/opt/tiger/CausalForcing/stream/StreamEdit/Self-Forcing_StreamEdit/outputs/907_hand_role_adaptive/907-hand-role-adaptive.hand_role_input.npz
+HAND_ROLE_ADAPTIVE online_radius=True online_visibility=True online_temporal=True online_threshold=True online_field_reliability=True
+[[5, 6, 7, 8, 9, 10]] [[5, 6, 7, 8, 9]]
+  0%|          | 0/7 [00:00<?, ?it/s]HAND_ROLE_FLOW block=0 edit_tokens=0.0579 visible=1.0000 temporal=0.0088 adaptive=1 object=0.0192 boundary=0.0185 hand=0.0384 background=0.9238 radius=4.000 attention_reliability=0.740 threshold=0.172 budget=0.197
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:01<00:20,  1.46s/it][A
+ 13%|█▎        | 2/15 [00:02<00:15,  1.18s/it][A
+ 20%|██        | 3/15 [00:03<00:13,  1.09s/it][A
+ 27%|██▋       | 4/15 [00:04<00:11,  1.04s/it][A
+ 33%|███▎      | 5/15 [00:05<00:10,  1.02s/it][A
+ 40%|████      | 6/15 [00:06<00:09,  1.01s/it][A
+ 47%|████▋     | 7/15 [00:07<00:07,  1.00it/s][A
+ 53%|█████▎    | 8/15 [00:08<00:07,  1.06s/it][A
+ 60%|██████    | 9/15 [00:09<00:06,  1.08s/it][A
+ 67%|██████▋   | 10/15 [00:10<00:05,  1.10s/it][A
+ 73%|███████▎  | 11/15 [00:11<00:04,  1.11s/it][A
+ 80%|████████  | 12/15 [00:13<00:03,  1.11s/it][A
+ 87%|████████▋ | 13/15 [00:14<00:02,  1.12s/it][A
+ 93%|█████████▎| 14/15 [00:15<00:01,  1.12s/it][A
+100%|██████████| 15/15 [00:16<00:00,  1.13s/it][A
+                                               [A 14%|█▍        | 1/7 [00:17<01:46, 17.69s/it]HAND_ROLE_FIELD block=0 mode=adaptive edit_tokens=0.0566 field=0.1429 observation=0.9310 reliability=0.1719
+HAND_ROLE_FLOW block=1 edit_tokens=0.1028 visible=1.0000 temporal=0.0045 adaptive=1 object=0.0195 boundary=0.0274 hand=0.0677 background=0.8854 radius=4.667 attention_reliability=0.798 threshold=0.041 budget=0.236
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:01<00:20,  1.48s/it][A
+ 13%|█▎        | 2/15 [00:02<00:15,  1.20s/it][A
+ 20%|██        | 3/15 [00:03<00:13,  1.11s/it][A
+ 27%|██▋       | 4/15 [00:04<00:11,  1.07s/it][A
+ 33%|███▎      | 5/15 [00:05<00:10,  1.05s/it][A
+ 40%|████      | 6/15 [00:06<00:09,  1.03s/it][A
+ 47%|████▋     | 7/15 [00:07<00:08,  1.03s/it][A
+ 53%|█████▎    | 8/15 [00:08<00:07,  1.09s/it][A
+ 60%|██████    | 9/15 [00:09<00:06,  1.11s/it][A
+ 67%|██████▋   | 10/15 [00:11<00:05,  1.13s/it][A
+ 73%|███████▎  | 11/15 [00:12<00:04,  1.14s/it][A
+ 80%|████████  | 12/15 [00:13<00:03,  1.14s/it][A
+ 87%|████████▋ | 13/15 [00:14<00:02,  1.15s/it][A
+ 93%|█████████▎| 14/15 [00:15<00:01,  1.15s/it][A
+100%|██████████| 15/15 [00:16<00:00,  1.16s/it][A
+                                               [A 29%|██▊       | 2/7 [00:35<01:28, 17.76s/it]HAND_ROLE_FIELD block=1 mode=adaptive edit_tokens=0.1021 field=0.1251 observation=0.9199 reliability=0.1664
+HAND_ROLE_FLOW block=2 edit_tokens=0.1000 visible=1.0000 temporal=0.0113 adaptive=1 object=0.0153 boundary=0.0194 hand=0.0638 background=0.9015 radius=4.000 attention_reliability=0.765 threshold=0.006 budget=0.212
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:01<00:22,  1.58s/it][A
+ 13%|█▎        | 2/15 [00:02<00:16,  1.31s/it][A
+ 20%|██        | 3/15 [00:03<00:14,  1.22s/it][A
+ 27%|██▋       | 4/15 [00:04<00:12,  1.17s/it][A
+ 33%|███▎      | 5/15 [00:06<00:11,  1.15s/it][A
+ 40%|████      | 6/15 [00:07<00:10,  1.14s/it][A
+ 47%|████▋     | 7/15 [00:08<00:09,  1.13s/it][A
+ 53%|█████▎    | 8/15 [00:09<00:08,  1.19s/it][A
+ 60%|██████    | 9/15 [00:10<00:07,  1.21s/it][A
+ 67%|██████▋   | 10/15 [00:12<00:06,  1.23s/it][A
+ 73%|███████▎  | 11/15 [00:13<00:04,  1.24s/it][A
+ 80%|████████  | 12/15 [00:14<00:03,  1.25s/it][A
+ 87%|████████▋ | 13/15 [00:15<00:02,  1.25s/it][A
+ 93%|█████████▎| 14/15 [00:17<00:01,  1.25s/it][A
+100%|██████████| 15/15 [00:18<00:00,  1.26s/it][A
+                                               [A 43%|████▎     | 3/7 [00:54<01:14, 18.51s/it]HAND_ROLE_FIELD block=2 mode=adaptive edit_tokens=0.0970 field=0.1511 observation=0.6810 reliability=0.3460
+HAND_ROLE_FLOW block=3 edit_tokens=0.1197 visible=1.0000 temporal=0.0047 adaptive=1 object=0.0228 boundary=0.0328 hand=0.0775 background=0.8670 radius=5.000 attention_reliability=0.788 threshold=0.038 budget=0.238
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:01<00:22,  1.62s/it][A
+ 13%|█▎        | 2/15 [00:02<00:17,  1.33s/it][A
+ 20%|██        | 3/15 [00:03<00:14,  1.24s/it][A
+ 27%|██▋       | 4/15 [00:05<00:13,  1.20s/it][A
+ 33%|███▎      | 5/15 [00:06<00:11,  1.18s/it][A
+ 40%|████      | 6/15 [00:07<00:10,  1.16s/it][A
+ 47%|████▋     | 7/15 [00:08<00:09,  1.16s/it][A
+ 53%|█████▎    | 8/15 [00:09<00:08,  1.22s/it][A
+ 60%|██████    | 9/15 [00:11<00:07,  1.26s/it][A
+ 67%|██████▋   | 10/15 [00:12<00:06,  1.29s/it][A
+ 73%|███████▎  | 11/15 [00:13<00:05,  1.32s/it][A
+ 80%|████████  | 12/15 [00:15<00:03,  1.33s/it][A
+ 87%|████████▋ | 13/15 [00:16<00:02,  1.34s/it][A
+ 93%|█████████▎| 14/15 [00:17<00:01,  1.35s/it][A
+100%|██████████| 15/15 [00:19<00:00,  1.36s/it][A
+                                               [A 57%|█████▋    | 4/7 [01:15<00:57, 19.29s/it]HAND_ROLE_FIELD block=3 mode=adaptive edit_tokens=0.1107 field=0.1402 observation=0.6382 reliability=0.3533
+HAND_ROLE_FLOW block=4 edit_tokens=0.0835 visible=1.0000 temporal=0.0054 adaptive=1 object=0.0161 boundary=0.0134 hand=0.0574 background=0.9131 radius=4.000 attention_reliability=0.579 threshold=0.020 budget=0.208
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:01<00:23,  1.71s/it][A
+ 13%|█▎        | 2/15 [00:02<00:18,  1.44s/it][A
+ 20%|██        | 3/15 [00:04<00:16,  1.35s/it][A
+ 27%|██▋       | 4/15 [00:05<00:14,  1.30s/it][A
+ 33%|███▎      | 5/15 [00:06<00:12,  1.28s/it][A
+ 40%|████      | 6/15 [00:07<00:11,  1.27s/it][A
+ 47%|████▋     | 7/15 [00:09<00:10,  1.26s/it][A
+ 53%|█████▎    | 8/15 [00:10<00:09,  1.32s/it][A
+ 60%|██████    | 9/15 [00:12<00:08,  1.34s/it][A
+ 67%|██████▋   | 10/15 [00:13<00:06,  1.36s/it][A
+ 73%|███████▎  | 11/15 [00:14<00:05,  1.37s/it][A
+ 80%|████████  | 12/15 [00:16<00:04,  1.38s/it][A
+ 87%|████████▋ | 13/15 [00:17<00:02,  1.38s/it][A
+ 93%|█████████▎| 14/15 [00:18<00:01,  1.39s/it][A
+100%|██████████| 15/15 [00:20<00:00,  1.39s/it][A
+                                               [A 71%|███████▏  | 5/7 [01:36<00:40, 20.09s/it]HAND_ROLE_FIELD block=4 mode=adaptive edit_tokens=0.0831 field=0.1573 observation=0.9611 reliability=0.1068
+HAND_ROLE_FLOW block=5 edit_tokens=0.0276 visible=0.3333 temporal=0.0033 adaptive=1 object=0.0043 boundary=0.0017 hand=0.0195 background=0.9745 radius=2.667 attention_reliability=0.551 threshold=0.422 budget=0.115
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:01<00:24,  1.73s/it][A
+ 13%|█▎        | 2/15 [00:03<00:18,  1.46s/it][A
+ 20%|██        | 3/15 [00:04<00:16,  1.37s/it][A
+ 27%|██▋       | 4/15 [00:05<00:14,  1.33s/it][A
+ 33%|███▎      | 5/15 [00:06<00:13,  1.31s/it][A
+ 40%|████      | 6/15 [00:08<00:11,  1.29s/it][A
+ 47%|████▋     | 7/15 [00:09<00:10,  1.29s/it][A
+ 53%|█████▎    | 8/15 [00:10<00:09,  1.35s/it][A
+ 60%|██████    | 9/15 [00:12<00:08,  1.37s/it][A
+ 67%|██████▋   | 10/15 [00:13<00:06,  1.39s/it][A
+ 73%|███████▎  | 11/15 [00:15<00:05,  1.40s/it][A
+ 80%|████████  | 12/15 [00:16<00:04,  1.40s/it][A
+ 87%|████████▋ | 13/15 [00:17<00:02,  1.41s/it][A
+ 93%|█████████▎| 14/15 [00:19<00:01,  1.41s/it][A
+100%|██████████| 15/15 [00:20<00:00,  1.42s/it][A
+                                               [A 86%|████████▌ | 6/7 [01:58<00:20, 20.72s/it]HAND_ROLE_FIELD block=5 mode=adaptive edit_tokens=0.0047 field=0.1763 observation=0.9315 reliability=0.1675
+HAND_ROLE_FLOW block=6 edit_tokens=0.0000 visible=0.0000 temporal=0.0000 adaptive=1 object=0.0000 boundary=0.0000 hand=0.0149 background=0.9851 radius=2.000 attention_reliability=0.689 threshold=0.955 budget=0.069
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:01<00:23,  1.68s/it][A
+ 13%|█▎        | 2/15 [00:02<00:18,  1.41s/it][A
+ 20%|██        | 3/15 [00:04<00:15,  1.33s/it][A
+ 27%|██▋       | 4/15 [00:05<00:14,  1.29s/it][A
+ 33%|███▎      | 5/15 [00:06<00:12,  1.26s/it][A
+ 40%|████      | 6/15 [00:07<00:11,  1.25s/it][A
+ 47%|████▋     | 7/15 [00:09<00:09,  1.24s/it][A
+ 53%|█████▎    | 8/15 [00:10<00:09,  1.30s/it][A
+ 60%|██████    | 9/15 [00:11<00:07,  1.33s/it][A
+ 67%|██████▋   | 10/15 [00:13<00:06,  1.34s/it][A
+ 73%|███████▎  | 11/15 [00:14<00:05,  1.35s/it][A
+ 80%|████████  | 12/15 [00:15<00:04,  1.36s/it][A
+ 87%|████████▋ | 13/15 [00:17<00:02,  1.37s/it][A
+ 93%|█████████▎| 14/15 [00:18<00:01,  1.37s/it][A
+100%|██████████| 15/15 [00:20<00:00,  1.38s/it][A
+                                               [A100%|██████████| 7/7 [02:20<00:00, 20.93s/it]100%|██████████| 7/7 [02:20<00:00, 20.03s/it]
+/usr/local/lib/python3.11/dist-packages/torchvision/io/_video_deprecation_warning.py:5: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+HAND_ROLE_FIELD block=6 mode=adaptive edit_tokens=0.0000 field=0.1892 observation=0.8560 reliability=0.2268
