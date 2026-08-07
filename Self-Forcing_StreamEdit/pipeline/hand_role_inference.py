@@ -87,6 +87,10 @@ class HandRoleInferencer:
         propagation_steps: int = 2,
         propagation_alpha: float = 0.55,
         max_object_coverage: float = 0.18,
+        visibility_ratio: float = 0.40,
+        temporal_weight: float = 0.45,
+        query_similarity_threshold: float = 0.65,
+        query_temperature: float = 0.07,
         eps: float = 1e-6,
     ):
         if not (
@@ -105,6 +109,16 @@ class HandRoleInferencer:
             raise ValueError("propagation_alpha must be in [0, 1]")
         if not 0.0 < max_object_coverage <= 1.0:
             raise ValueError("max_object_coverage must be in (0, 1]")
+        if not 0.0 <= visibility_ratio <= 1.0:
+            raise ValueError("visibility_ratio must be in [0, 1]")
+        if not 0.0 <= temporal_weight <= 1.0:
+            raise ValueError("temporal_weight must be in [0, 1]")
+        if not -1.0 < query_similarity_threshold < 1.0:
+            raise ValueError(
+                "query_similarity_threshold must be in (-1, 1)"
+            )
+        if query_temperature <= 0:
+            raise ValueError("query_temperature must be positive")
 
         self.attention_quantile_low = attention_quantile_low
         self.attention_quantile_high = attention_quantile_high
@@ -114,12 +128,57 @@ class HandRoleInferencer:
         self.propagation_steps = propagation_steps
         self.propagation_alpha = propagation_alpha
         self.max_object_coverage = max_object_coverage
+        self.visibility_ratio = visibility_ratio
+        self.temporal_weight = temporal_weight
+        self.query_similarity_threshold = query_similarity_threshold
+        self.query_temperature = query_temperature
         self.eps = eps
+        self.previous_features = None
+        self.previous_posterior = None
+        self.reference_interaction_support = None
+
+    def _query_affinity_propagation(
+        self,
+        current_features: torch.Tensor,
+        reference_features: torch.Tensor,
+        reference_posterior: torch.Tensor,
+    ):
+        similarity = torch.einsum(
+            "bnd,bmd->bnm",
+            current_features,
+            reference_features,
+        ).clamp(-1.0, 1.0)
+        topk = min(4, similarity.shape[-1])
+        top_similarity, top_index = similarity.topk(topk, dim=-1)
+        reference_flat = reference_posterior.flatten(1)
+        selected_posterior = reference_flat.unsqueeze(1).expand(
+            -1,
+            current_features.shape[1],
+            -1,
+        ).gather(2, top_index)
+        affinity_weight = torch.softmax(
+            (
+                top_similarity - self.query_similarity_threshold
+            ) / self.query_temperature,
+            dim=-1,
+        )
+        confidence = (
+            (
+                top_similarity[..., 0]
+                - self.query_similarity_threshold
+            )
+            / (1.0 - self.query_similarity_threshold + self.eps)
+        ).clamp(0.0, 1.0)
+        propagated = (
+            affinity_weight * selected_posterior
+        ).sum(dim=-1) * confidence
+        return propagated, confidence
 
     def __call__(
         self,
         source_attention: torch.Tensor,
         hand_mask: torch.Tensor,
+        source_features: torch.Tensor = None,
     ) -> HandRoleInferenceResult:
         if source_attention.ndim != 2:
             raise ValueError(
@@ -141,6 +200,25 @@ class HandRoleInferencer:
                 "Source attention and hand mask imply different token grids: "
                 f"expected {(batch, expected_length)}, got "
                 f"{tuple(source_attention.shape)}"
+            )
+        if source_features is not None:
+            if source_features.ndim != 3:
+                raise ValueError(
+                    "source_features must have shape [B,L,D], got "
+                    f"{tuple(source_features.shape)}"
+                )
+            if source_features.shape[:2] != source_attention.shape:
+                raise ValueError(
+                    "source_features and source_attention must share [B,L]"
+                )
+            source_features = F.normalize(
+                source_features.float(),
+                dim=-1,
+            ).reshape(
+                batch,
+                frames,
+                token_height * token_width,
+                -1,
             )
 
         attention = source_attention.reshape(
@@ -198,6 +276,32 @@ class HandRoleInferencer:
             * near_hand.float()
             * hand_present.float()
         )
+        seed_candidate = (
+            (seed_score >= seed_threshold)
+            & near_hand
+            & hand_present
+        )
+        interaction_support = (
+            seed_score * seed_candidate.float()
+        ).mean(dim=(2, 3), keepdim=True)
+        current_reference = interaction_support.amax(
+            dim=1,
+            keepdim=True,
+        ).detach()
+        if self.reference_interaction_support is None:
+            self.reference_interaction_support = current_reference
+        else:
+            self.reference_interaction_support = torch.maximum(
+                self.reference_interaction_support,
+                current_reference,
+            )
+        visibility_threshold = (
+            self.reference_interaction_support * self.visibility_ratio
+        )
+        object_visible = (
+            (self.reference_interaction_support > self.eps)
+            & (interaction_support >= visibility_threshold)
+        )
 
         candidate_threshold = torch.quantile(
             attention.flatten(2),
@@ -214,6 +318,47 @@ class HandRoleInferencer:
                 + (1.0 - self.propagation_alpha) * propagated
             )
             posterior = posterior * gate
+        posterior = posterior * object_visible.float()
+
+        temporal_posterior = torch.zeros_like(posterior)
+        temporal_confidence = torch.zeros_like(posterior)
+        if source_features is not None:
+            for frame_index in range(frames):
+                if frame_index == 0:
+                    reference_features = self.previous_features
+                    reference_posterior = self.previous_posterior
+                else:
+                    reference_features = source_features[:, frame_index - 1]
+                    reference_posterior = posterior[:, frame_index - 1]
+                if (
+                    reference_features is None
+                    or reference_posterior is None
+                ):
+                    continue
+                propagated, confidence = self._query_affinity_propagation(
+                    source_features[:, frame_index],
+                    reference_features,
+                    reference_posterior,
+                )
+                propagated = propagated.reshape(
+                    batch,
+                    token_height,
+                    token_width,
+                )
+                confidence = confidence.reshape(
+                    batch,
+                    token_height,
+                    token_width,
+                )
+                temporal_posterior[:, frame_index] = propagated
+                temporal_confidence[:, frame_index] = confidence
+                semantic_gate = 0.20 + 0.80 * attention[:, frame_index]
+                posterior[:, frame_index] = torch.maximum(
+                    posterior[:, frame_index],
+                    self.temporal_weight
+                    * propagated
+                    * semantic_gate,
+                ) * object_visible[:, frame_index].float()
 
         coverage_threshold = torch.quantile(
             posterior.flatten(2),
@@ -224,8 +369,11 @@ class HandRoleInferencer:
         posterior = (
             posterior
             * (posterior >= coverage_threshold).float()
-            * hand_present.float()
+            * object_visible.float()
         ).clamp(0.0, 1.0)
+        if source_features is not None:
+            self.previous_features = source_features[:, -1].detach()
+            self.previous_posterior = posterior[:, -1].detach()
 
         posterior_latent = F.interpolate(
             posterior.reshape(
@@ -258,6 +406,13 @@ class HandRoleInferencer:
                 "hand_probability": hand_probability,
                 "hand_proximity": proximity,
                 "object_seed": seed,
+                "interaction_support": interaction_support,
+                "visibility_threshold": visibility_threshold.expand_as(
+                    interaction_support
+                ),
+                "object_visible": object_visible.float(),
+                "temporal_posterior": temporal_posterior,
+                "temporal_confidence": temporal_confidence,
                 "object_posterior": posterior,
             },
         )

@@ -16,6 +16,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from torch.nn.attention.flex_attention import BlockMask
 from diffusers.models.modeling_utils import ModelMixin
 import torch.nn as nn
+import torch.nn.functional as F
 import torch
 import math
 import torch.distributed as dist
@@ -168,6 +169,14 @@ class CausalWanSelfAttention(nn.Module):
             return q, k, v
 
         q, k, v = qkv_fn(x)
+        if (
+            isinstance(kv_cache, dict)
+            and kv_cache.pop("capture_current_query", False)
+        ):
+            kv_cache["current_query_feature"] = F.normalize(
+                q.detach().float().mean(dim=2),
+                dim=-1,
+            ).to(dtype=v.dtype)
 
         if kv_cache is None:
             # if it is teacher forcing training?

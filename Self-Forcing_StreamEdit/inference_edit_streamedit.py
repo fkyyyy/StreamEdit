@@ -201,6 +201,31 @@ if __name__ == '__main__':
         default=2,
         help="Spatial propagation steps for hand-only object discovery.",
     )
+    parser.add_argument(
+        "--hand_visibility_ratio",
+        type=float,
+        default=0.40,
+        help="Relative interaction-support threshold for object visibility.",
+    )
+    parser.add_argument(
+        "--hand_temporal_weight",
+        type=float,
+        default=0.45,
+        help="Weight of source-query temporal posterior propagation.",
+    )
+    parser.add_argument(
+        "--hand_query_similarity_threshold",
+        type=float,
+        default=0.65,
+        help="Minimum cosine confidence for source-query propagation.",
+    )
+    parser.add_argument(
+        "--hand_query_layers",
+        type=int,
+        nargs="+",
+        default=[8, 12, 16, 20],
+        help="Transformer layers used to form clean-source query features.",
+    )
     parser.add_argument("--role_boundary_radius", type=int, default=1)
     parser.add_argument(
         "--contact_target_weight",
@@ -275,6 +300,20 @@ if __name__ == '__main__':
         parser.error("--hand_proximity_radius must be non-negative")
     if args.hand_propagation_steps < 0:
         parser.error("--hand_propagation_steps must be non-negative")
+    if not 0.0 <= args.hand_visibility_ratio <= 1.0:
+        parser.error("--hand_visibility_ratio must be in [0, 1]")
+    if not 0.0 <= args.hand_temporal_weight <= 1.0:
+        parser.error("--hand_temporal_weight must be in [0, 1]")
+    if not -1.0 < args.hand_query_similarity_threshold < 1.0:
+        parser.error(
+            "--hand_query_similarity_threshold must be in (-1, 1)"
+        )
+    if not args.hand_query_layers or any(
+        layer < 0 or layer >= 30 for layer in args.hand_query_layers
+    ):
+        parser.error(
+            "--hand_query_layers must contain values in [0, 29]"
+        )
     if (
         args.contact_graph_mode != "no_graph"
         and args.routing_mode != "oracle_role_residual_kv"
@@ -453,6 +492,12 @@ if __name__ == '__main__':
         hand_max_object_coverage=args.hand_max_object_coverage,
         hand_proximity_radius=args.hand_proximity_radius,
         hand_propagation_steps=args.hand_propagation_steps,
+        hand_visibility_ratio=args.hand_visibility_ratio,
+        hand_temporal_weight=args.hand_temporal_weight,
+        hand_query_similarity_threshold=(
+            args.hand_query_similarity_threshold
+        ),
+        hand_query_layers=args.hand_query_layers,
         contact_graph_mode=args.contact_graph_mode,
         contact_graph_topk=args.contact_graph_topk,
         contact_graph_radius=args.contact_graph_radius,

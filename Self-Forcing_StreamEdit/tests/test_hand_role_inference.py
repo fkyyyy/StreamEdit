@@ -98,3 +98,45 @@ def test_bfloat16_attention_is_normalized_in_float32():
 
     assert result.token_edit_confidence.dtype == torch.float32
     assert torch.isfinite(result.token_edit_confidence).all()
+
+
+def test_visibility_gate_clears_frame_without_interaction_support():
+    attention = torch.cat(
+        [
+            _attention(),
+            torch.zeros_like(_attention()),
+        ],
+        dim=1,
+    )
+    hand = _hand().repeat(1, 2, 1, 1)
+    result = hand_role.HandRoleInferencer(
+        visibility_ratio=0.40,
+    )(attention, hand)
+    posterior = result.token_edit_confidence.reshape(1, 2, 4, 4)
+
+    assert result.debug["object_visible"][0, 0].item() == 1.0
+    assert result.debug["object_visible"][0, 1].item() == 0.0
+    assert torch.count_nonzero(posterior[:, 1]) == 0
+
+
+def test_query_affinity_propagates_previous_object_posterior():
+    attention = _attention().repeat(1, 2)
+    hand = _hand().repeat(1, 2, 1, 1)
+    token_identity = torch.eye(16)
+    source_features = torch.cat(
+        [token_identity, token_identity],
+        dim=0,
+    ).unsqueeze(0)
+
+    result = hand_role.HandRoleInferencer(
+        visibility_ratio=0.0,
+        temporal_weight=0.75,
+        query_similarity_threshold=0.5,
+    )(
+        attention,
+        hand,
+        source_features=source_features,
+    )
+
+    assert result.debug["temporal_posterior"][:, 1].max() > 0
+    assert result.debug["temporal_confidence"][:, 1].max() > 0

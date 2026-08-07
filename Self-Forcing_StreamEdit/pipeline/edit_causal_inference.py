@@ -108,6 +108,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_max_object_coverage: float = 0.18,
         hand_proximity_radius: int = 3,
         hand_propagation_steps: int = 2,
+        hand_visibility_ratio: float = 0.40,
+        hand_temporal_weight: float = 0.45,
+        hand_query_similarity_threshold: float = 0.65,
+        hand_query_layers: Iterable = (8, 12, 16, 20),
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -168,6 +172,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 hand_max_object_coverage=hand_max_object_coverage,
                 hand_proximity_radius=hand_proximity_radius,
                 hand_propagation_steps=hand_propagation_steps,
+                hand_visibility_ratio=hand_visibility_ratio,
+                hand_temporal_weight=hand_temporal_weight,
+                hand_query_similarity_threshold=(
+                    hand_query_similarity_threshold
+                ),
+                hand_query_layers=hand_query_layers,
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
                 contact_graph_radius=contact_graph_radius,
@@ -260,6 +270,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 hand_max_object_coverage=hand_max_object_coverage,
                 hand_proximity_radius=hand_proximity_radius,
                 hand_propagation_steps=hand_propagation_steps,
+                hand_visibility_ratio=hand_visibility_ratio,
+                hand_temporal_weight=hand_temporal_weight,
+                hand_query_similarity_threshold=(
+                    hand_query_similarity_threshold
+                ),
+                hand_query_layers=hand_query_layers,
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
                 contact_graph_radius=contact_graph_radius,
@@ -343,6 +359,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_max_object_coverage: float = 0.18,
         hand_proximity_radius: int = 3,
         hand_propagation_steps: int = 2,
+        hand_visibility_ratio: float = 0.40,
+        hand_temporal_weight: float = 0.45,
+        hand_query_similarity_threshold: float = 0.65,
+        hand_query_layers: Iterable = (8, 12, 16, 20),
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -391,6 +411,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
             raise ValueError("hand_proximity_radius must be non-negative")
         if hand_propagation_steps < 0:
             raise ValueError("hand_propagation_steps must be non-negative")
+        if not 0.0 <= hand_visibility_ratio <= 1.0:
+            raise ValueError("hand_visibility_ratio must be in [0, 1]")
+        if not 0.0 <= hand_temporal_weight <= 1.0:
+            raise ValueError("hand_temporal_weight must be in [0, 1]")
+        if not -1.0 < hand_query_similarity_threshold < 1.0:
+            raise ValueError(
+                "hand_query_similarity_threshold must be in (-1, 1)"
+            )
+        hand_query_layers = tuple(hand_query_layers)
+        if not hand_query_layers:
+            raise ValueError("hand_query_layers must not be empty")
+        if any(
+            layer < 0 or layer >= self.num_transformer_blocks
+            for layer in hand_query_layers
+        ):
+            raise ValueError(
+                "hand_query_layers must contain valid transformer layers"
+            )
         if contact_graph_mode not in CONTACT_GRAPH_MODES:
             raise ValueError(
                 f"Unsupported contact_graph_mode: {contact_graph_mode}"
@@ -479,7 +517,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 f"posterior_threshold={hand_posterior_threshold:.3f} "
                 f"max_object_coverage={hand_max_object_coverage:.3f} "
                 f"proximity_radius={hand_proximity_radius} "
-                f"propagation_steps={hand_propagation_steps}"
+                f"propagation_steps={hand_propagation_steps} "
+                f"visibility_ratio={hand_visibility_ratio:.3f} "
+                f"temporal_weight={hand_temporal_weight:.3f} "
+                f"query_layers={hand_query_layers}"
             )
         # #region debug-point B:network-reporter
         def _debug_report(hypothesis_id, location, msg, data):
@@ -597,6 +638,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
             hand_proximity_radius=hand_proximity_radius,
             propagation_steps=hand_propagation_steps,
             max_object_coverage=hand_max_object_coverage,
+            visibility_ratio=hand_visibility_ratio,
+            temporal_weight=hand_temporal_weight,
+            query_similarity_threshold=(
+                hand_query_similarity_threshold
+            ),
         )
 
         # get trigger token indices
@@ -693,6 +739,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
             #✨ forward clean source video to get source mask, and store into kv_cache
             self._register_crossattn_mask_gatherer(crossattn_cache_src, tok_src, layers=mask_layers, fg_scale=fg_scale)
+            if hand_role_enabled:
+                self._register_query_capture(
+                    kv_cache_src,
+                    hand_query_layers,
+                )
             self.generator(
                 noisy_image_or_video=src_input,
                 conditional_dict=src_conditional_dict,
@@ -703,6 +754,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
             )
             src_fg_mask_soft, src_fg_mask_bin, _, _ = (
                 self._aggregate_crossattn_mask(crossattn_cache_src)
+            )
+            source_query_features = (
+                self._aggregate_query_features(
+                    kv_cache_src,
+                    hand_query_layers,
+                )
+                if hand_role_enabled
+                else None
             )
             current_roles = None
             role_edit_tokens = None
@@ -800,6 +859,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 inferred = hand_role_inferencer(
                     source_attention=src_fg_mask_soft,
                     hand_mask=hand_only_mask[:, role_left:role_right],
+                    source_features=source_query_features,
                 )
                 current_roles = inferred.roles
                 hand_role_debug = inferred.debug
@@ -815,6 +875,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     "HAND_ROLE_FLOW "
                     f"block={current_start_frame // self.num_frame_per_block} "
                     f"edit_tokens={role_edit_tokens.float().mean().item():.4f} "
+                    f"visible={hand_role_debug['object_visible'].mean().item():.4f} "
+                    f"temporal={hand_role_debug['temporal_posterior'].mean().item():.4f} "
                     + " ".join(
                         f"{name}={coverage:.4f}"
                         for name, coverage in role_coverage.items()
@@ -1340,6 +1402,23 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "trg_fg_mask": trg_fg_mask_cache['trg_fg_mask'],
                 "current_src_fg_mask": current_src_fg_mask,
             })
+
+    @staticmethod
+    def _register_query_capture(kv_cache, layers):
+        for layer_index in layers:
+            kv_cache[layer_index]["capture_current_query"] = True
+
+    @staticmethod
+    def _aggregate_query_features(kv_cache, layers):
+        features = []
+        for layer_index in layers:
+            feature = kv_cache[layer_index].get("current_query_feature")
+            if feature is None:
+                raise RuntimeError(
+                    f"Missing captured source query at layer {layer_index}"
+                )
+            features.append(F.normalize(feature.float(), dim=-1))
+        return F.normalize(torch.stack(features).mean(dim=0), dim=-1)
     
     def _kv_cache_to(self, kvc, device, low_memory):
         if not low_memory:
