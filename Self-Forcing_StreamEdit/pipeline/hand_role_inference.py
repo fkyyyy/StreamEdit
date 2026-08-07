@@ -264,6 +264,7 @@ class HandRoleInferencer:
                     prior_threshold=prior.debug[
                         "posterior_threshold"
                     ].float(),
+                    update_state=apply_update,
                 )
             )
             field_candidate = prior_posterior > self.eps

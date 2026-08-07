@@ -169,6 +169,7 @@ if __name__ == '__main__':
             "oracle_role_residual_kv",
             "hand_role_residual_kv",
             "hand_role_adaptive_kv",
+            "hand_role_posterior_flow_kv",
         ],
         default="dynamic_sog",
     )
@@ -277,6 +278,24 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        "--posterior_flow_mode",
+        choices=["soft", "hard"],
+        default="soft",
+        help=(
+            "Use soft role probabilities or hard argmax roles for "
+            "posterior-routed residual vector fields."
+        ),
+    )
+    parser.add_argument(
+        "--posterior_flow_use_field",
+        action="store_true",
+        help=(
+            "Allow target-dependent field evidence to update the adaptive "
+            "posterior in posterior-flow mode. Disabled for clean routing "
+            "ablations."
+        ),
+    )
+    parser.add_argument(
         "--contact_graph_mode",
         choices=[
             "no_graph",
@@ -321,6 +340,7 @@ if __name__ == '__main__':
     hand_role_enabled = args.routing_mode in {
         "hand_role_residual_kv",
         "hand_role_adaptive_kv",
+        "hand_role_posterior_flow_kv",
     }
     if oracle_role_enabled and (
         args.object_mask_video is None or args.hand_mask_video is None
@@ -548,6 +568,8 @@ if __name__ == '__main__':
         ),
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,
+        posterior_flow_mode=args.posterior_flow_mode,
+        posterior_flow_use_field=args.posterior_flow_use_field,
         hand_posterior_threshold=args.hand_posterior_threshold,
         hand_max_object_coverage=args.hand_max_object_coverage,
         hand_proximity_radius=args.hand_proximity_radius,

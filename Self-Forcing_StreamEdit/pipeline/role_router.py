@@ -45,6 +45,10 @@ class RoleState:
     def preserve_weight(self) -> torch.Tensor:
         return self.hand + self.background
 
+    @property
+    def contact(self) -> torch.Tensor:
+        return self.boundary
+
     def validate(self) -> None:
         shapes = {tuple(value.shape) for value in self.as_dict().values()}
         if len(shapes) != 1:
@@ -180,3 +184,149 @@ class ResidualRoleFlowRouter:
         )
         routed_velocity = target_velocity + correction_weight * source_residual
         return routed_velocity, correction_weight
+
+
+class PosteriorResidualFlowRouter:
+    """Mix target and source-residual experts with role posteriors."""
+
+    def __init__(self, eps: float = 1e-6):
+        if eps <= 0:
+            raise ValueError("eps must be positive")
+        self.eps = eps
+
+    @staticmethod
+    def _resize_roles(
+        roles: RoleState,
+        spatial_size,
+        dtype,
+        device,
+    ) -> torch.Tensor:
+        role_tensor = torch.stack(
+            [
+                roles.object,
+                roles.boundary,
+                roles.hand,
+                roles.background,
+            ],
+            dim=2,
+        ).float()
+        batch, frames, role_count, height, width = role_tensor.shape
+        resized = F.interpolate(
+            role_tensor.reshape(
+                batch * frames,
+                role_count,
+                height,
+                width,
+            ),
+            size=spatial_size,
+            mode="bilinear",
+            align_corners=False,
+        ).reshape(
+            batch,
+            frames,
+            role_count,
+            *spatial_size,
+        )
+        resized = resized.clamp_min(0.0)
+        resized = resized / resized.sum(
+            dim=2,
+            keepdim=True,
+        ).clamp_min(1e-6)
+        return resized.to(device=device, dtype=dtype)
+
+    def __call__(
+        self,
+        target_velocity: torch.Tensor,
+        source_velocity: torch.Tensor,
+        source_reconstruction_velocity: torch.Tensor,
+        roles: RoleState,
+        hard_roles: bool = False,
+    ):
+        velocity_shapes = {
+            tuple(target_velocity.shape),
+            tuple(source_velocity.shape),
+            tuple(source_reconstruction_velocity.shape),
+        }
+        if len(velocity_shapes) != 1:
+            raise ValueError(
+                "Target, source, and source reconstruction velocities must "
+                f"have the same shape, got {sorted(velocity_shapes)}"
+            )
+
+        roles.validate()
+        probabilities = self._resize_roles(
+            roles,
+            target_velocity.shape[-2:],
+            target_velocity.dtype,
+            target_velocity.device,
+        )
+        if hard_roles:
+            hard_index = probabilities.argmax(dim=2, keepdim=True)
+            probabilities = torch.zeros_like(probabilities).scatter_(
+                2,
+                hard_index,
+                1.0,
+            )
+
+        object_probability = probabilities[:, :, 0:1]
+        contact_probability = probabilities[:, :, 1:2]
+        hand_probability = probabilities[:, :, 2:3]
+        background_probability = probabilities[:, :, 3:4]
+        preservation_probability = (
+            hand_probability + background_probability
+        )
+
+        # Contact is split online by its competition with preservation roles.
+        contact_denominator = (
+            contact_probability + preservation_probability
+        )
+        contact_present = contact_probability > self.eps
+        contact_target_weight = torch.where(
+            contact_present,
+            contact_probability
+            / contact_denominator.clamp_min(self.eps),
+            torch.zeros_like(contact_probability),
+        ).clamp(0.0, 1.0)
+        contact_residual_weight = torch.where(
+            contact_present,
+            1.0 - contact_target_weight,
+            torch.zeros_like(contact_probability),
+        )
+        residual_expert_weight = (
+            preservation_probability
+            + contact_probability * contact_residual_weight
+        ).clamp(0.0, 1.0)
+        target_expert_weight = (
+            object_probability
+            + contact_probability * contact_target_weight
+        ).clamp(0.0, 1.0)
+
+        expert_sum = (
+            target_expert_weight + residual_expert_weight
+        ).clamp_min(self.eps)
+        target_expert_weight = target_expert_weight / expert_sum
+        residual_expert_weight = residual_expert_weight / expert_sum
+
+        source_residual = (
+            source_reconstruction_velocity - source_velocity
+        )
+        routed_velocity = (
+            target_velocity
+            + residual_expert_weight * source_residual
+        )
+        entropy = -(
+            probabilities.float()
+            * probabilities.float().clamp_min(self.eps).log()
+        ).sum(dim=2, keepdim=True) / torch.log(
+            probabilities.new_tensor(4.0).float()
+        )
+        entropy = entropy.clamp(0.0, 1.0)
+        diagnostics = {
+            "target_expert_weight": target_expert_weight,
+            "residual_expert_weight": residual_expert_weight,
+            "contact_target_weight": contact_target_weight,
+            "contact_residual_weight": contact_residual_weight,
+            "role_entropy": entropy.to(target_velocity),
+            "role_probabilities": probabilities,
+        }
+        return routed_velocity, diagnostics

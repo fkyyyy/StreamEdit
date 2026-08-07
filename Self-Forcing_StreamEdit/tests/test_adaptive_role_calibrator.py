@@ -225,3 +225,35 @@ def test_adaptive_bfloat16_input_returns_float32():
 
     assert result.token_edit_confidence.dtype == torch.float32
     assert torch.isfinite(result.token_edit_confidence).all()
+
+
+def test_adaptive_field_diagnostic_does_not_update_threshold_state():
+    hand_latent = torch.zeros((1, 1, 16, 16))
+    hand_latent[:, :, 8:12, 4:8] = 1.0
+    inferencer = hand_role.HandRoleInferencer(adaptive=True)
+    prior = inferencer(
+        _attention().reshape(1, -1),
+        hand_latent,
+    )
+    threshold_before = (
+        inferencer.adaptive_calibrator.state
+        .previous_posterior_threshold.clone()
+    )
+
+    observed = inferencer.refine_with_field(
+        prior,
+        source_velocity=torch.zeros((1, 1, 4, 16, 16)),
+        target_velocity=torch.randn((1, 1, 4, 16, 16)),
+        hand_mask=hand_latent,
+        apply_update=False,
+    )
+
+    threshold_after = (
+        inferencer.adaptive_calibrator.state
+        .previous_posterior_threshold
+    )
+    assert torch.equal(threshold_after, threshold_before)
+    assert torch.equal(
+        observed.token_edit_confidence,
+        prior.token_edit_confidence,
+    )

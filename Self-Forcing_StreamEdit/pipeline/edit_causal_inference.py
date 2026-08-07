@@ -19,6 +19,7 @@ from .contact_graph import (
 )
 from .hand_role_inference import HandRoleInferencer
 from .role_router import (
+    PosteriorResidualFlowRouter,
     ResidualRoleFlowRouter,
     RoleFlowRouter,
     build_oracle_roles,
@@ -104,6 +105,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_only_mask: Optional[torch.Tensor] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
+        posterior_flow_mode: str = "soft",
+        posterior_flow_use_field: bool = False,
         hand_posterior_threshold: float = 0.20,
         hand_max_object_coverage: float = 0.18,
         hand_proximity_radius: int = 3,
@@ -175,6 +178,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 hand_only_mask=hand_only_mask,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
+                posterior_flow_mode=posterior_flow_mode,
+                posterior_flow_use_field=posterior_flow_use_field,
                 hand_posterior_threshold=hand_posterior_threshold,
                 hand_max_object_coverage=hand_max_object_coverage,
                 hand_proximity_radius=hand_proximity_radius,
@@ -206,7 +211,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
         rollout_hand_role_inferencer = _hand_role_inferencer
         if (
             rollout_hand_role_inferencer is None
-            and routing_mode == "hand_role_adaptive_kv"
+            and routing_mode in {
+                "hand_role_adaptive_kv",
+                "hand_role_posterior_flow_kv",
+            }
         ):
             rollout_hand_role_inferencer = HandRoleInferencer(
                 hand_proximity_radius=hand_proximity_radius,
@@ -223,7 +231,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 field_weight=hand_field_weight,
                 field_candidate_radius=hand_field_candidate_radius,
                 adaptive=(
-                    routing_mode == "hand_role_adaptive_kv"
+                    routing_mode in {
+                        "hand_role_adaptive_kv",
+                        "hand_role_posterior_flow_kv",
+                    }
                 ),
             )
 
@@ -302,6 +313,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 hand_only_mask=rollout_hand_only_mask,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
+                posterior_flow_mode=posterior_flow_mode,
+                posterior_flow_use_field=posterior_flow_use_field,
                 hand_posterior_threshold=hand_posterior_threshold,
                 hand_max_object_coverage=hand_max_object_coverage,
                 hand_proximity_radius=hand_proximity_radius,
@@ -398,6 +411,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_only_mask: Optional[torch.Tensor] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
+        posterior_flow_mode: str = "soft",
+        posterior_flow_use_field: bool = False,
         hand_posterior_threshold: float = 0.20,
         hand_max_object_coverage: float = 0.18,
         hand_proximity_radius: int = 3,
@@ -440,8 +455,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_role_enabled = routing_mode in {
             "hand_role_residual_kv",
             "hand_role_adaptive_kv",
+            "hand_role_posterior_flow_kv",
         }
-        adaptive_role_enabled = routing_mode == "hand_role_adaptive_kv"
+        adaptive_role_enabled = routing_mode in {
+            "hand_role_adaptive_kv",
+            "hand_role_posterior_flow_kv",
+        }
+        posterior_flow_enabled = (
+            routing_mode == "hand_role_posterior_flow_kv"
+        )
         consistent_role_kv_enabled = oracle_kv_enabled or hand_role_enabled
         if routing_mode not in {
             "dynamic_sog",
@@ -451,12 +473,17 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "oracle_role_residual_kv",
             "hand_role_residual_kv",
             "hand_role_adaptive_kv",
+            "hand_role_posterior_flow_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
         if not 0.0 <= contact_target_weight <= 1.0:
             raise ValueError(
                 "contact_target_weight must lie in [0, 1], got "
                 f"{contact_target_weight}"
+            )
+        if posterior_flow_mode not in {"soft", "hard"}:
+            raise ValueError(
+                "posterior_flow_mode must be 'soft' or 'hard'"
             )
         if not 0.0 <= hand_posterior_threshold <= 1.0:
             raise ValueError("hand_posterior_threshold must be in [0, 1]")
@@ -599,6 +626,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "online_temporal=True online_threshold=True "
                 "online_field_reliability=True"
             )
+            if posterior_flow_enabled:
+                print(
+                    "POSTERIOR_RESIDUAL_FLOW "
+                    f"mode={posterior_flow_mode} "
+                    f"use_field={posterior_flow_use_field} "
+                    "contact_split=posterior"
+                )
         elif hand_role_enabled:
             print(
                 "HAND_ROLE_RESIDUAL "
@@ -724,6 +758,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         self._initialize_noise_statistics(reuse_noise_temporal_mean)
         role_flow_router = RoleFlowRouter()
         residual_role_flow_router = ResidualRoleFlowRouter()
+        posterior_residual_flow_router = PosteriorResidualFlowRouter()
         hand_role_inferencer = _hand_role_inferencer
         if hand_role_inferencer is None:
             hand_role_inferencer = HandRoleInferencer(
@@ -1109,6 +1144,16 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         or hand_field_update_mode != "off"
                     )
                 ):
+                    apply_field_update = (
+                        (
+                            adaptive_role_enabled
+                            and (
+                                not posterior_flow_enabled
+                                or posterior_flow_use_field
+                            )
+                        )
+                        or hand_field_update_mode == "posterior"
+                    )
                     hand_role_inference = (
                         hand_role_inferencer.refine_with_field(
                             prior=hand_role_inference,
@@ -1117,10 +1162,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             hand_mask=hand_only_mask[
                                 :, role_left:role_right
                             ],
-                            apply_update=(
-                                adaptive_role_enabled
-                                or hand_field_update_mode == "posterior"
-                            ),
+                            apply_update=apply_field_update,
                         )
                     )
                     hand_role_debug = hand_role_inference.debug
@@ -1158,6 +1200,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         f"{current_start_frame // self.num_frame_per_block} "
                         "mode="
                         f"{'adaptive' if adaptive_role_enabled else hand_field_update_mode} "
+                        f"applied={int(apply_field_update)} "
                         f"edit_tokens={role_edit_tokens.float().mean().item():.4f} "
                         f"field={hand_role_debug['field_score'].mean().item():.4f} "
                         f"observation={hand_role_debug['field_observation'].mean().item():.4f}"
@@ -1216,7 +1259,101 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     )
                 # #endregion
                 
-                if routing_mode in {
+                if posterior_flow_enabled:
+                    v_t, posterior_flow_debug = (
+                        posterior_residual_flow_router(
+                            target_velocity=v_trg,
+                            source_velocity=v_src,
+                            source_reconstruction_velocity=v_gt,
+                            roles=current_roles,
+                            hard_roles=(
+                                posterior_flow_mode == "hard"
+                            ),
+                        )
+                    )
+                    if index == 0:
+                        role_probabilities = posterior_flow_debug[
+                            "role_probabilities"
+                        ]
+                        hand_role_debug.update({
+                            "flow_target_expert_weight": (
+                                posterior_flow_debug[
+                                    "target_expert_weight"
+                                ].squeeze(2)
+                            ),
+                            "flow_residual_expert_weight": (
+                                posterior_flow_debug[
+                                    "residual_expert_weight"
+                                ].squeeze(2)
+                            ),
+                            "flow_contact_target_weight": (
+                                posterior_flow_debug[
+                                    "contact_target_weight"
+                                ].squeeze(2)
+                            ),
+                            "flow_contact_residual_weight": (
+                                posterior_flow_debug[
+                                    "contact_residual_weight"
+                                ].squeeze(2)
+                            ),
+                            "flow_role_entropy": (
+                                posterior_flow_debug[
+                                    "role_entropy"
+                                ].squeeze(2)
+                            ),
+                            "flow_object_probability": (
+                                role_probabilities[:, :, 0]
+                            ),
+                            "flow_contact_probability": (
+                                role_probabilities[:, :, 1]
+                            ),
+                            "flow_hand_probability": (
+                                role_probabilities[:, :, 2]
+                            ),
+                            "flow_background_probability": (
+                                role_probabilities[:, :, 3]
+                            ),
+                        })
+                        expert_sum_error = (
+                            posterior_flow_debug[
+                                "target_expert_weight"
+                            ]
+                            + posterior_flow_debug[
+                                "residual_expert_weight"
+                            ]
+                            - 1.0
+                        ).abs().max()
+                        contact_mass = role_probabilities[
+                            :, :, 1:2
+                        ].float()
+                        contact_target_mean = (
+                            posterior_flow_debug[
+                                "contact_target_weight"
+                            ].float()
+                            * contact_mass
+                        ).sum() / contact_mass.sum().clamp_min(1e-6)
+                        print(
+                            "POSTERIOR_FLOW "
+                            f"block={current_start_frame // self.num_frame_per_block} "
+                            f"mode={posterior_flow_mode} "
+                            "target="
+                            f"{posterior_flow_debug['target_expert_weight'].mean().item():.4f} "
+                            "residual="
+                            f"{posterior_flow_debug['residual_expert_weight'].mean().item():.4f} "
+                            "contact_target="
+                            f"{contact_target_mean.item():.4f} "
+                            "entropy="
+                            f"{posterior_flow_debug['role_entropy'].mean().item():.4f} "
+                            f"sum_error={expert_sum_error.item():.2e}"
+                        )
+                        if save_role_dir is not None:
+                            self._save_hand_role_debug(
+                                save_role_dir,
+                                current_start_frame
+                                // self.num_frame_per_block,
+                                hand_role_debug,
+                            )
+                elif routing_mode in {
                     "oracle_role_residual",
                     "oracle_role_residual_kv",
                     "hand_role_residual_kv",

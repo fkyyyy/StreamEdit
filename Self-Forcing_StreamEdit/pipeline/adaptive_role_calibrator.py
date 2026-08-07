@@ -431,6 +431,7 @@ class AdaptiveRoleCalibrator:
     def posterior_threshold(
         self,
         posterior: torch.Tensor,
+        update_state: bool = True,
     ) -> torch.Tensor:
         reliability = self.state.current_attention_reliability
         if (
@@ -474,9 +475,10 @@ class AdaptiveRoleCalibrator:
                     * self.state.previous_posterior_threshold
                     + 0.50 * current
                 )
-            self.state.previous_posterior_threshold = (
-                current.detach()
-            )
+            if update_state:
+                self.state.previous_posterior_threshold = (
+                    current.detach()
+                )
             thresholds.append(current)
         return torch.stack(thresholds, dim=1)
 
@@ -488,6 +490,7 @@ class AdaptiveRoleCalibrator:
         object_visible: torch.Tensor,
         coverage_budget: torch.Tensor,
         prior_threshold: torch.Tensor,
+        update_state: bool = True,
     ):
         seed_mask = object_seed > self.eps
         radius = 1
@@ -524,7 +527,10 @@ class AdaptiveRoleCalibrator:
             coverage_budget,
             object_visible,
         )
-        threshold = self.posterior_threshold(posterior)
+        threshold = self.posterior_threshold(
+            posterior,
+            update_state=update_state,
+        )
         threshold = torch.maximum(
             threshold,
             prior_threshold.float(),
