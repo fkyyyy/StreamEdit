@@ -27,6 +27,7 @@ __all__ = [
     'flash_attention',
     'attention',
     'fuse_aligned_memory',
+    'apply_target_identity_value_correction',
 ]
 
 
@@ -213,3 +214,142 @@ def fuse_aligned_memory(
         + weight * (source_value.float() - target_value.float())
     ).to(target_value.dtype)
     return fused_key, fused_value
+
+
+def apply_target_identity_value_correction(
+    target_key,
+    target_value,
+    prototype_key,
+    prototype_value,
+    prototype_evidence,
+    eps=1e-6,
+):
+    """Retrieve slow appearance prototypes while retaining current keys."""
+    if target_key.shape != target_value.shape:
+        raise ValueError(
+            "Current target keys and values must share shape"
+        )
+    if prototype_key.shape != prototype_value.shape:
+        raise ValueError(
+            "Identity prototype keys and values must share shape"
+        )
+    if target_key.ndim != 4 or prototype_key.ndim != 4:
+        raise ValueError(
+            "Identity correction expects [B,L,H,D] tensors"
+        )
+    if target_key.shape[0] != prototype_key.shape[0]:
+        raise ValueError(
+            "Current target and identity memory must share batch size"
+        )
+    if target_key.shape[2:] != prototype_key.shape[2:]:
+        raise ValueError(
+            "Current target and identity memory must share heads"
+        )
+    if prototype_evidence.shape != prototype_key.shape[:2]:
+        raise ValueError(
+            "Identity evidence must have shape [B,P]"
+        )
+    if eps <= 0:
+        raise ValueError("eps must be positive")
+
+    key = torch.nn.functional.normalize(
+        target_key.float(),
+        dim=-1,
+    )
+    memory_key = torch.nn.functional.normalize(
+        prototype_key.float(),
+        dim=-1,
+    )
+    similarity = torch.einsum(
+        "blhd,bphd->blph",
+        key,
+        memory_key,
+    ).mean(dim=-1).clamp(-1.0, 1.0)
+    valid = prototype_evidence > eps
+    confidence = prototype_evidence.float().clamp(0.0, 1.0)
+
+    flat_similarity = similarity.flatten(1)
+    median_similarity = torch.quantile(
+        flat_similarity,
+        0.50,
+        dim=-1,
+        keepdim=True,
+    )
+    absolute_deviation = (
+        flat_similarity - median_similarity
+    ).abs()
+    robust_scale = (
+        torch.quantile(
+            absolute_deviation,
+            0.50,
+            dim=-1,
+            keepdim=True,
+        )
+        / 0.6745
+    ).clamp_min(eps)
+    logits = similarity / robust_scale.unsqueeze(-1)
+    logits = logits + confidence.clamp_min(eps).log()[:, None, :]
+    logits = logits.masked_fill(
+        ~valid[:, None, :],
+        torch.finfo(logits.dtype).min,
+    )
+    assignment = torch.softmax(logits, dim=-1)
+    has_memory = valid.any(dim=-1, keepdim=True)
+    assignment = torch.where(
+        has_memory.unsqueeze(-1),
+        assignment,
+        torch.zeros_like(assignment),
+    )
+
+    retrieved_value = torch.einsum(
+        "blp,bphd->blhd",
+        assignment,
+        prototype_value.float(),
+    )
+    best_similarity = similarity.masked_fill(
+        ~valid[:, None, :],
+        -1.0,
+    ).max(dim=-1).values
+    support_threshold = torch.quantile(
+        best_similarity,
+        0.90,
+        dim=-1,
+        keepdim=True,
+    )
+    high_match = torch.quantile(
+        best_similarity,
+        0.99,
+        dim=-1,
+        keepdim=True,
+    )
+    match_spread = high_match - support_threshold
+    relative_match = (
+        (best_similarity - support_threshold)
+        / match_spread.clamp_min(eps)
+    ).clamp(0.0, 1.0)
+    relative_match = torch.where(
+        match_spread > eps,
+        relative_match,
+        torch.zeros_like(relative_match),
+    )
+    absolute_match = (
+        0.5 * (best_similarity + 1.0)
+    ).clamp(0.0, 1.0)
+    assigned_confidence = (
+        assignment * confidence[:, None, :]
+    ).sum(dim=-1)
+    identity_support = (
+        torch.sqrt(relative_match * absolute_match)
+        * assigned_confidence
+    ).clamp(0.0, 1.0)
+    identity_support = torch.where(
+        has_memory,
+        identity_support,
+        torch.zeros_like(identity_support),
+    )
+    corrected_value = (
+        target_value.float()
+        + identity_support[:, :, None, None]
+        * (retrieved_value - target_value.float())
+    ).to(target_value.dtype)
+    return corrected_value, identity_support.float()

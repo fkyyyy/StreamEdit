@@ -1,4 +1,8 @@
-from wan.modules.attention import attention, fuse_aligned_memory
+from wan.modules.attention import (
+    apply_target_identity_value_correction,
+    attention,
+    fuse_aligned_memory,
+)
 from wan.modules.contact_graph_attention import (
     apply_contact_graph_residual,
 )
@@ -340,6 +344,38 @@ class CausalWanSelfAttention(nn.Module):
                 trg_current_key = trg_key[:, -num_new_tokens: ]
                 trg_current_value = trg_value[:, -num_new_tokens: ]
 
+                shared_dict = kv_cache["shared_dict"]
+                identity_states = shared_dict.get(
+                    "target_identity_memory",
+                    {},
+                )
+                layer_index = kv_cache.get("layer_index", -1)
+                identity_state = identity_states.get(layer_index)
+                if identity_state is not None:
+                    _, raw_target_key = k.chunk(2, dim=0)
+                    (
+                        trg_current_value,
+                        identity_support,
+                    ) = apply_target_identity_value_correction(
+                        target_key=raw_target_key,
+                        target_value=trg_current_value,
+                        prototype_key=identity_state.key.to(
+                            device=raw_target_key.device,
+                            dtype=raw_target_key.dtype,
+                        ),
+                        prototype_value=identity_state.value.to(
+                            device=trg_current_value.device,
+                            dtype=trg_current_value.dtype,
+                        ),
+                        prototype_evidence=identity_state.evidence.to(
+                            device=raw_target_key.device,
+                        ),
+                    )
+                    shared_dict.setdefault(
+                        "target_identity_support",
+                        {},
+                    )[layer_index] = identity_support.detach()
+
                 x_list = [
                     attention(src_query, src_key, src_value)   # source
                 ]
@@ -463,13 +499,11 @@ class CausalWanSelfAttention(nn.Module):
                         b_trg_key.unsqueeze(0),
                         b_trg_value.unsqueeze(0),
                     )
-                    shared_dict = kv_cache["shared_dict"]
                     contact_graph_mode = shared_dict.get(
                         "contact_graph_mode",
                         "no_graph",
                     )
                     contact_graphs = shared_dict.get("contact_graphs")
-                    layer_index = kv_cache.get("layer_index", -1)
                     layer_start = shared_dict.get(
                         "contact_graph_layer_start",
                         0,

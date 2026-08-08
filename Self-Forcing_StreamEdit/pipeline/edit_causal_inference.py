@@ -28,6 +28,11 @@ from .memory_consolidation import (
     CausalMemoryConsolidator,
     MemoryConsolidationPlan,
 )
+from .target_identity_memory import (
+    SlowTargetIdentityMemory,
+    TargetIdentityUpdate,
+    strengthen_belief_with_target_identity,
+)
 from .role_router import (
     BayesResidualFlowRouter,
     PosteriorResidualFlowRouter,
@@ -148,6 +153,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         _edit_commitment_controller: Optional[
             EditCommitmentController
         ] = None,
+        _target_identity_memory: Optional[
+            SlowTargetIdentityMemory
+        ] = None,
     ) -> torch.Tensor:
         expected_role_shape = (
             src_video.shape[0], src_video.shape[1],
@@ -227,6 +235,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 _edit_commitment_controller=(
                     _edit_commitment_controller
                 ),
+                _target_identity_memory=_target_identity_memory,
             )
 
         rollout_overlap = rollout_overlap_block_num * self.num_frame_per_block
@@ -240,6 +249,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_dual_kv",
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
+                "hand_role_bayes_flow_identity_kv",
             }
         ):
             rollout_hand_role_inferencer = HandRoleInferencer(
@@ -264,6 +274,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "hand_role_bayes_flow_dual_kv",
                         "hand_role_bayes_flow_consolidated_kv",
                         "hand_role_bayes_flow_commitment_kv",
+                        "hand_role_bayes_flow_identity_kv",
                     }
                 ),
             )
@@ -273,15 +284,27 @@ class EditCausalInferencePipeline(torch.nn.Module):
             and routing_mode in {
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
+                "hand_role_bayes_flow_identity_kv",
             }
         ):
             rollout_memory_consolidator = CausalMemoryConsolidator()
         rollout_commitment_controller = _edit_commitment_controller
         if (
             rollout_commitment_controller is None
-            and routing_mode == "hand_role_bayes_flow_commitment_kv"
+            and routing_mode in {
+                "hand_role_bayes_flow_commitment_kv",
+                "hand_role_bayes_flow_identity_kv",
+            }
         ):
             rollout_commitment_controller = EditCommitmentController()
+        rollout_target_identity_memory = _target_identity_memory
+        if (
+            rollout_target_identity_memory is None
+            and routing_mode == "hand_role_bayes_flow_identity_kv"
+        ):
+            rollout_target_identity_memory = SlowTargetIdentityMemory(
+                layers=hand_query_layers,
+            )
 
         total_frame_num = src_video.shape[1]
         ret_latent_list = []
@@ -390,6 +413,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 _edit_commitment_controller=(
                     rollout_commitment_controller
                 ),
+                _target_identity_memory=(
+                    rollout_target_identity_memory
+                ),
             )
 
             # store results
@@ -492,6 +518,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         _edit_commitment_controller: Optional[
             EditCommitmentController
         ] = None,
+        _target_identity_memory: Optional[
+            SlowTargetIdentityMemory
+        ] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
         independent_first_frame = independent_first_frame or self.independent_first_frame
@@ -515,6 +544,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_dual_kv",
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
+            "hand_role_bayes_flow_identity_kv",
         }
         adaptive_role_enabled = routing_mode in {
             "hand_role_adaptive_kv",
@@ -523,6 +553,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_dual_kv",
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
+            "hand_role_bayes_flow_identity_kv",
         }
         posterior_flow_enabled = (
             routing_mode == "hand_role_posterior_flow_kv"
@@ -533,6 +564,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_dual_kv",
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
+                "hand_role_bayes_flow_identity_kv",
             }
         )
         aligned_belief_kv_enabled = (
@@ -542,10 +574,17 @@ class EditCausalInferencePipeline(torch.nn.Module):
             routing_mode in {
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
+                "hand_role_bayes_flow_identity_kv",
             }
         )
         edit_commitment_enabled = (
-            routing_mode == "hand_role_bayes_flow_commitment_kv"
+            routing_mode in {
+                "hand_role_bayes_flow_commitment_kv",
+                "hand_role_bayes_flow_identity_kv",
+            }
+        )
+        target_identity_enabled = (
+            routing_mode == "hand_role_bayes_flow_identity_kv"
         )
         belief_memory_enabled = (
             aligned_belief_kv_enabled
@@ -565,6 +604,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_dual_kv",
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
+            "hand_role_bayes_flow_identity_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
         if not 0.0 <= contact_target_weight <= 1.0:
@@ -757,6 +797,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "presence=semantic_match "
                         "preserve_release=object_core"
                     )
+                if target_identity_enabled:
+                    print(
+                        "SLOW_TARGET_IDENTITY_MEMORY "
+                        f"layers={hand_query_layers} "
+                        "slots=4 write=precision_statistics "
+                        "read=value_only "
+                        "belief_feedback=identity_match"
+                    )
         elif hand_role_enabled:
             print(
                 "HAND_ROLE_RESIDUAL "
@@ -917,6 +965,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
         edit_commitment_controller = _edit_commitment_controller
         if edit_commitment_enabled and edit_commitment_controller is None:
             edit_commitment_controller = EditCommitmentController()
+        target_identity_memory = _target_identity_memory
+        if target_identity_enabled and target_identity_memory is None:
+            target_identity_memory = SlowTargetIdentityMemory(
+                layers=hand_query_layers,
+            )
 
         # get trigger token indices
         trans_tokenizer = self.text_encoder.tokenizer.tokenizer
@@ -1057,6 +1110,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
             ] = None
             current_commitment: Optional[
                 EditCommitmentResult
+            ] = None
+            current_identity_support = None
+            identity_observation_belief = None
+            identity_observation_tokens = None
+            current_identity_update: Optional[
+                TargetIdentityUpdate
             ] = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
@@ -1228,6 +1287,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "contact_graph_strength": contact_graph_strength,
                 "contact_graph_layer_start": contact_graph_layer_start,
                 "contact_graph_layer_end": contact_graph_layer_end,
+                "target_identity_memory": (
+                    target_identity_memory.export()
+                    if target_identity_enabled
+                    else {}
+                ),
             })
             effective_src_fg_mask = (
                 role_edit_tokens
@@ -1266,6 +1330,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 shared_dict_dual['current_timestep_index'] = index
                 shared_dict_dual['total_timestep'] = len(denoising_step_list)
                 shared_dict_dual['blend_power'] = blend_power
+                if target_identity_enabled:
+                    shared_dict_dual["target_identity_support"] = {}
 
                 # use previous statistics on noise
                 fwd_noise = torch.randn_like(src_input)
@@ -1456,6 +1522,84 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 width,
                             ),
                         )
+                    if target_identity_enabled:
+                        identity_observation_belief = (
+                            current_control_belief
+                        )
+                        identity_observation_tokens = (
+                            role_edit_tokens.clone()
+                        )
+                        identity_by_layer = shared_dict_dual.get(
+                            "target_identity_support",
+                            {},
+                        )
+                        identity_layers = [
+                            identity_by_layer[layer]
+                            for layer in hand_query_layers
+                            if layer in identity_by_layer
+                        ]
+                        if identity_layers:
+                            current_identity_support = torch.stack(
+                                identity_layers,
+                                dim=0,
+                            ).mean(dim=0).reshape_as(
+                                hand_role_debug[
+                                    "object_posterior"
+                                ]
+                            )
+                        else:
+                            current_identity_support = torch.zeros_like(
+                                hand_role_debug[
+                                    "object_posterior"
+                                ]
+                            )
+                        hand_role_debug[
+                            "identity_read_support"
+                        ] = current_identity_support
+                        hand_role_debug.update({
+                            f"preidentity_control_{name}": value
+                            for name, value
+                            in current_control_belief.as_dict().items()
+                        })
+                        current_control_belief = (
+                            strengthen_belief_with_target_identity(
+                                belief=current_control_belief,
+                                identity_support=(
+                                    current_identity_support
+                                ),
+                                hand_mask=hand_only_mask[
+                                    :, role_left:role_right
+                                ],
+                            )
+                        )
+                        identity_flat = (
+                            current_identity_support.flatten(2)
+                        )
+                        identity_threshold = torch.quantile(
+                            identity_flat,
+                            0.90,
+                            dim=-1,
+                            keepdim=True,
+                        )
+                        identity_edit_tokens = (
+                            identity_flat >= identity_threshold
+                        ) & (identity_flat > 0)
+                        role_edit_tokens = (
+                            role_edit_tokens
+                            | identity_edit_tokens.reshape(
+                                batch_size,
+                                -1,
+                            )
+                        )
+                        inloop_trg_fg_mask = role_edit_tokens
+                        src_fg_mask_map = self._mask_reshape(
+                            role_edit_tokens,
+                            size=(
+                                current_num_frames,
+                                height,
+                                width,
+                            ),
+                        )
                     hand_role_debug.update({
                         f"control_{name}": value
                         for name, value
@@ -1555,6 +1699,18 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             f"{current_commitment.effective_commitment.mean().item():.4f} "
                             "edit_support="
                             f"{current_commitment.edit_support.float().mean().item():.4f}"
+                        )
+                    if current_identity_support is not None:
+                        print(
+                            "TARGET_IDENTITY_READ "
+                            "block="
+                            f"{current_start_frame // self.num_frame_per_block} "
+                            "support="
+                            f"{current_identity_support.mean().item():.4f} "
+                            "peak="
+                            f"{current_identity_support.max().item():.4f} "
+                            "edit_tokens="
+                            f"{identity_edit_tokens.float().mean().item():.4f}"
                         )
                     if aligned_belief_kv_enabled:
                         print(
@@ -1897,6 +2053,68 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     },
                 )
             # #endregion
+            if target_identity_enabled:
+                if (
+                    identity_observation_belief is None
+                    or identity_observation_tokens is None
+                ):
+                    raise RuntimeError(
+                        "Missing independent evidence for identity write"
+                    )
+                identity_write_map = (
+                    identity_observation_belief.edit_belief
+                    * identity_observation_belief.edit_precision
+                    * (
+                        1.0
+                        - identity_observation_belief.uncertainty
+                    )
+                    * identity_observation_belief.visibility
+                ).clamp(0.0, 1.0)
+                identity_write_tokens = F.avg_pool2d(
+                    identity_write_map.reshape(
+                        batch_size * current_num_frames,
+                        1,
+                        height,
+                        width,
+                    ),
+                    kernel_size=2,
+                    stride=2,
+                ).reshape(batch_size, -1)
+                identity_write_tokens = (
+                    identity_write_tokens
+                    * identity_observation_tokens.float()
+                )
+                current_identity_update = (
+                    target_identity_memory.update(
+                        kv_cache=kv_cache_trg,
+                        write_weight=identity_write_tokens,
+                    )
+                )
+                hand_role_debug["identity_write_weight"] = (
+                    identity_write_tokens.reshape_as(
+                        hand_role_debug["object_posterior"]
+                    )
+                )
+                print(
+                    "TARGET_IDENTITY_WRITE "
+                    "block="
+                    f"{current_start_frame // self.num_frame_per_block} "
+                    "weight="
+                    f"{identity_write_tokens.mean().item():.4f} "
+                    "observation_evidence="
+                    f"{current_identity_update.observation_evidence.mean().item():.4f} "
+                    "gain="
+                    f"{current_identity_update.update_gain.mean().item():.4f} "
+                    "accumulated_evidence="
+                    f"{current_identity_update.accumulated_evidence.mean().item():.4f}"
+                )
+                if save_role_dir is not None:
+                    self._save_hand_role_debug(
+                        save_role_dir,
+                        current_start_frame
+                        // self.num_frame_per_block,
+                        hand_role_debug,
+                    )
             #✨ store clean target kv cache, and obtain clean target mask
             _, trg_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_trg)
             current_trg_fg_mask = (
