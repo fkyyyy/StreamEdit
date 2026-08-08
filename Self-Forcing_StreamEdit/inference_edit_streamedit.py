@@ -32,6 +32,10 @@ BACKBONE_PRESETS = {
         "config": "configs/causal_forcing_dmd_framewise.yaml",
         "checkpoint": "checkpoints/framewise/causal_forcing.pt",
     },
+    "causal_forcing_chunkwise": {
+        "config": "configs/causal_forcing_dmd_chunkwise.yaml",
+        "checkpoint": "checkpoints/chunkwise/causal_forcing.pt",
+    },
     "causal_forcing_plus_plus_2step": {
         "config": (
             "configs/"
@@ -146,10 +150,20 @@ def load_pipe(args):
         ).astype(int).tolist()
     else:
         config['model_kwargs']['absolute_kv_rope'] = True
-        if config.num_frame_per_block != 1:
+        expected_frames_per_block = (
+            3
+            if args.backbone == "causal_forcing_chunkwise"
+            else 1
+        )
+        if (
+            config.num_frame_per_block
+            != expected_frames_per_block
+        ):
             raise ValueError(
-                "Causal Forcing editing currently requires the "
-                "frame-wise checkpoint with num_frame_per_block=1"
+                f"{args.backbone} requires "
+                "num_frame_per_block="
+                f"{expected_frames_per_block}, got "
+                f"{config.num_frame_per_block}"
             )
     print(
         "BACKBONE_CONFIG "

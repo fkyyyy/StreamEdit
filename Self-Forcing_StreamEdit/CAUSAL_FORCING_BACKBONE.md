@@ -2,6 +2,7 @@
 
 The editing pipeline supports these backbone presets:
 
+- `causal_forcing_chunkwise`: official 3-frame-block 4-step model.
 - `causal_forcing_framewise`: official frame-wise 4-step model.
 - `causal_forcing_plus_plus_2step`: official frame-wise 2-step model,
   with a 4-step schedule for the first generated block.
@@ -9,6 +10,10 @@ The editing pipeline supports these backbone presets:
 Download one of the official checkpoints:
 
 ```bash
+hf download zhuhz22/Causal-Forcing \
+  chunkwise/causal_forcing.pt \
+  --local-dir checkpoints
+
 hf download zhuhz22/Causal-Forcing \
   framewise/causal_forcing.pt \
   --local-dir checkpoints
@@ -18,16 +23,23 @@ hf download zhuhz22/Causal-Forcing \
   --local-dir checkpoints
 ```
 
-Run the default 2-step backbone with target identity memory:
+Run the default 3-frame-block backbone with target identity memory:
 
 ```bash
 bash run_907_bayes_causal_forcing.sh
 ```
 
-Run the 4-step backbone:
+Run the frame-wise 4-step backbone:
 
 ```bash
 BACKBONE=causal_forcing_framewise \
+bash run_907_bayes_causal_forcing.sh
+```
+
+Run the frame-wise 2-step backbone:
+
+```bash
+BACKBONE=causal_forcing_plus_plus_2step \
 bash run_907_bayes_causal_forcing.sh
 ```
 
@@ -49,7 +61,7 @@ bash run_907_bayes_causal_forcing.sh
 The startup log must report:
 
 ```text
-BACKBONE_CONFIG name=causal_forcing_plus_plus_2step
-EDIT_BACKBONE ... frames_per_block=1 steps=2 first_block_steps=4
-BACKBONE_CHECKPOINT_LOADED name=causal_forcing_plus_plus_2step
+BACKBONE_CONFIG name=causal_forcing_chunkwise
+EDIT_BACKBONE ... frames_per_block=3 steps=4 first_block_steps=4
+BACKBONE_CHECKPOINT_LOADED name=causal_forcing_chunkwise
 ```

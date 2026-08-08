@@ -1,0 +1,22 @@
+backbone_name: causal_forcing_chunkwise
+denoising_step_list:
+  - 1000
+  - 750
+  - 500
+  - 250
+warp_denoising_step: true
+num_train_timestep: 1000
+timestep_shift: 5.0
+guidance_scale: 3.0
+mixed_precision: true
+seed: 0
+image_or_video_shape:
+  - 1
+  - 21
+  - 16
+  - 60
+  - 104
+num_frame_per_block: 3
+model_kwargs:
+  timestep_shift: 5.0
+  absolute_kv_rope: true

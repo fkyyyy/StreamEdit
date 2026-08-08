@@ -6,7 +6,7 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 DATA_PATH="${DATA_PATH:-$REPO_ROOT/source_video.mp4}"
 HAND_MASK="${HAND_MASK:-$REPO_ROOT/hand_mask.mp4}"
-BACKBONE="${BACKBONE:-causal_forcing_plus_plus_2step}"
+BACKBONE="${BACKBONE:-causal_forcing_chunkwise}"
 CHECKPOINT_PATH="${CHECKPOINT_PATH:-}"
 ROUTING_MODE="${ROUTING_MODE:-hand_role_bayes_flow_identity_kv}"
 REFERENCE_IMAGE="${REFERENCE_IMAGE:-}"
@@ -14,7 +14,7 @@ OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/907_bayes_causal_forcing}"
 CUDA_DEVICE="${CUDA_DEVICE:-0}"
 
 case "$BACKBONE" in
-  causal_forcing_framewise|causal_forcing_plus_plus_2step)
+  causal_forcing_chunkwise|causal_forcing_framewise|causal_forcing_plus_plus_2step)
     ;;
   *)
     echo "Unsupported Causal Forcing backbone: $BACKBONE" >&2
