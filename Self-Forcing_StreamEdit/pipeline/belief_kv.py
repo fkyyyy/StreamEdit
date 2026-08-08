@@ -14,21 +14,36 @@ class BeliefKVWeights:
 
     edit: torch.Tensor
     preserve: torch.Tensor
+    edit_action: torch.Tensor
+    preserve_action: torch.Tensor
     edit_map: torch.Tensor
     preserve_map: torch.Tensor
+    edit_action_map: torch.Tensor
+    preserve_action_map: torch.Tensor
     conflict_map: torch.Tensor
 
     def validate(self) -> None:
-        if self.edit.ndim != 2 or self.preserve.ndim != 2:
-            raise ValueError("Belief KV token weights must have shape [B,L]")
-        if self.edit.shape != self.preserve.shape:
-            raise ValueError("Edit and preserve KV weights must share shape")
-        map_shapes = {
-            tuple(self.edit_map.shape),
-            tuple(self.preserve_map.shape),
-            tuple(self.conflict_map.shape),
+        token_values = {
+            "edit": self.edit,
+            "preserve": self.preserve,
+            "edit_action": self.edit_action,
+            "preserve_action": self.preserve_action,
         }
-        if len(map_shapes) != 1 or self.edit_map.ndim != 4:
+        if any(value.ndim != 2 for value in token_values.values()):
+            raise ValueError("Belief KV token weights must have shape [B,L]")
+        if len({tuple(value.shape) for value in token_values.values()}) != 1:
+            raise ValueError("Belief KV token weights must share shape")
+        map_values = {
+            "edit_map": self.edit_map,
+            "preserve_map": self.preserve_map,
+            "edit_action_map": self.edit_action_map,
+            "preserve_action_map": self.preserve_action_map,
+            "conflict_map": self.conflict_map,
+        }
+        if (
+            len({tuple(value.shape) for value in map_values.values()}) != 1
+            or self.edit_map.ndim != 4
+        ):
             raise ValueError(
                 "Belief KV maps must share shape [B,T,H,W]"
             )
@@ -38,11 +53,7 @@ class BeliefKVWeights:
             self.edit.shape[1]
         ):
             raise ValueError("Belief KV map size must match token length")
-        for name, value in (
-            ("edit", self.edit),
-            ("preserve", self.preserve),
-            ("conflict", self.conflict_map),
-        ):
+        for name, value in {**token_values, **map_values}.items():
             if not torch.isfinite(value.float()).all():
                 raise ValueError(f"Belief KV {name} weights are not finite")
             if value.min() < 0 or value.max() > 1:
@@ -92,11 +103,44 @@ def build_belief_kv_weights(
         torch.ones_like(preserve_map),
         preserve_map,
     )
+    edit_strength = (
+        belief.edit_belief.float()
+        * belief.edit_precision.float()
+    )
+    preserve_strength = (
+        belief.preserve_belief.float()
+        * belief.preserve_precision.float()
+    )
+    total_strength = edit_strength + preserve_strength
+    no_action_evidence = total_strength <= eps
+    edit_action_map = downsample(
+        torch.where(
+            no_action_evidence,
+            torch.zeros_like(total_strength),
+            edit_strength / total_strength.clamp_min(eps),
+        )
+    )
+    preserve_action_map = downsample(
+        torch.where(
+            no_action_evidence,
+            torch.ones_like(total_strength),
+            preserve_strength / total_strength.clamp_min(eps),
+        )
+    )
+    action_sum = edit_action_map + preserve_action_map
+    edit_action_map = edit_action_map / action_sum.clamp_min(eps)
+    preserve_action_map = (
+        preserve_action_map / action_sum.clamp_min(eps)
+    )
     weights = BeliefKVWeights(
         edit=edit_map.reshape(batch, -1),
         preserve=preserve_map.reshape(batch, -1),
+        edit_action=edit_action_map.reshape(batch, -1),
+        preserve_action=preserve_action_map.reshape(batch, -1),
         edit_map=edit_map,
         preserve_map=preserve_map,
+        edit_action_map=edit_action_map,
+        preserve_action_map=preserve_action_map,
         conflict_map=(edit_map * preserve_map).clamp(0.0, 1.0),
     )
     weights.validate()

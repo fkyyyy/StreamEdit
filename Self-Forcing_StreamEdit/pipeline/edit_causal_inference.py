@@ -1345,6 +1345,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             "dual_kv_preserve_weight": (
                                 current_belief_kv_weights.preserve_map
                             ),
+                            "dual_kv_edit_action": (
+                                current_belief_kv_weights.edit_action_map
+                            ),
+                            "dual_kv_preserve_action": (
+                                current_belief_kv_weights
+                                .preserve_action_map
+                            ),
                             "dual_kv_conflict_weight": (
                                 current_belief_kv_weights.conflict_map
                             ),
@@ -1386,6 +1393,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             f"{current_belief_kv_weights.edit.mean().item():.4f} "
                             "source="
                             f"{current_belief_kv_weights.preserve.mean().item():.4f} "
+                            "edit_action="
+                            f"{current_belief_kv_weights.edit_action.mean().item():.4f} "
                             "conflict="
                             f"{current_belief_kv_weights.conflict_map.mean().item():.4f}"
                         )
@@ -2082,6 +2091,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     ),
                     "current_preserve_kv_weight": (
                         current_belief_kv_weights.preserve
+                    ),
+                    "current_edit_kv_action": (
+                        current_belief_kv_weights.edit_action
+                    ),
+                    "current_preserve_kv_action": (
+                        current_belief_kv_weights.preserve_action
                     ),
                 })
 

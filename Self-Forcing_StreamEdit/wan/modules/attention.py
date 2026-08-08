@@ -27,6 +27,7 @@ __all__ = [
     'flash_attention',
     'attention',
     'weighted_attention',
+    'dual_memory_attention',
 ]
 
 
@@ -225,3 +226,66 @@ def weighted_attention(
         numerator.float()
         / denominator.float().clamp_min(eps)
     ).to(numerator.dtype)
+
+
+def dual_memory_attention(
+    q,
+    target_key,
+    target_value,
+    target_key_weight,
+    source_key,
+    source_value,
+    source_key_weight,
+    edit_action,
+    preserve_action,
+    eps=1e-6,
+):
+    """Mix independently normalized target and source memory experts."""
+    if edit_action.shape != preserve_action.shape:
+        raise ValueError("Dual-memory query actions must share shape")
+    if edit_action.shape != q.shape[:2]:
+        raise ValueError(
+            "Dual-memory query actions must align with query tokens"
+        )
+    action_sum = (
+        edit_action.float().clamp_min(0.0)
+        + preserve_action.float().clamp_min(0.0)
+    )
+    edit_action = (
+        edit_action.float().clamp_min(0.0)
+        / action_sum.clamp_min(eps)
+    )
+    preserve_action = (
+        preserve_action.float().clamp_min(0.0)
+        / action_sum.clamp_min(eps)
+    )
+    no_action = action_sum <= eps
+    edit_action = torch.where(
+        no_action,
+        torch.zeros_like(edit_action),
+        edit_action,
+    )
+    preserve_action = torch.where(
+        no_action,
+        torch.ones_like(preserve_action),
+        preserve_action,
+    )
+
+    target_output = weighted_attention(
+        q,
+        target_key,
+        target_value,
+        target_key_weight,
+        eps=eps,
+    )
+    source_output = weighted_attention(
+        q,
+        source_key,
+        source_value,
+        source_key_weight,
+        eps=eps,
+    )
+    return (
+        edit_action[:, :, None, None] * target_output.float()
+        + preserve_action[:, :, None, None] * source_output.float()
+    ).to(target_output.dtype)
