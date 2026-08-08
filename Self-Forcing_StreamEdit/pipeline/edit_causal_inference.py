@@ -19,6 +19,10 @@ from .contact_graph import (
 )
 from .belief_kv import build_belief_kv_weights
 from .control_belief import CausalControlBeliefBuilder
+from .edit_commitment import (
+    EditCommitmentController,
+    EditCommitmentResult,
+)
 from .hand_role_inference import HandRoleInferencer
 from .memory_consolidation import (
     CausalMemoryConsolidator,
@@ -141,6 +145,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         _memory_consolidator: Optional[
             CausalMemoryConsolidator
         ] = None,
+        _edit_commitment_controller: Optional[
+            EditCommitmentController
+        ] = None,
     ) -> torch.Tensor:
         expected_role_shape = (
             src_video.shape[0], src_video.shape[1],
@@ -217,6 +224,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 save_role_dir=save_role_dir,
                 _hand_role_inferencer=_hand_role_inferencer,
                 _memory_consolidator=_memory_consolidator,
+                _edit_commitment_controller=(
+                    _edit_commitment_controller
+                ),
             )
 
         rollout_overlap = rollout_overlap_block_num * self.num_frame_per_block
@@ -229,6 +239,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_kv",
                 "hand_role_bayes_flow_dual_kv",
                 "hand_role_bayes_flow_consolidated_kv",
+                "hand_role_bayes_flow_commitment_kv",
             }
         ):
             rollout_hand_role_inferencer = HandRoleInferencer(
@@ -252,16 +263,25 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "hand_role_bayes_flow_kv",
                         "hand_role_bayes_flow_dual_kv",
                         "hand_role_bayes_flow_consolidated_kv",
+                        "hand_role_bayes_flow_commitment_kv",
                     }
                 ),
             )
         rollout_memory_consolidator = _memory_consolidator
         if (
             rollout_memory_consolidator is None
-            and routing_mode
-            == "hand_role_bayes_flow_consolidated_kv"
+            and routing_mode in {
+                "hand_role_bayes_flow_consolidated_kv",
+                "hand_role_bayes_flow_commitment_kv",
+            }
         ):
             rollout_memory_consolidator = CausalMemoryConsolidator()
+        rollout_commitment_controller = _edit_commitment_controller
+        if (
+            rollout_commitment_controller is None
+            and routing_mode == "hand_role_bayes_flow_commitment_kv"
+        ):
+            rollout_commitment_controller = EditCommitmentController()
 
         total_frame_num = src_video.shape[1]
         ret_latent_list = []
@@ -367,6 +387,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 save_role_dir=save_role_dir,
                 _hand_role_inferencer=rollout_hand_role_inferencer,
                 _memory_consolidator=rollout_memory_consolidator,
+                _edit_commitment_controller=(
+                    rollout_commitment_controller
+                ),
             )
 
             # store results
@@ -466,6 +489,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         _memory_consolidator: Optional[
             CausalMemoryConsolidator
         ] = None,
+        _edit_commitment_controller: Optional[
+            EditCommitmentController
+        ] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
         independent_first_frame = independent_first_frame or self.independent_first_frame
@@ -488,6 +514,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_kv",
             "hand_role_bayes_flow_dual_kv",
             "hand_role_bayes_flow_consolidated_kv",
+            "hand_role_bayes_flow_commitment_kv",
         }
         adaptive_role_enabled = routing_mode in {
             "hand_role_adaptive_kv",
@@ -495,6 +522,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_kv",
             "hand_role_bayes_flow_dual_kv",
             "hand_role_bayes_flow_consolidated_kv",
+            "hand_role_bayes_flow_commitment_kv",
         }
         posterior_flow_enabled = (
             routing_mode == "hand_role_posterior_flow_kv"
@@ -504,14 +532,20 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_kv",
                 "hand_role_bayes_flow_dual_kv",
                 "hand_role_bayes_flow_consolidated_kv",
+                "hand_role_bayes_flow_commitment_kv",
             }
         )
         aligned_belief_kv_enabled = (
             routing_mode == "hand_role_bayes_flow_dual_kv"
         )
         memory_consolidation_enabled = (
-            routing_mode
-            == "hand_role_bayes_flow_consolidated_kv"
+            routing_mode in {
+                "hand_role_bayes_flow_consolidated_kv",
+                "hand_role_bayes_flow_commitment_kv",
+            }
+        )
+        edit_commitment_enabled = (
+            routing_mode == "hand_role_bayes_flow_commitment_kv"
         )
         belief_memory_enabled = (
             aligned_belief_kv_enabled
@@ -530,6 +564,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_kv",
             "hand_role_bayes_flow_dual_kv",
             "hand_role_bayes_flow_consolidated_kv",
+            "hand_role_bayes_flow_commitment_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
         if not 0.0 <= contact_target_weight <= 1.0:
@@ -714,6 +749,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "state=sufficient_statistics "
                         "materialization=aligned_kv"
                     )
+                if edit_commitment_enabled:
+                    print(
+                        "PERSISTENT_EDIT_COMMITMENT "
+                        "trigger=hand_interaction "
+                        "transport=source_query_affinity "
+                        "presence=semantic_match "
+                        "preserve_release=object_core"
+                    )
         elif hand_role_enabled:
             print(
                 "HAND_ROLE_RESIDUAL "
@@ -871,6 +914,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         memory_consolidator = _memory_consolidator
         if memory_consolidation_enabled and memory_consolidator is None:
             memory_consolidator = CausalMemoryConsolidator()
+        edit_commitment_controller = _edit_commitment_controller
+        if edit_commitment_enabled and edit_commitment_controller is None:
+            edit_commitment_controller = EditCommitmentController()
 
         # get trigger token indices
         trans_tokenizer = self.text_encoder.tokenizer.tokenizer
@@ -1008,6 +1054,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
             current_belief_kv_weights = None
             current_memory_plan: Optional[
                 MemoryConsolidationPlan
+            ] = None
+            current_commitment: Optional[
+                EditCommitmentResult
             ] = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
@@ -1366,6 +1415,47 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             :, role_left:role_right
                         ],
                     )
+                    if edit_commitment_enabled:
+                        hand_role_debug.update({
+                            f"precommit_control_{name}": value
+                            for name, value
+                            in current_control_belief.as_dict().items()
+                        })
+                        current_commitment = (
+                            edit_commitment_controller(
+                                belief=current_control_belief,
+                                debug=hand_role_debug,
+                                hand_mask=hand_only_mask[
+                                    :, role_left:role_right
+                                ],
+                                source_features=source_query_features,
+                            )
+                        )
+                        current_control_belief = (
+                            current_commitment.belief
+                        )
+                        hand_role_debug.update(
+                            current_commitment.as_debug_maps()
+                        )
+                        commitment_edit_tokens = (
+                            current_commitment.edit_support.reshape(
+                                batch_size,
+                                -1,
+                            )
+                        )
+                        role_edit_tokens = (
+                            role_edit_tokens
+                            | commitment_edit_tokens
+                        )
+                        inloop_trg_fg_mask = role_edit_tokens
+                        src_fg_mask_map = self._mask_reshape(
+                            role_edit_tokens,
+                            size=(
+                                current_num_frames,
+                                height,
+                                width,
+                            ),
+                        )
                     hand_role_debug.update({
                         f"control_{name}": value
                         for name, value
@@ -1442,6 +1532,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "uncertainty="
                         f"{current_control_belief.uncertainty.mean().item():.4f}"
                     )
+                    if current_commitment is not None:
+                        print(
+                            "EDIT_COMMITMENT "
+                            "block="
+                            f"{current_start_frame // self.num_frame_per_block} "
+                            "trigger="
+                            f"{current_commitment.trigger.mean().item():.4f} "
+                            "transport="
+                            f"{current_commitment.transported.mean().item():.4f} "
+                            "presence="
+                            f"{current_commitment.semantic_presence.mean().item():.4f} "
+                            "precision="
+                            f"{current_commitment.commitment_precision.mean().item():.4f} "
+                            "effective="
+                            f"{current_commitment.effective_commitment.mean().item():.4f} "
+                            "edit_support="
+                            f"{current_commitment.edit_support.float().mean().item():.4f}"
+                        )
                     if aligned_belief_kv_enabled:
                         print(
                             "BELIEF_DUAL_KV "
