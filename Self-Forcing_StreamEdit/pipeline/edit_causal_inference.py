@@ -65,16 +65,50 @@ class EditCausalInferencePipeline(torch.nn.Module):
         if args.warp_denoising_step:
             timesteps = torch.cat((self.scheduler.timesteps.cpu(), torch.tensor([0], dtype=torch.float32)))
             self.denoising_step_list = timesteps[1000 - self.denoising_step_list]
+        first_block_steps = getattr(
+            args,
+            "denoising_step_list_first_chunk",
+            None,
+        )
+        self.denoising_step_list_first_block = (
+            None
+            if first_block_steps is None
+            else torch.tensor(first_block_steps, dtype=torch.long)
+        )
+        if (
+            self.denoising_step_list_first_block is not None
+            and args.warp_denoising_step
+        ):
+            self.denoising_step_list_first_block = timesteps[
+                1000 - self.denoising_step_list_first_block
+            ]
 
         self.num_transformer_blocks = 30
         self.frame_seq_length = 1560
 
         self.args = args
+        self.backbone_name = getattr(
+            args,
+            "backbone_name",
+            "self_forcing",
+        )
         self.num_frame_per_block = getattr(args, "num_frame_per_block", 1)
         self.independent_first_frame = args.independent_first_frame
         self.local_attn_size = self.generator.model.local_attn_size
 
-        print(f"KV inference with {self.num_frame_per_block} frames per block")
+        first_block_step_count = (
+            len(self.denoising_step_list_first_block)
+            if self.denoising_step_list_first_block is not None
+            else len(self.denoising_step_list)
+        )
+        print(
+            "EDIT_BACKBONE "
+            f"name={self.backbone_name} "
+            f"frames_per_block={self.num_frame_per_block} "
+            f"steps={len(self.denoising_step_list)} "
+            "first_block_steps="
+            f"{first_block_step_count}"
+        )
 
         if self.num_frame_per_block > 1:
             self.generator.model.num_frame_per_block = self.num_frame_per_block
@@ -424,6 +458,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 _target_identity_memory=(
                     rollout_target_identity_memory
                 ),
+                _use_first_block_schedule=(start_idx == 0),
             )
 
             # store results
@@ -529,6 +564,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         _target_identity_memory: Optional[
             SlowTargetIdentityMemory
         ] = None,
+        _use_first_block_schedule: bool = True,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
         independent_first_frame = independent_first_frame or self.independent_first_frame
@@ -1056,6 +1092,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 #✨ trg and trg mask
                 current_trg_ref_latents = trg_initial_latent[:, left: right]
                 self._register_crossattn_mask_gatherer(crossattn_cache_trg, tok_trg, layers=mask_layers, fg_scale=fg_scale)
+                if (
+                    reference_identity_enabled
+                    and not target_identity_memory.reference_bootstrapped
+                ):
+                    self._register_identity_key_capture(
+                        kv_cache_trg,
+                        hand_query_layers,
+                    )
                 self.generator(
                     noisy_image_or_video=current_trg_ref_latents,
                     conditional_dict=trg_conditional_dict,
@@ -1138,11 +1182,28 @@ class EditCausalInferencePipeline(torch.nn.Module):
             diffusion_start.record()
 
         # Step 3: Temporal denoising loop
-        denoising_step_list = self.denoising_step_list
         all_num_frames = [self.num_frame_per_block] * num_blocks
         if independent_first_frame and trg_initial_latent is None:
             all_num_frames = [1] + all_num_frames
-        for current_num_frames in tqdm(all_num_frames):
+        for block_index, current_num_frames in enumerate(
+            tqdm(all_num_frames)
+        ):
+            denoising_step_list = (
+                self.denoising_step_list_first_block
+                if (
+                    block_index == 0
+                    and _use_first_block_schedule
+                    and self.denoising_step_list_first_block is not None
+                )
+                else self.denoising_step_list
+            )
+            if block_index == 0:
+                print(
+                    "EDIT_DENOISING_SCHEDULE "
+                    f"backbone={self.backbone_name} "
+                    f"first_block={int(_use_first_block_schedule)} "
+                    f"steps={len(denoising_step_list)}"
+                )
             if profile:
                 block_start.record()
 
@@ -2096,6 +2157,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
             del kv_cache_dual
             self._kv_cache_to(kv_cache_trg, 'cuda', low_memory)
             self._register_crossattn_mask_gatherer(crossattn_cache_trg, tok_trg, layers=mask_layers, fg_scale=fg_scale)
+            if target_identity_enabled:
+                self._register_identity_key_capture(
+                    kv_cache_trg,
+                    hand_query_layers,
+                )
             # Step 3.3: rerun with timestep zero to update KV cache using clean context
             self.generator(
                 noisy_image_or_video=denoised_pred,
@@ -2624,6 +2690,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
     def _register_query_capture(kv_cache, layers):
         for layer_index in layers:
             kv_cache[layer_index]["capture_current_query"] = True
+
+    @staticmethod
+    def _register_identity_key_capture(kv_cache, layers):
+        for layer_index in layers:
+            kv_cache[layer_index][
+                "capture_current_identity_key"
+            ] = True
 
     @staticmethod
     def _aggregate_query_features(kv_cache, layers):

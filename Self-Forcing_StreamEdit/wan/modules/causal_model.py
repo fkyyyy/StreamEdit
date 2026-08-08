@@ -121,6 +121,7 @@ class CausalWanSelfAttention(nn.Module):
                  num_heads,
                  local_attn_size=-1,
                  sink_size=0,
+                 absolute_kv_rope=False,
                  qk_norm=True,
                  eps=1e-6):
         assert dim % num_heads == 0
@@ -130,6 +131,7 @@ class CausalWanSelfAttention(nn.Module):
         self.head_dim = dim // num_heads
         self.local_attn_size = local_attn_size
         self.sink_size = sink_size
+        self.absolute_kv_rope = absolute_kv_rope
         self.qk_norm = qk_norm
         self.eps = eps
         self.max_attention_size = 32760 if local_attn_size == -1 else local_attn_size * 1560
@@ -181,6 +183,11 @@ class CausalWanSelfAttention(nn.Module):
                 q.detach().float().mean(dim=2),
                 dim=-1,
             ).to(dtype=v.dtype)
+        if (
+            isinstance(kv_cache, dict)
+            and kv_cache.pop("capture_current_identity_key", False)
+        ):
+            kv_cache["current_identity_key"] = k.detach()
 
         if kv_cache is None:
             # if it is teacher forcing training?
@@ -292,7 +299,29 @@ class CausalWanSelfAttention(nn.Module):
             local_start_index = local_end_index - num_new_tokens
             attn_seq_slice = slice(max(0, local_end_index - self.max_attention_size), local_end_index)
 
-            if sink_tokens == 0:
+            if self.absolute_kv_rope:
+                current_start_frame = current_start // frame_seqlen
+                roped_query = causal_rope_apply(
+                    q,
+                    grid_sizes,
+                    freqs,
+                    start_frame=current_start_frame,
+                ).type_as(v)
+                roped_key = causal_rope_apply(
+                    k,
+                    grid_sizes,
+                    freqs,
+                    start_frame=current_start_frame,
+                ).type_as(v)
+                kv_cache["k"][
+                    :, local_start_index:local_end_index
+                ] = roped_key
+                kv_cache["v"][
+                    :, local_start_index:local_end_index
+                ] = v
+                attn_key = kv_cache["k"][:, attn_seq_slice]
+                attn_value = kv_cache["v"][:, attn_seq_slice]
+            elif sink_tokens == 0:
                 kv_cache["k"][:, local_start_index:local_end_index] = k
                 kv_cache["v"][:, local_start_index:local_end_index] = v
 
@@ -554,6 +583,7 @@ class CausalWanAttentionBlock(nn.Module):
                  num_heads,
                  local_attn_size=-1,
                  sink_size=0,
+                 absolute_kv_rope=False,
                  qk_norm=True,
                  cross_attn_norm=False,
                  eps=1e-6):
@@ -568,7 +598,15 @@ class CausalWanAttentionBlock(nn.Module):
 
         # layers
         self.norm1 = WanLayerNorm(dim, eps)
-        self.self_attn = CausalWanSelfAttention(dim, num_heads, local_attn_size, sink_size, qk_norm, eps)
+        self.self_attn = CausalWanSelfAttention(
+            dim,
+            num_heads,
+            local_attn_size,
+            sink_size,
+            absolute_kv_rope,
+            qk_norm,
+            eps,
+        )
         self.norm3 = WanLayerNorm(
             dim, eps,
             elementwise_affine=True) if cross_attn_norm else nn.Identity()
@@ -697,6 +735,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                  num_layers=32,
                  local_attn_size=-1,
                  sink_size=0,
+                 absolute_kv_rope=False,
                  qk_norm=True,
                  cross_attn_norm=True,
                  eps=1e-6):
@@ -730,6 +769,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 Window size for temporal local attention (-1 indicates global attention)
             sink_size (`int`, *optional*, defaults to 0):
                 Size of the attention sink, we keep the first `sink_size` frames unchanged when rolling the KV cache
+            absolute_kv_rope (`bool`, *optional*, defaults to False):
+                Cache absolute-position RoPE keys used by Causal Forcing
             qk_norm (`bool`, *optional*, defaults to True):
                 Enable query/key normalization
             cross_attn_norm (`bool`, *optional*, defaults to False):
@@ -754,6 +795,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.local_attn_size = local_attn_size
+        self.absolute_kv_rope = absolute_kv_rope
         self.qk_norm = qk_norm
         self.cross_attn_norm = cross_attn_norm
         self.eps = eps
@@ -774,7 +816,9 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         cross_attn_type = 't2v_cross_attn' if model_type == 't2v' else 'i2v_cross_attn'
         self.blocks = nn.ModuleList([
             CausalWanAttentionBlock(cross_attn_type, dim, ffn_dim, num_heads,
-                                    local_attn_size, sink_size, qk_norm, cross_attn_norm, eps)
+                                    local_attn_size, sink_size,
+                                    absolute_kv_rope, qk_norm,
+                                    cross_attn_norm, eps)
             for _ in range(num_layers)
         ])
 

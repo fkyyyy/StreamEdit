@@ -546,10 +546,17 @@ class SlowTargetIdentityMemory:
                     "Identity write weights and target KV must align: "
                     f"{write_weight.shape[1]} != {num_new_tokens}"
                 )
-            key = cache["k"][
-                :,
-                local_end - num_new_tokens:local_end,
-            ]
+            key = cache.get("current_identity_key")
+            if key is None:
+                key = cache["k"][
+                    :,
+                    local_end - num_new_tokens:local_end,
+                ]
+            if key.shape[1] != num_new_tokens:
+                raise ValueError(
+                    "Captured identity keys and target KV write must "
+                    f"align: {key.shape[1]} != {num_new_tokens}"
+                )
             value = cache["v"][
                 :,
                 local_end - num_new_tokens:local_end,

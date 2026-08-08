@@ -23,6 +23,28 @@ from demo_utils.memory import gpu, get_cuda_free_memory_gb, DynamicSwapInstaller
 from diffusers.utils import load_video
 
 
+BACKBONE_PRESETS = {
+    "self_forcing": {
+        "config": "configs/self_forcing_dmd.yaml",
+        "checkpoint": "checkpoints/self_forcing_dmd.pt",
+    },
+    "causal_forcing_framewise": {
+        "config": "configs/causal_forcing_dmd_framewise.yaml",
+        "checkpoint": "checkpoints/framewise/causal_forcing.pt",
+    },
+    "causal_forcing_plus_plus_2step": {
+        "config": (
+            "configs/"
+            "causal_forcing_dmd_framewise_2step.yaml"
+        ),
+        "checkpoint": (
+            "checkpoints/"
+            "causal-forcing++/framewise-2step.pt"
+        ),
+    },
+}
+
+
 def read_json(fname):
     fname = Path(fname)
     with fname.open('rt', encoding='utf-8') as handle:
@@ -101,23 +123,82 @@ def load_pipe(args):
 
     torch.set_grad_enabled(False)
 
-    config = OmegaConf.load(args.config_path)
+    preset = BACKBONE_PRESETS[args.backbone]
+    config_path = args.config_path or preset["config"]
+    checkpoint_path = (
+        args.checkpoint_path or preset["checkpoint"]
+    )
+    config = OmegaConf.load(config_path)
     default_config = OmegaConf.load("configs/default_config.yaml")
     config = OmegaConf.merge(default_config, config)
+    config["backbone_name"] = args.backbone
 
     # settings for editing
     config['guidance_scale'] = 1.0
-    config['timestep_shift'] = args.flow_shift
-    config['model_kwargs']['timestep_shift'] = args.flow_shift
     config['model_kwargs']['sink_size'] = getattr(args, 'sink_size', 0)
-    config['denoising_step_list'] = np.arange(1000, 0, -1000 / args.step).astype(int).tolist()
+    if args.backbone == "self_forcing":
+        config['timestep_shift'] = args.flow_shift
+        config['model_kwargs']['timestep_shift'] = args.flow_shift
+        config['denoising_step_list'] = np.arange(
+            1000,
+            0,
+            -1000 / args.step,
+        ).astype(int).tolist()
+    else:
+        config['model_kwargs']['absolute_kv_rope'] = True
+        if config.num_frame_per_block != 1:
+            raise ValueError(
+                "Causal Forcing editing currently requires the "
+                "frame-wise checkpoint with num_frame_per_block=1"
+            )
+    print(
+        "BACKBONE_CONFIG "
+        f"name={args.backbone} "
+        f"config={config_path} "
+        f"checkpoint={checkpoint_path}"
+    )
 
-    # Initialize pipeline, few-step method is unimplemented
+    # Initialize the editing pipeline with the selected AR backbone.
     pipeline = EditCausalInferencePipeline(config, device=device)
 
-    if args.checkpoint_path:
-        state_dict = torch.load(args.checkpoint_path, map_location="cpu")
-        pipeline.generator.load_state_dict(state_dict['generator' if not args.use_ema else 'generator_ema'])
+    if checkpoint_path:
+        state_dict = torch.load(
+            checkpoint_path,
+            map_location="cpu",
+        )
+        checkpoint_key = (
+            "generator_ema" if args.use_ema else "generator"
+        )
+        if checkpoint_key not in state_dict:
+            raise KeyError(
+                f"Checkpoint {checkpoint_path} has no "
+                f"'{checkpoint_key}' weights"
+            )
+        generator_state = {}
+        for name, value in state_dict[checkpoint_key].items():
+            if name.startswith(
+                "model._fsdp_wrapped_module."
+            ):
+                name = name.replace(
+                    "model._fsdp_wrapped_module.",
+                    "model.",
+                    1,
+                )
+            elif name.startswith("_fsdp_wrapped_module."):
+                name = name.replace(
+                    "_fsdp_wrapped_module.",
+                    "",
+                    1,
+                )
+            generator_state[name] = value
+        pipeline.generator.load_state_dict(
+            generator_state,
+            strict=True,
+        )
+        print(
+            "BACKBONE_CHECKPOINT_LOADED "
+            f"name={args.backbone} key={checkpoint_key}"
+        )
 
     pipeline = pipeline.to(dtype=torch.bfloat16)
     if low_memory:
@@ -148,15 +229,28 @@ if __name__ == '__main__':
     parser.add_argument("--blend_power", type=float, default=2.0, help='rho')
 
     # model settings
-    parser.add_argument("--step", type=int, default=15, help='1~1000')
+    parser.add_argument(
+        "--step",
+        type=int,
+        default=15,
+        help=(
+            "Self-Forcing denoising steps. Causal Forcing presets "
+            "use their checkpoint schedule."
+        ),
+    )
     parser.add_argument("--flow_shift", type=float, default=1.0)
+    parser.add_argument(
+        "--backbone",
+        choices=tuple(BACKBONE_PRESETS),
+        default="self_forcing",
+    )
 
     # for Self-forcing rollout long video sampling
     parser.add_argument("--rollout_chunk_size", type=int, default=21)
     parser.add_argument("--rollout_overlap_block_num", type=int, default=1)
 
-    parser.add_argument("--config_path", type=str, default='configs/self_forcing_dmd.yaml')
-    parser.add_argument("--checkpoint_path", type=str, default='checkpoints/self_forcing_dmd.pt')
+    parser.add_argument("--config_path", type=str, default=None)
+    parser.add_argument("--checkpoint_path", type=str, default=None)
     parser.add_argument("--use_ema", action="store_true", default=True)
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     parser.add_argument(
@@ -478,7 +572,10 @@ if __name__ == '__main__':
     height = src_video[0].size[1]
     width = src_video[0].size[0]
     num_frames = len(src_video)
-    new_len = find_closest_num_frame(num_frames)
+    new_len = find_closest_num_frame(
+        num_frames,
+        b=pipeline.num_frame_per_block,
+    )
     src_video = src_video[: new_len]
     num_frames = len(src_video)
     print(num_frames, height, width)

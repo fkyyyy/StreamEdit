@@ -309,6 +309,41 @@ def test_identity_memory_can_bootstrap_after_empty_block():
     assert torch.count_nonzero(memory.states[0].value) > 0
 
 
+def test_identity_memory_prefers_captured_raw_keys():
+    cached_key = torch.tensor(
+        [[[[0.0, 1.0]]] * 4]
+    )
+    raw_key = torch.tensor(
+        [[[[1.0, 0.0]]] * 4]
+    )
+    value = torch.randn_like(cached_key)
+    cache = _cache(cached_key, value)
+    cache[0]["current_identity_key"] = raw_key
+    memory = identity_module.SlowTargetIdentityMemory(
+        layers=(0,),
+        num_prototypes=1,
+    )
+
+    memory.update(
+        cache,
+        write_weight=torch.ones((1, 4)),
+    )
+    prototype = memory.states[0].key.float()
+
+    raw_similarity = torch.nn.functional.cosine_similarity(
+        prototype,
+        raw_key[:, :1],
+        dim=-1,
+    )
+    cached_similarity = torch.nn.functional.cosine_similarity(
+        prototype,
+        cached_key[:, :1],
+        dim=-1,
+    )
+    assert raw_similarity.min() > 0.99
+    assert cached_similarity.max() < 0.01
+
+
 def test_identity_value_correction_is_match_gated():
     target_key = torch.tensor(
         [[
