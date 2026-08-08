@@ -26,8 +26,7 @@ import warnings
 __all__ = [
     'flash_attention',
     'attention',
-    'weighted_attention',
-    'dual_memory_attention',
+    'fuse_aligned_memory',
 ]
 
 
@@ -187,111 +186,30 @@ def attention(
         return out
 
 
-def weighted_attention(
-    q,
-    k,
-    v,
-    key_weight,
-    eps=1e-6,
-):
-    """Attention with non-negative per-key contribution weights."""
-    if key_weight.ndim != 2:
-        raise ValueError("key_weight must have shape [B,Lk]")
-    if key_weight.shape != k.shape[:2]:
-        raise ValueError(
-            "key_weight and key/value sequence must align, got "
-            f"{tuple(key_weight.shape)} and {tuple(k.shape[:2])}"
-        )
-    if eps <= 0:
-        raise ValueError("eps must be positive")
-
-    weight = key_weight.float().clamp_min(0.0)
-    value_weight = weight[:, :, None, None].to(v.dtype)
-    packed_query = torch.cat([q, q], dim=0)
-    packed_key = torch.cat([k, k], dim=0)
-    packed_value = torch.cat(
-        [
-            v * value_weight,
-            value_weight.expand_as(v),
-        ],
-        dim=0,
-    )
-    packed_output = attention(
-        packed_query,
-        packed_key,
-        packed_value,
-    )
-    numerator, denominator = packed_output.chunk(2, dim=0)
-    return (
-        numerator.float()
-        / denominator.float().clamp_min(eps)
-    ).to(numerator.dtype)
-
-
-def dual_memory_attention(
-    q,
+def fuse_aligned_memory(
     target_key,
     target_value,
-    target_key_weight,
     source_key,
     source_value,
-    source_key_weight,
-    edit_action,
     preserve_action,
-    composition_steps=1,
-    eps=1e-6,
 ):
-    """Mix independently normalized target and source memory experts."""
-    if edit_action.shape != preserve_action.shape:
-        raise ValueError("Dual-memory query actions must share shape")
-    if edit_action.shape != q.shape[:2]:
+    """Fuse aligned target/source KV with a per-memory-token action."""
+    if target_key.shape != source_key.shape:
+        raise ValueError("Aligned target/source keys must share shape")
+    if target_value.shape != source_value.shape:
+        raise ValueError("Aligned target/source values must share shape")
+    if target_key.shape[:2] != preserve_action.shape:
         raise ValueError(
-            "Dual-memory query actions must align with query tokens"
+            "Preserve action must align with memory tokens"
         )
-    if composition_steps <= 0:
-        raise ValueError("composition_steps must be positive")
-    action_sum = (
-        edit_action.float().clamp_min(0.0)
-        + preserve_action.float().clamp_min(0.0)
-    )
-    edit_action = (
-        edit_action.float().clamp_min(0.0)
-        / action_sum.clamp_min(eps)
-    )
-    preserve_action = (
-        preserve_action.float().clamp_min(0.0)
-        / action_sum.clamp_min(eps)
-    )
-    no_action = action_sum <= eps
-    edit_action = torch.where(
-        no_action,
-        torch.zeros_like(edit_action),
-        edit_action,
-    )
-    preserve_action = torch.where(
-        no_action,
-        torch.ones_like(preserve_action),
-        preserve_action,
-    )
-    if composition_steps > 1:
-        edit_action = edit_action.pow(1.0 / composition_steps)
-        preserve_action = 1.0 - edit_action
-
-    target_output = weighted_attention(
-        q,
-        target_key,
-        target_value,
-        target_key_weight,
-        eps=eps,
-    )
-    source_output = weighted_attention(
-        q,
-        source_key,
-        source_value,
-        source_key_weight,
-        eps=eps,
-    )
-    return (
-        edit_action[:, :, None, None] * target_output.float()
-        + preserve_action[:, :, None, None] * source_output.float()
-    ).to(target_output.dtype)
+    weight = preserve_action.float().clamp(0.0, 1.0)
+    weight = weight[:, :, None, None]
+    fused_key = (
+        target_key.float()
+        + weight * (source_key.float() - target_key.float())
+    ).to(target_key.dtype)
+    fused_value = (
+        target_value.float()
+        + weight * (source_value.float() - target_value.float())
+    ).to(target_value.dtype)
+    return fused_key, fused_value

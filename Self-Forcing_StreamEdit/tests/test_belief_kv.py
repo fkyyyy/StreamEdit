@@ -150,120 +150,63 @@ def test_belief_kv_rejects_misaligned_token_length():
         )
 
 
-def test_weighted_attention_keeps_batch_numerators_aligned(monkeypatch):
-    def uniform_attention(query, key, value):
-        del key
-        return value.mean(dim=1, keepdim=True).expand(
-            -1,
-            query.shape[1],
-            -1,
-            -1,
-        )
-
-    monkeypatch.setattr(
-        attention_module,
-        "attention",
-        uniform_attention,
+def test_aligned_memory_fusion_preserves_endpoints_and_conflict():
+    target_key = torch.tensor(
+        [[[[0.0]], [[2.0]], [[4.0]]]]
     )
-    query = torch.zeros((2, 1, 1, 1))
-    key = torch.zeros((2, 2, 1, 1))
-    value = torch.tensor(
-        [
-            [[[[1.0]]], [[[3.0]]]],
-            [[[[2.0]]], [[[4.0]]]],
-        ]
-    ).reshape(2, 2, 1, 1)
-    key_weight = torch.tensor(
-        [[1.0, 0.0], [0.0, 1.0]]
+    target_value = target_key + 1.0
+    source_key = torch.tensor(
+        [[[[10.0]], [[12.0]], [[14.0]]]]
     )
+    source_value = source_key + 1.0
 
-    output = attention_module.weighted_attention(
-        query,
-        key,
-        value,
-        key_weight,
-    )
-
-    assert torch.allclose(
-        output.flatten(),
-        torch.tensor([1.0, 4.0]),
-    )
-
-
-def test_dual_memory_normalizes_experts_before_query_mixture(monkeypatch):
-    def uniform_attention(query, key, value):
-        del key
-        return value.mean(dim=1, keepdim=True).expand(
-            -1,
-            query.shape[1],
-            -1,
-            -1,
-        )
-
-    monkeypatch.setattr(
-        attention_module,
-        "attention",
-        uniform_attention,
-    )
-    query = torch.zeros((1, 2, 1, 1))
-    target_key = torch.zeros((1, 1, 1, 1))
-    target_value = torch.full_like(target_key, 10.0)
-    source_key = torch.zeros((1, 20, 1, 1))
-    source_value = torch.ones_like(source_key)
-
-    output = attention_module.dual_memory_attention(
-        query,
+    fused_key, fused_value = attention_module.fuse_aligned_memory(
         target_key,
         target_value,
-        torch.ones((1, 1)),
         source_key,
         source_value,
-        torch.ones((1, 20)),
-        edit_action=torch.tensor([[1.0, 0.5]]),
-        preserve_action=torch.tensor([[0.0, 0.5]]),
+        preserve_action=torch.tensor([[0.0, 0.5, 1.0]]),
     )
 
     assert torch.allclose(
-        output.flatten(),
-        torch.tensor([10.0, 5.5]),
+        fused_key.flatten(),
+        torch.tensor([0.0, 7.0, 14.0]),
+    )
+    assert torch.allclose(
+        fused_value.flatten(),
+        torch.tensor([1.0, 8.0, 15.0]),
     )
 
 
-def test_dual_memory_calibrates_repeated_layer_action(monkeypatch):
-    def uniform_attention(query, key, value):
-        del key
-        return value.mean(dim=1, keepdim=True).expand(
-            -1,
-            query.shape[1],
-            -1,
-            -1,
+def test_aligned_memory_fusion_supports_bfloat16():
+    target = torch.zeros((1, 2, 1, 1), dtype=torch.bfloat16)
+    source = torch.full_like(target, 2.0)
+
+    fused_key, fused_value = attention_module.fuse_aligned_memory(
+        target,
+        target,
+        source,
+        source,
+        preserve_action=torch.tensor([[0.25, 0.75]]),
+    )
+
+    assert fused_key.dtype == torch.bfloat16
+    assert fused_value.dtype == torch.bfloat16
+    assert torch.allclose(
+        fused_key.float().flatten(),
+        torch.tensor([0.5, 1.5]),
+    )
+
+
+def test_aligned_memory_fusion_rejects_unaligned_tokens():
+    target = torch.zeros((1, 2, 1, 1))
+    source = torch.zeros((1, 3, 1, 1))
+
+    with pytest.raises(ValueError, match="keys must share shape"):
+        attention_module.fuse_aligned_memory(
+            target,
+            target,
+            source,
+            source,
+            preserve_action=torch.ones((1, 2)),
         )
-
-    monkeypatch.setattr(
-        attention_module,
-        "attention",
-        uniform_attention,
-    )
-    query = torch.zeros((1, 1, 1, 1))
-    key = torch.zeros((1, 1, 1, 1))
-    target_value = torch.ones_like(key)
-    source_value = torch.zeros_like(key)
-
-    output = attention_module.dual_memory_attention(
-        query,
-        key,
-        target_value,
-        torch.ones((1, 1)),
-        key,
-        source_value,
-        torch.ones((1, 1)),
-        edit_action=torch.tensor([[0.25]]),
-        preserve_action=torch.tensor([[0.75]]),
-        composition_steps=2,
-    )
-
-    # A 0.5 per-layer target action composes to 0.25 over two layers.
-    assert torch.allclose(
-        output.flatten(),
-        torch.tensor([0.5]),
-    )

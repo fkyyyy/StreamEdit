@@ -1,4 +1,4 @@
-from wan.modules.attention import attention, dual_memory_attention
+from wan.modules.attention import attention, fuse_aligned_memory
 from wan.modules.contact_graph_attention import (
     apply_contact_graph_residual,
 )
@@ -347,108 +347,76 @@ class CausalWanSelfAttention(nn.Module):
                     dual_belief_kv = all(
                         kv_cache.get(name) is not None
                         for name in (
-                            "cached_edit_kv_weight",
-                            "cached_preserve_kv_weight",
-                            "current_edit_kv_weight",
-                            "current_preserve_kv_weight",
-                            "current_edit_kv_action",
-                            "current_preserve_kv_action",
+                            "cached_preserve_kv_action",
                         )
                     )
                     if dual_belief_kv:
-                        cached_edit = kv_cache[
-                            "cached_edit_kv_weight"
+                        cached_preserve_action = kv_cache[
+                            "cached_preserve_kv_action"
                         ][b_idx, attn_seq_slice][:-num_new_tokens]
-                        cached_preserve = kv_cache[
-                            "cached_preserve_kv_weight"
-                        ][b_idx, attn_seq_slice][:-num_new_tokens]
-                        current_edit = kv_cache[
-                            "current_edit_kv_weight"
-                        ][b_idx]
-                        current_preserve = kv_cache[
-                            "current_preserve_kv_weight"
-                        ][b_idx]
-                        current_edit_action = kv_cache[
-                            "current_edit_kv_action"
-                        ][b_idx]
-                        current_preserve_action = kv_cache[
-                            "current_preserve_kv_action"
-                        ][b_idx]
-                        if (
-                            current_edit.shape[0] != num_new_tokens
-                            or current_preserve.shape[0] != num_new_tokens
-                            or current_edit_action.shape[0]
-                            != num_new_tokens
-                            or current_preserve_action.shape[0]
-                            != num_new_tokens
+                        if cached_preserve_action.shape[0] != (
+                            src_prev_key.shape[1]
                         ):
                             raise ValueError(
-                                "Current belief KV weights must align with "
-                                f"{num_new_tokens} query tokens"
+                                "Cached belief KV actions must align with "
+                                "historical memory tokens"
                             )
-                        source_memory_key = torch.cat(
-                            [
-                                src_prev_key[b_idx],
-                                src_current_key[b_idx],
-                            ],
-                            dim=0,
+                        fused_prev_key, fused_prev_value = (
+                            fuse_aligned_memory(
+                                trg_prev_key[b_idx].unsqueeze(0),
+                                trg_prev_value[b_idx].unsqueeze(0),
+                                src_prev_key[b_idx].unsqueeze(0),
+                                src_prev_value[b_idx].unsqueeze(0),
+                                cached_preserve_action.unsqueeze(0),
+                            )
                         )
-                        source_memory_value = torch.cat(
-                            [
-                                src_prev_value[b_idx],
-                                src_current_value[b_idx],
-                            ],
-                            dim=0,
+                        current_target_key = (
+                            trg_current_key[b_idx] * blender_rate
+                            + src_current_key[b_idx] * (1 - blender_rate)
                         )
-                        source_memory_weight = torch.cat(
-                            [
-                                cached_preserve,
-                                current_preserve,
-                            ],
-                            dim=0,
-                        ).unsqueeze(0)
+                        target_key_list = [fused_prev_key.squeeze(0)]
+                        target_value_list = [
+                            fused_prev_value.squeeze(0)
+                        ]
+                        if kv_cache["shared_dict"][
+                            "current_timestep_index"
+                        ] > kv_cache["shared_dict"][
+                            "total_timestep"
+                        ] // 2:
+                            current_edit_mask = kv_cache[
+                                "current_src_fg_mask"
+                            ][b_idx]
+                            current_background_mask = ~current_edit_mask
+                            target_key_list.append(
+                                src_current_key[b_idx][
+                                    current_background_mask
+                                ]
+                            )
+                            target_value_list.append(
+                                src_current_value[b_idx][
+                                    current_background_mask
+                                ]
+                            )
+                        target_key_list.append(current_target_key)
+                        target_value_list.append(
+                            trg_current_value[b_idx]
+                        )
                         target_memory_key = torch.cat(
-                            [
-                                trg_prev_key[b_idx],
-                                (
-                                    trg_current_key[b_idx] * blender_rate
-                                    + src_current_key[b_idx]
-                                    * (1 - blender_rate)
-                                ),
-                            ],
+                            target_key_list,
                             dim=0,
                         )
                         target_memory_value = torch.cat(
-                            [
-                                trg_prev_value[b_idx],
-                                trg_current_value[b_idx],
-                            ],
+                            target_value_list,
                             dim=0,
                         )
-                        target_memory_weight = torch.cat(
-                            [
-                                cached_edit,
-                                torch.ones_like(current_edit),
-                            ],
-                            dim=0,
-                        ).unsqueeze(0)
                         b_query = (
                             trg_query[b_idx] * blender_rate
                             + src_query[b_idx] * (1 - blender_rate)
                         )
-                        b_target_output = dual_memory_attention(
+                        b_target_output = attention(
                             b_query.unsqueeze(0),
                             target_memory_key.unsqueeze(0),
                             target_memory_value.unsqueeze(0),
-                            target_memory_weight,
-                            source_memory_key.unsqueeze(0),
-                            source_memory_value.unsqueeze(0),
-                            source_memory_weight,
-                            current_edit_action.unsqueeze(0),
-                            current_preserve_action.unsqueeze(0),
-                            composition_steps=kv_cache[
-                                "shared_dict"
-                            ].get("belief_dual_kv_num_layers", 1),
                         )
                         x_list.append(b_target_output)
                         continue
