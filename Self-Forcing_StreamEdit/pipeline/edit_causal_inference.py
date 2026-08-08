@@ -667,7 +667,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "BELIEF_DUAL_KV "
                         "target_memory=edit_belief "
                         "source_memory=preserve_belief "
-                        "conflict=dual_active"
+                        "conflict=dual_active "
+                        "expert_norm=independent "
+                        "action=layer_calibrated "
+                        "current_target=full"
                     )
         elif hand_role_enabled:
             print(
@@ -1132,6 +1135,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "contact_graph_strength": contact_graph_strength,
                 "contact_graph_layer_start": contact_graph_layer_start,
                 "contact_graph_layer_end": contact_graph_layer_end,
+                "belief_dual_kv_num_layers": (
+                    self.num_transformer_blocks
+                    if belief_dual_kv_enabled
+                    else 1
+                ),
             })
             effective_src_fg_mask = (
                 role_edit_tokens
@@ -1352,6 +1360,19 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 current_belief_kv_weights
                                 .preserve_action_map
                             ),
+                            "dual_kv_layer_edit_action": (
+                                current_belief_kv_weights
+                                .edit_action_map.pow(
+                                    1.0 / self.num_transformer_blocks
+                                )
+                            ),
+                            "dual_kv_layer_preserve_action": (
+                                1.0
+                                - current_belief_kv_weights
+                                .edit_action_map.pow(
+                                    1.0 / self.num_transformer_blocks
+                                )
+                            ),
                             "dual_kv_conflict_weight": (
                                 current_belief_kv_weights.conflict_map
                             ),
@@ -1395,6 +1416,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             f"{current_belief_kv_weights.preserve.mean().item():.4f} "
                             "edit_action="
                             f"{current_belief_kv_weights.edit_action.mean().item():.4f} "
+                            "layer_preserve="
+                            f"{(1.0 - current_belief_kv_weights.edit_action.pow(1.0 / self.num_transformer_blocks)).mean().item():.4f} "
                             "conflict="
                             f"{current_belief_kv_weights.conflict_map.mean().item():.4f}"
                         )

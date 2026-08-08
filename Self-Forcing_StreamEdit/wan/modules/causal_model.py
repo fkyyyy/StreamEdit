@@ -410,7 +410,11 @@ class CausalWanSelfAttention(nn.Module):
                         target_memory_key = torch.cat(
                             [
                                 trg_prev_key[b_idx],
-                                trg_current_key[b_idx],
+                                (
+                                    trg_current_key[b_idx] * blender_rate
+                                    + src_current_key[b_idx]
+                                    * (1 - blender_rate)
+                                ),
                             ],
                             dim=0,
                         )
@@ -424,7 +428,7 @@ class CausalWanSelfAttention(nn.Module):
                         target_memory_weight = torch.cat(
                             [
                                 cached_edit,
-                                current_edit,
+                                torch.ones_like(current_edit),
                             ],
                             dim=0,
                         ).unsqueeze(0)
@@ -442,6 +446,9 @@ class CausalWanSelfAttention(nn.Module):
                             source_memory_weight,
                             current_edit_action.unsqueeze(0),
                             current_preserve_action.unsqueeze(0),
+                            composition_steps=kv_cache[
+                                "shared_dict"
+                            ].get("belief_dual_kv_num_layers", 1),
                         )
                         x_list.append(b_target_output)
                         continue

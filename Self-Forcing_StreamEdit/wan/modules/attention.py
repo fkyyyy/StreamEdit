@@ -238,6 +238,7 @@ def dual_memory_attention(
     source_key_weight,
     edit_action,
     preserve_action,
+    composition_steps=1,
     eps=1e-6,
 ):
     """Mix independently normalized target and source memory experts."""
@@ -247,6 +248,8 @@ def dual_memory_attention(
         raise ValueError(
             "Dual-memory query actions must align with query tokens"
         )
+    if composition_steps <= 0:
+        raise ValueError("composition_steps must be positive")
     action_sum = (
         edit_action.float().clamp_min(0.0)
         + preserve_action.float().clamp_min(0.0)
@@ -270,6 +273,9 @@ def dual_memory_attention(
         torch.ones_like(preserve_action),
         preserve_action,
     )
+    if composition_steps > 1:
+        edit_action = edit_action.pow(1.0 / composition_steps)
+        preserve_action = 1.0 - edit_action
 
     target_output = weighted_attention(
         q,

@@ -227,3 +227,43 @@ def test_dual_memory_normalizes_experts_before_query_mixture(monkeypatch):
         output.flatten(),
         torch.tensor([10.0, 5.5]),
     )
+
+
+def test_dual_memory_calibrates_repeated_layer_action(monkeypatch):
+    def uniform_attention(query, key, value):
+        del key
+        return value.mean(dim=1, keepdim=True).expand(
+            -1,
+            query.shape[1],
+            -1,
+            -1,
+        )
+
+    monkeypatch.setattr(
+        attention_module,
+        "attention",
+        uniform_attention,
+    )
+    query = torch.zeros((1, 1, 1, 1))
+    key = torch.zeros((1, 1, 1, 1))
+    target_value = torch.ones_like(key)
+    source_value = torch.zeros_like(key)
+
+    output = attention_module.dual_memory_attention(
+        query,
+        key,
+        target_value,
+        torch.ones((1, 1)),
+        key,
+        source_value,
+        torch.ones((1, 1)),
+        edit_action=torch.tensor([[0.25]]),
+        preserve_action=torch.tensor([[0.75]]),
+        composition_steps=2,
+    )
+
+    # A 0.5 per-layer target action composes to 0.25 over two layers.
+    assert torch.allclose(
+        output.flatten(),
+        torch.tensor([0.5]),
+    )
