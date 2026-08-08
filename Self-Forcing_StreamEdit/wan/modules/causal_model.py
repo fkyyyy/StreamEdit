@@ -1,4 +1,4 @@
-from wan.modules.attention import attention
+from wan.modules.attention import attention, weighted_attention
 from wan.modules.contact_graph_attention import (
     apply_contact_graph_residual,
 )
@@ -344,6 +344,76 @@ class CausalWanSelfAttention(nn.Module):
                     attention(src_query, src_key, src_value)   # source
                 ]
                 for b_idx in range(b // 2):
+                    dual_belief_kv = all(
+                        kv_cache.get(name) is not None
+                        for name in (
+                            "cached_edit_kv_weight",
+                            "cached_preserve_kv_weight",
+                            "current_edit_kv_weight",
+                            "current_preserve_kv_weight",
+                        )
+                    )
+                    if dual_belief_kv:
+                        cached_edit = kv_cache[
+                            "cached_edit_kv_weight"
+                        ][b_idx, attn_seq_slice][:-num_new_tokens]
+                        cached_preserve = kv_cache[
+                            "cached_preserve_kv_weight"
+                        ][b_idx, attn_seq_slice][:-num_new_tokens]
+                        current_edit = kv_cache[
+                            "current_edit_kv_weight"
+                        ][b_idx]
+                        current_preserve = kv_cache[
+                            "current_preserve_kv_weight"
+                        ][b_idx]
+                        if (
+                            current_edit.shape[0] != num_new_tokens
+                            or current_preserve.shape[0] != num_new_tokens
+                        ):
+                            raise ValueError(
+                                "Current belief KV weights must align with "
+                                f"{num_new_tokens} query tokens"
+                            )
+                        dual_key = torch.cat(
+                            [
+                                src_prev_key[b_idx],
+                                trg_prev_key[b_idx],
+                                src_current_key[b_idx],
+                                trg_current_key[b_idx],
+                            ],
+                            dim=0,
+                        )
+                        dual_value = torch.cat(
+                            [
+                                src_prev_value[b_idx],
+                                trg_prev_value[b_idx],
+                                src_current_value[b_idx],
+                                trg_current_value[b_idx],
+                            ],
+                            dim=0,
+                        )
+                        dual_weight = torch.cat(
+                            [
+                                cached_preserve,
+                                cached_edit,
+                                current_preserve,
+                                current_edit,
+                            ],
+                            dim=0,
+                        ).unsqueeze(0)
+                        b_query = (
+                            trg_query[b_idx] * blender_rate
+                            + src_query[b_idx] * (1 - blender_rate)
+                        )
+                        b_target_output = weighted_attention(
+                            b_query.unsqueeze(0),
+                            dual_key.unsqueeze(0),
+                            dual_value.unsqueeze(0),
+                            dual_weight,
+                        )
+                        x_list.append(b_target_output)
+                        continue
+
                     b_key_list = []
                     b_value_list = []
                     

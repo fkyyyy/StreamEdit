@@ -17,6 +17,7 @@ from .contact_graph import (
     build_oracle_contact_graphs,
     contact_graph_stats,
 )
+from .belief_kv import build_belief_kv_weights
 from .control_belief import CausalControlBeliefBuilder
 from .hand_role_inference import HandRoleInferencer
 from .role_router import (
@@ -217,6 +218,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_adaptive_kv",
                 "hand_role_posterior_flow_kv",
                 "hand_role_bayes_flow_kv",
+                "hand_role_bayes_flow_dual_kv",
             }
         ):
             rollout_hand_role_inferencer = HandRoleInferencer(
@@ -238,6 +240,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "hand_role_adaptive_kv",
                         "hand_role_posterior_flow_kv",
                         "hand_role_bayes_flow_kv",
+                        "hand_role_bayes_flow_dual_kv",
                     }
                 ),
             )
@@ -461,17 +464,25 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_adaptive_kv",
             "hand_role_posterior_flow_kv",
             "hand_role_bayes_flow_kv",
+            "hand_role_bayes_flow_dual_kv",
         }
         adaptive_role_enabled = routing_mode in {
             "hand_role_adaptive_kv",
             "hand_role_posterior_flow_kv",
             "hand_role_bayes_flow_kv",
+            "hand_role_bayes_flow_dual_kv",
         }
         posterior_flow_enabled = (
             routing_mode == "hand_role_posterior_flow_kv"
         )
         bayes_flow_enabled = (
-            routing_mode == "hand_role_bayes_flow_kv"
+            routing_mode in {
+                "hand_role_bayes_flow_kv",
+                "hand_role_bayes_flow_dual_kv",
+            }
+        )
+        belief_dual_kv_enabled = (
+            routing_mode == "hand_role_bayes_flow_dual_kv"
         )
         consistent_role_kv_enabled = oracle_kv_enabled or hand_role_enabled
         if routing_mode not in {
@@ -484,6 +495,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_adaptive_kv",
             "hand_role_posterior_flow_kv",
             "hand_role_bayes_flow_kv",
+            "hand_role_bayes_flow_dual_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
         if not 0.0 <= contact_target_weight <= 1.0:
@@ -650,6 +662,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     "precision=online_fp32 "
                     "field_role=precision_only"
                 )
+                if belief_dual_kv_enabled:
+                    print(
+                        "BELIEF_DUAL_KV "
+                        "target_memory=edit_belief "
+                        "source_memory=preserve_belief "
+                        "conflict=dual_active"
+                    )
         elif hand_role_enabled:
             print(
                 "HAND_ROLE_RESIDUAL "
@@ -756,6 +775,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
             batch_size=batch_size,
             device=src_video.device
         )
+        belief_kv_weight_cache = (
+            self._initialize_belief_kv_weight_cache(
+                batch_size=batch_size,
+                device=src_video.device,
+            )
+            if belief_dual_kv_enabled
+            else None
+        )
         crossattn_cache_src = self._initialize_crossattn_cache(
             batch_size=batch_size,
             dtype=src_video.dtype,
@@ -857,6 +884,19 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 #✨ src & trg union
                 current_trg_fg_mask = trg_fg_mask_bin | src_fg_mask_bin
                 self._update_trg_fg_mask_cache(trg_fg_mask_cache, current_trg_fg_mask, kv_cache_trg)
+                if belief_dual_kv_enabled:
+                    self._update_belief_kv_weight_cache(
+                        belief_kv_weight_cache,
+                        current_edit_weight=torch.ones_like(
+                            current_trg_fg_mask,
+                            dtype=torch.float32,
+                        ),
+                        current_preserve_weight=torch.ones_like(
+                            current_trg_fg_mask,
+                            dtype=torch.float32,
+                        ),
+                        kv_cache_trg=kv_cache_trg,
+                    )
 
                 output[:, left: right] = current_trg_ref_latents
                 current_start_frame = right
@@ -921,6 +961,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             hand_role_debug = None
             hand_role_inference = None
             current_control_belief = None
+            current_belief_kv_weights = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
                 role_right = role_left + current_num_frames
@@ -1074,6 +1115,17 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         block_index,
                         hand_role_debug,
                     )
+                if belief_dual_kv_enabled:
+                    current_control_belief = control_belief_builder(
+                        debug=hand_role_debug,
+                        hand_mask=hand_only_mask[
+                            :, role_left:role_right
+                        ],
+                    )
+                    current_belief_kv_weights = build_belief_kv_weights(
+                        current_control_belief,
+                        expected_token_length=role_edit_tokens.shape[1],
+                    )
             shared_dict_dual.update({
                 "contact_graph_mode": contact_graph_mode,
                 "contact_graphs": contact_graphs,
@@ -1090,6 +1142,16 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 kv_cache_dual,
                 trg_fg_mask_cache,
                 effective_src_fg_mask,
+                belief_kv_weight_cache=(
+                    belief_kv_weight_cache
+                    if belief_dual_kv_enabled
+                    else None
+                ),
+                current_belief_kv_weights=(
+                    current_belief_kv_weights
+                    if belief_dual_kv_enabled
+                    else None
+                ),
             )
             src_fg_mask_map = self._mask_reshape(
                 effective_src_fg_mask,
@@ -1267,6 +1329,37 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         for name, value
                         in current_control_belief.as_dict().items()
                     })
+                    if belief_dual_kv_enabled:
+                        current_belief_kv_weights = (
+                            build_belief_kv_weights(
+                                current_control_belief,
+                                expected_token_length=(
+                                    role_edit_tokens.shape[1]
+                                ),
+                            )
+                        )
+                        hand_role_debug.update({
+                            "dual_kv_edit_weight": (
+                                current_belief_kv_weights.edit_map
+                            ),
+                            "dual_kv_preserve_weight": (
+                                current_belief_kv_weights.preserve_map
+                            ),
+                            "dual_kv_conflict_weight": (
+                                current_belief_kv_weights.conflict_map
+                            ),
+                        })
+                        self._inject_masks_to_kv_cache(
+                            kv_cache_dual,
+                            trg_fg_mask_cache,
+                            role_edit_tokens,
+                            belief_kv_weight_cache=(
+                                belief_kv_weight_cache
+                            ),
+                            current_belief_kv_weights=(
+                                current_belief_kv_weights
+                            ),
+                        )
                     print(
                         "CAUSAL_CONTROL_BELIEF "
                         "block="
@@ -1284,6 +1377,18 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "uncertainty="
                         f"{current_control_belief.uncertainty.mean().item():.4f}"
                     )
+                    if belief_dual_kv_enabled:
+                        print(
+                            "BELIEF_DUAL_KV "
+                            "block="
+                            f"{current_start_frame // self.num_frame_per_block} "
+                            "target="
+                            f"{current_belief_kv_weights.edit.mean().item():.4f} "
+                            "source="
+                            f"{current_belief_kv_weights.preserve.mean().item():.4f} "
+                            "conflict="
+                            f"{current_belief_kv_weights.conflict_map.mean().item():.4f}"
+                        )
                     if save_role_dir is not None:
                         self._save_hand_role_debug(
                             save_role_dir,
@@ -1587,6 +1692,21 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 else trg_fg_mask_bin | src_fg_mask_bin
             )
             self._update_trg_fg_mask_cache(trg_fg_mask_cache, current_trg_fg_mask, kv_cache_trg)
+            if belief_dual_kv_enabled:
+                if current_belief_kv_weights is None:
+                    raise RuntimeError(
+                        "Missing belief KV weights for dual-KV cache update"
+                    )
+                self._update_belief_kv_weight_cache(
+                    belief_kv_weight_cache,
+                    current_edit_weight=(
+                        current_belief_kv_weights.edit
+                    ),
+                    current_preserve_weight=(
+                        current_belief_kv_weights.preserve
+                    ),
+                    kv_cache_trg=kv_cache_trg,
+                )
             self._kv_cache_to(kv_cache_trg, 'cpu', low_memory)
 
             if profile:
@@ -1775,6 +1895,34 @@ class EditCausalInferencePipeline(torch.nn.Module):
         }
         return trg_fg_mask_cache
 
+    def _initialize_belief_kv_weight_cache(self, batch_size, device):
+        if self.local_attn_size != -1:
+            kv_cache_size = self.local_attn_size * self.frame_seq_length
+        else:
+            kv_cache_size = 32760
+        return {
+            "edit": torch.zeros(
+                [batch_size, kv_cache_size],
+                dtype=torch.float32,
+                device=device,
+            ),
+            "preserve": torch.zeros(
+                [batch_size, kv_cache_size],
+                dtype=torch.float32,
+                device=device,
+            ),
+            "global_end_index": torch.tensor(
+                [0],
+                dtype=torch.long,
+                device=device,
+            ),
+            "local_end_index": torch.tensor(
+                [0],
+                dtype=torch.long,
+                device=device,
+            ),
+        }
+
     def _update_trg_fg_mask_cache(self, trg_fg_mask_cache, current_trg_fg_mask, kv_cache_trg):
         '''
         ✨ update trg_fg_mask similar to kv cache update
@@ -1800,6 +1948,76 @@ class EditCausalInferencePipeline(torch.nn.Module):
         trg_fg_mask_cache["trg_fg_mask"][:, local_start_index:local_end_index] = current_trg_fg_mask
         trg_fg_mask_cache["global_end_index"].fill_(current_end)
         trg_fg_mask_cache["local_end_index"].fill_(local_end_index)
+
+    def _update_belief_kv_weight_cache(
+        self,
+        belief_kv_weight_cache,
+        current_edit_weight,
+        current_preserve_weight,
+        kv_cache_trg,
+    ):
+        if current_edit_weight.shape != current_preserve_weight.shape:
+            raise ValueError(
+                "Current edit and preserve KV weights must share shape"
+            )
+        if current_edit_weight.ndim != 2:
+            raise ValueError(
+                "Current belief KV weights must have shape [B,L]"
+            )
+        current_end = kv_cache_trg[0]["global_end_index"].item()
+        sink_tokens = kv_cache_trg[0]["sink_tokens"]
+        kv_cache_size = belief_kv_weight_cache["edit"].shape[1]
+        num_new_tokens = current_edit_weight.shape[1]
+        if num_new_tokens != kv_cache_trg[0]["num_new_tokens"]:
+            raise ValueError(
+                "Belief KV weights and target cache write must align: "
+                f"{num_new_tokens} != "
+                f"{kv_cache_trg[0]['num_new_tokens']}"
+            )
+        cache_end = belief_kv_weight_cache["local_end_index"].item()
+        cache_global_end = belief_kv_weight_cache[
+            "global_end_index"
+        ].item()
+        if (
+            self.local_attn_size != -1
+            and current_end > cache_global_end
+            and num_new_tokens + cache_end > kv_cache_size
+        ):
+            num_evicted_tokens = (
+                num_new_tokens + cache_end - kv_cache_size
+            )
+            num_rolled_tokens = (
+                cache_end - num_evicted_tokens - sink_tokens
+            )
+            for name in ("edit", "preserve"):
+                cache = belief_kv_weight_cache[name]
+                cache[
+                    :,
+                    sink_tokens:sink_tokens + num_rolled_tokens,
+                ] = cache[
+                    :,
+                    sink_tokens + num_evicted_tokens:
+                    sink_tokens + num_evicted_tokens + num_rolled_tokens,
+                ].clone()
+            local_end_index = (
+                cache_end
+                + current_end
+                - cache_global_end
+                - num_evicted_tokens
+            )
+        else:
+            local_end_index = (
+                cache_end + current_end - cache_global_end
+            )
+        local_start_index = local_end_index - num_new_tokens
+        belief_kv_weight_cache["edit"][
+            :, local_start_index:local_end_index
+        ] = current_edit_weight.float().clamp(0.0, 1.0)
+        belief_kv_weight_cache["preserve"][
+            :, local_start_index:local_end_index
+        ] = current_preserve_weight.float().clamp(0.0, 1.0)
+        belief_kv_weight_cache["global_end_index"].fill_(current_end)
+        belief_kv_weight_cache["local_end_index"].fill_(local_end_index)
 
 
     def _concat_kv_cache(self, kvc_1, kvc_2, index_select=-1, shared_dict=None):
@@ -1835,6 +2053,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
     def _inject_masks_to_kv_cache(
         self, kv_cache, 
         trg_fg_mask_cache=None, current_src_fg_mask=None,
+        belief_kv_weight_cache=None,
+        current_belief_kv_weights=None,
     ):
         '''
         ✨
@@ -1846,6 +2066,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "trg_fg_mask": trg_fg_mask_cache['trg_fg_mask'],
                 "current_src_fg_mask": current_src_fg_mask,
             })
+            if (
+                belief_kv_weight_cache is not None
+                and current_belief_kv_weights is not None
+            ):
+                kv_cache[b_idx].update({
+                    "cached_edit_kv_weight": (
+                        belief_kv_weight_cache["edit"]
+                    ),
+                    "cached_preserve_kv_weight": (
+                        belief_kv_weight_cache["preserve"]
+                    ),
+                    "current_edit_kv_weight": (
+                        current_belief_kv_weights.edit
+                    ),
+                    "current_preserve_kv_weight": (
+                        current_belief_kv_weights.preserve
+                    ),
+                })
 
     @staticmethod
     def _register_query_capture(kv_cache, layers):

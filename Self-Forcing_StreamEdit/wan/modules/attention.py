@@ -26,6 +26,7 @@ import warnings
 __all__ = [
     'flash_attention',
     'attention',
+    'weighted_attention',
 ]
 
 
@@ -183,3 +184,44 @@ def attention(
 
         out = out.transpose(1, 2).contiguous()
         return out
+
+
+def weighted_attention(
+    q,
+    k,
+    v,
+    key_weight,
+    eps=1e-6,
+):
+    """Attention with non-negative per-key contribution weights."""
+    if key_weight.ndim != 2:
+        raise ValueError("key_weight must have shape [B,Lk]")
+    if key_weight.shape != k.shape[:2]:
+        raise ValueError(
+            "key_weight and key/value sequence must align, got "
+            f"{tuple(key_weight.shape)} and {tuple(k.shape[:2])}"
+        )
+    if eps <= 0:
+        raise ValueError("eps must be positive")
+
+    weight = key_weight.float().clamp_min(0.0)
+    value_weight = weight[:, :, None, None].to(v.dtype)
+    packed_query = torch.cat([q, q], dim=0)
+    packed_key = torch.cat([k, k], dim=0)
+    packed_value = torch.cat(
+        [
+            v * value_weight,
+            value_weight.expand_as(v),
+        ],
+        dim=0,
+    )
+    packed_output = attention(
+        packed_query,
+        packed_key,
+        packed_value,
+    )
+    numerator, denominator = packed_output.chunk(2, dim=0)
+    return (
+        numerator.float()
+        / denominator.float().clamp_min(eps)
+    ).to(numerator.dtype)
