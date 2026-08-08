@@ -1,0 +1,246 @@
+Self-Forcing_StreamEdit/run_907_bayes_causal_forcing.sh
+  s_84848dcc7c7af8::t_42273bf2a13b26 9,17 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a776f8fcf50fe984ec30575","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":9},{"Single":17}]}]}
+Self-Forcing_StreamEdit/CAUSAL_FORCING_BACKBONE.md
+  s_84848dcc7c7af8::t_d1977c8985b995 5,13-16,26,32,39-45,64-66 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a776f9bcf50fe984ec3059d","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":5},{"Range":[13,16]},{"Single":26},{"Single":32},{"Range":[39,45]},{"Range":[64,66]}]}]}
+Self-Forcing_StreamEdit/configs/causal_forcing_dmd_chunkwise.yaml
+  s_84848dcc7c7af8::t_a487cff84a132c 1-22 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a776eb8cf50fe984ec30526","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[1,22]}]}]}
+Self-Forcing_StreamEdit/inference_edit_streamedit.py
+  s_84848dcc7c7af8::t_a301f93a6366af 35-38,153-161,163-166 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a776f80cf50fe984ec30551","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[35,38]},{"Range":[153,161]},{"Range":[163,166]}]}]}
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "ad8ef17444c4ac24798e1cfbab6aca5f1d09869f",
+  "prompts": {},
+  "sessions": {
+    "s_84848dcc7c7af8": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a7351b9cf50fe984ec2b5f8",
+        "model": "gpt-5.6-sol__dev"
+      },
+      "human_author": "kunyufeng <kunyufeng@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {
+    "Self-Forcing_StreamEdit/CAUSAL_FORCING_BACKBONE.md": [
+      {
+        "hash": "s_84848dcc7c7af8::t_d1977c8985b995",
+        "line_ranges": [
+          {
+            "Single": 5
+          },
+          {
+            "Range": [
+              13,
+              16
+            ]
+          },
+          {
+            "Single": 26
+          },
+          {
+            "Single": 32
+          },
+          {
+            "Range": [
+              39,
+              45
+            ]
+          },
+          {
+            "Range": [
+              64,
+              66
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a776f9bcf50fe984ec3059d",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 5
+              },
+              {
+                "Range": [
+                  13,
+                  16
+                ]
+              },
+              {
+                "Single": 26
+              },
+              {
+                "Single": 32
+              },
+              {
+                "Range": [
+                  39,
+                  45
+                ]
+              },
+              {
+                "Range": [
+                  64,
+                  66
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "Self-Forcing_StreamEdit/configs/causal_forcing_dmd_chunkwise.yaml": [
+      {
+        "hash": "s_84848dcc7c7af8::t_a487cff84a132c",
+        "line_ranges": [
+          {
+            "Range": [
+              1,
+              22
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a776eb8cf50fe984ec30526",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  1,
+                  22
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "Self-Forcing_StreamEdit/inference_edit_streamedit.py": [
+      {
+        "hash": "s_84848dcc7c7af8::t_a301f93a6366af",
+        "line_ranges": [
+          {
+            "Range": [
+              35,
+              38
+            ]
+          },
+          {
+            "Range": [
+              153,
+              161
+            ]
+          },
+          {
+            "Range": [
+              163,
+              166
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a776f80cf50fe984ec30551",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  35,
+                  38
+                ]
+              },
+              {
+                "Range": [
+                  153,
+                  161
+                ]
+              },
+              {
+                "Range": [
+                  163,
+                  166
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "Self-Forcing_StreamEdit/run_907_bayes_causal_forcing.sh": [
+      {
+        "hash": "s_84848dcc7c7af8::t_42273bf2a13b26",
+        "line_ranges": [
+          {
+            "Single": 9
+          },
+          {
+            "Single": 17
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a776f8fcf50fe984ec30575",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 9
+              },
+              {
+                "Single": 17
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "s_84848dcc7c7af8": {
+      "tool": "trae",
+      "conversation_id": "6a7351b9cf50fe984ec2b5f8",
+      "session_id": "6a7351b9cf50fe984ec2b5f8",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_84848dcc7c7af8::t_42273bf2a13b26": {
+      "tool": "trae",
+      "conversation_id": "6a7351b9cf50fe984ec2b5f8",
+      "session_id": "6a7351b9cf50fe984ec2b5f8",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_84848dcc7c7af8::t_a301f93a6366af": {
+      "tool": "trae",
+      "conversation_id": "6a7351b9cf50fe984ec2b5f8",
+      "session_id": "6a7351b9cf50fe984ec2b5f8",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_84848dcc7c7af8::t_a487cff84a132c": {
+      "tool": "trae",
+      "conversation_id": "6a7351b9cf50fe984ec2b5f8",
+      "session_id": "6a7351b9cf50fe984ec2b5f8",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_84848dcc7c7af8::t_d1977c8985b995": {
+      "tool": "trae",
+      "conversation_id": "6a7351b9cf50fe984ec2b5f8",
+      "session_id": "6a7351b9cf50fe984ec2b5f8",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
