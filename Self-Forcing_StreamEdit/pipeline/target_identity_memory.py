@@ -86,6 +86,223 @@ class TargetIdentityUpdate:
                 )
 
 
+@dataclass(frozen=True)
+class ReferenceIdentityBootstrap:
+    """Object evidence extracted from an aligned target reference."""
+
+    write_weight: torch.Tensor
+    change_score: torch.Tensor
+    semantic_score: torch.Tensor
+    joint_score: torch.Tensor
+
+    def validate(self) -> None:
+        if self.write_weight.ndim != 2:
+            raise ValueError(
+                "Reference identity weights must have shape [B,L]"
+            )
+        if self.change_score.ndim != 4:
+            raise ValueError(
+                "Reference identity maps must have shape [B,T,H,W]"
+            )
+        shapes = {
+            tuple(value.shape)
+            for value in (
+                self.change_score,
+                self.semantic_score,
+                self.joint_score,
+            )
+        }
+        if len(shapes) != 1:
+            raise ValueError(
+                "Reference identity debug maps must share shape"
+            )
+        if self.write_weight.shape != (
+            self.change_score.shape[0],
+            math.prod(self.change_score.shape[1:]),
+        ):
+            raise ValueError(
+                "Reference identity weights and maps must align"
+            )
+        for name, value in (
+            ("write_weight", self.write_weight),
+            ("change_score", self.change_score),
+            ("semantic_score", self.semantic_score),
+            ("joint_score", self.joint_score),
+        ):
+            if not torch.isfinite(value.float()).all():
+                raise ValueError(
+                    f"Reference identity '{name}' is not finite"
+                )
+            if value.min() < 0 or value.max() > 1:
+                raise ValueError(
+                    f"Reference identity '{name}' must lie in [0, 1]"
+                )
+
+    def as_debug_maps(self) -> Dict[str, torch.Tensor]:
+        return {
+            "reference_identity_change": self.change_score.float(),
+            "reference_identity_semantic": self.semantic_score.float(),
+            "reference_identity_joint": self.joint_score.float(),
+            "reference_identity_write": self.write_weight.reshape_as(
+                self.joint_score
+            ).float(),
+        }
+
+
+def build_reference_identity_bootstrap(
+    source_latent: torch.Tensor,
+    target_latent: torch.Tensor,
+    target_attention: torch.Tensor,
+    hand_mask: torch.Tensor | None = None,
+    patch_size: int = 2,
+    eps: float = 1e-6,
+) -> ReferenceIdentityBootstrap:
+    """Locate customized content from an aligned source/reference pair."""
+    if source_latent.shape != target_latent.shape:
+        raise ValueError(
+            "Source and target reference latents must share shape"
+        )
+    if source_latent.ndim != 5:
+        raise ValueError(
+            "Reference latents must have shape [B,T,C,H,W]"
+        )
+    if patch_size <= 0:
+        raise ValueError("patch_size must be positive")
+    if eps <= 0:
+        raise ValueError("eps must be positive")
+    batch, frames, _, height, width = source_latent.shape
+    if height % patch_size or width % patch_size:
+        raise ValueError(
+            "Reference latent size must be divisible by patch_size"
+        )
+    token_height = height // patch_size
+    token_width = width // patch_size
+    token_count = frames * token_height * token_width
+    if target_attention.shape != (batch, token_count):
+        raise ValueError(
+            "Target attention and reference token grid must align"
+        )
+    if hand_mask is not None and hand_mask.shape != (
+        batch,
+        frames,
+        height,
+        width,
+    ):
+        raise ValueError(
+            "Reference hand mask must match latent spatial shape"
+        )
+
+    latent_change = (
+        target_latent.float() - source_latent.float()
+    ).abs().mean(dim=2)
+    change_score = F.avg_pool2d(
+        latent_change.reshape(
+            batch * frames,
+            1,
+            height,
+            width,
+        ),
+        kernel_size=patch_size,
+        stride=patch_size,
+    ).reshape(batch, frames, token_height, token_width)
+
+    def robust_unit(value: torch.Tensor) -> torch.Tensor:
+        flat = value.flatten(2)
+        median = torch.quantile(
+            flat,
+            0.50,
+            dim=-1,
+            keepdim=True,
+        )
+        residual = (flat - median).clamp_min(0.0)
+        high = torch.quantile(
+            residual,
+            0.95,
+            dim=-1,
+            keepdim=True,
+        )
+        normalized = residual / high.clamp_min(eps)
+        normalized = torch.where(
+            high > eps,
+            normalized,
+            torch.zeros_like(normalized),
+        )
+        return normalized.clamp(0.0, 1.0).reshape_as(value)
+
+    change_score = robust_unit(change_score)
+    raw_semantic = target_attention.float().clamp_min(0.0).reshape(
+        batch,
+        frames,
+        token_height,
+        token_width,
+    )
+    semantic_score = robust_unit(raw_semantic)
+    semantic_available = (
+        semantic_score.flatten(2).amax(dim=-1, keepdim=True) > eps
+    ).reshape(batch, frames, 1, 1)
+    joint_score = torch.where(
+        semantic_available,
+        torch.sqrt(change_score * semantic_score),
+        change_score,
+    )
+
+    if hand_mask is not None:
+        hand_core = F.avg_pool2d(
+            hand_mask.float().reshape(
+                batch * frames,
+                1,
+                height,
+                width,
+            ),
+            kernel_size=patch_size,
+            stride=patch_size,
+        ).reshape_as(joint_score).clamp(0.0, 1.0)
+        joint_score = joint_score * (1.0 - hand_core)
+
+    flat_joint = joint_score.flatten(2)
+    center = torch.quantile(
+        flat_joint,
+        0.50,
+        dim=-1,
+        keepdim=True,
+    )
+    deviation = (flat_joint - center).abs()
+    robust_scale = (
+        torch.quantile(
+            deviation,
+            0.50,
+            dim=-1,
+            keepdim=True,
+        )
+        / 0.6745
+    )
+    threshold = center + robust_scale
+    high = torch.quantile(
+        flat_joint,
+        0.95,
+        dim=-1,
+        keepdim=True,
+    )
+    write_weight = (
+        (flat_joint - threshold)
+        / (high - threshold).clamp_min(eps)
+    ).clamp(0.0, 1.0)
+    write_weight = torch.where(
+        high > threshold + eps,
+        write_weight,
+        torch.zeros_like(write_weight),
+    ).reshape(batch, -1)
+
+    result = ReferenceIdentityBootstrap(
+        write_weight=write_weight.float(),
+        change_score=change_score.float(),
+        semantic_score=semantic_score.float(),
+        joint_score=joint_score.float(),
+    )
+    result.validate()
+    return result
+
+
 class SlowTargetIdentityMemory:
     """Maintain reliable target appearance without spatially locking pose."""
 
@@ -113,6 +330,7 @@ class SlowTargetIdentityMemory:
         self.num_prototypes = num_prototypes
         self.eps = eps
         self.states: Dict[int, TargetIdentityLayerState] = {}
+        self.reference_bootstrapped = False
 
     @staticmethod
     def _descriptor(key: torch.Tensor) -> torch.Tensor:
@@ -412,6 +630,51 @@ class SlowTargetIdentityMemory:
         )
         update.validate()
         return update
+
+    @torch.no_grad()
+    def bootstrap_reference(
+        self,
+        kv_cache,
+        write_weight: torch.Tensor,
+    ) -> TargetIdentityUpdate:
+        if self.reference_bootstrapped:
+            raise RuntimeError(
+                "Target identity reference was already bootstrapped"
+            )
+        if self.states:
+            raise RuntimeError(
+                "Target identity reference must be bootstrapped before "
+                "online identity updates"
+            )
+        update = self.update(kv_cache, write_weight)
+        for layer, state in tuple(self.states.items()):
+            authoritative_evidence = torch.where(
+                state.evidence > self.eps,
+                torch.ones_like(state.evidence),
+                torch.zeros_like(state.evidence),
+            )
+            anchored_state = TargetIdentityLayerState(
+                key=state.key,
+                value=state.value,
+                evidence=authoritative_evidence,
+            )
+            anchored_state.validate()
+            self.states[layer] = anchored_state
+        self.reference_bootstrapped = True
+        anchored_update = TargetIdentityUpdate(
+            write_weight=update.write_weight,
+            observation_evidence=update.observation_evidence,
+            update_gain=update.update_gain,
+            accumulated_evidence=torch.stack(
+                [
+                    self.states[layer].evidence
+                    for layer in self.layers
+                ],
+                dim=0,
+            ),
+        )
+        anchored_update.validate()
+        return anchored_update
 
     def export(
         self,

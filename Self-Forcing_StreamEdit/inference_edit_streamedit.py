@@ -175,6 +175,7 @@ if __name__ == '__main__':
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
             "hand_role_bayes_flow_identity_kv",
+            "hand_role_bayes_flow_customized_kv",
         ],
         default="dynamic_sog",
     )
@@ -351,7 +352,11 @@ if __name__ == '__main__':
         "hand_role_bayes_flow_consolidated_kv",
         "hand_role_bayes_flow_commitment_kv",
         "hand_role_bayes_flow_identity_kv",
+        "hand_role_bayes_flow_customized_kv",
     }
+    customized_reference_enabled = (
+        args.routing_mode == "hand_role_bayes_flow_customized_kv"
+    )
     if oracle_role_enabled and (
         args.object_mask_video is None or args.hand_mask_video is None
     ):
@@ -362,6 +367,16 @@ if __name__ == '__main__':
     if hand_role_enabled and args.hand_mask_video is None:
         parser.error(
             f"{args.routing_mode} requires --hand_mask_video"
+        )
+    if customized_reference_enabled and args.first_frame_edit is None:
+        parser.error(
+            "hand_role_bayes_flow_customized_kv requires "
+            "--first_frame_edit"
+        )
+    if customized_reference_enabled and args.triple_first_frame:
+        parser.error(
+            "Customized reference mode requires one independent "
+            "reference frame; do not use --triple_first_frame"
         )
     if not 0.0 <= args.contact_target_weight <= 1.0:
         parser.error("--contact_target_weight must be in [0, 1]")
@@ -447,6 +462,15 @@ if __name__ == '__main__':
     if args.first_frame_edit is not None:
         src_first_frame = src_video[0]
         trg_first_frame = Image.open(args.first_frame_edit).convert('RGB')
+        if (
+            customized_reference_enabled
+            and trg_first_frame.size != src_first_frame.size
+        ):
+            parser.error(
+                "Customized reference image must have the same spatial "
+                "size as the source first frame before resizing: "
+                f"{trg_first_frame.size} != {src_first_frame.size}"
+            )
     else:
         src_first_frame = None
         trg_first_frame = None

@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import types
 
+import pytest
 import torch
 
 
@@ -62,6 +63,173 @@ def _cache(key, value):
         "local_end_index": torch.tensor([key.shape[1]]),
         "num_new_tokens": key.shape[1],
     }]
+
+
+def _reference_inputs():
+    source = torch.zeros((1, 1, 2, 4, 4))
+    target = source.clone()
+    target[:, :, :, :2, :2] = 1.0
+    attention = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    return source, target, attention
+
+
+def test_reference_bootstrap_localizes_semantic_latent_change():
+    source, target, attention = _reference_inputs()
+
+    bootstrap = (
+        identity_module.build_reference_identity_bootstrap(
+            source_latent=source,
+            target_latent=target,
+            target_attention=attention,
+        )
+    )
+
+    assert bootstrap.change_score[0, 0, 0, 0] == 1.0
+    assert bootstrap.semantic_score[0, 0, 0, 0] == 1.0
+    assert bootstrap.joint_score[0, 0, 0, 0] == 1.0
+    assert bootstrap.write_weight.argmax(dim=-1).item() == 0
+    assert bootstrap.write_weight[0, 0] == 1.0
+    assert torch.count_nonzero(
+        bootstrap.write_weight[0, 1:]
+    ) == 0
+
+
+def test_reference_bootstrap_excludes_hand_core():
+    source, target, attention = _reference_inputs()
+    hand = torch.zeros((1, 1, 4, 4))
+    hand[:, :, :2, :2] = 1.0
+
+    bootstrap = (
+        identity_module.build_reference_identity_bootstrap(
+            source_latent=source,
+            target_latent=target,
+            target_attention=attention,
+            hand_mask=hand,
+        )
+    )
+
+    assert torch.count_nonzero(bootstrap.joint_score) == 0
+    assert torch.count_nonzero(bootstrap.write_weight) == 0
+
+
+def test_reference_bootstrap_requires_semantic_change_agreement():
+    source, target, _ = _reference_inputs()
+    disjoint_attention = torch.tensor(
+        [[0.0, 0.0, 0.0, 1.0]]
+    )
+
+    bootstrap = (
+        identity_module.build_reference_identity_bootstrap(
+            source_latent=source,
+            target_latent=target,
+            target_attention=disjoint_attention,
+        )
+    )
+
+    assert torch.count_nonzero(bootstrap.joint_score) == 0
+    assert torch.count_nonzero(bootstrap.write_weight) == 0
+
+
+def test_reference_bootstrap_falls_back_without_semantics():
+    source, target, attention = _reference_inputs()
+
+    bootstrap = (
+        identity_module.build_reference_identity_bootstrap(
+            source_latent=source,
+            target_latent=target,
+            target_attention=torch.zeros_like(attention),
+        )
+    )
+
+    assert torch.equal(
+        bootstrap.joint_score,
+        bootstrap.change_score,
+    )
+    assert bootstrap.write_weight[0, 0] == 1.0
+
+
+def test_reference_bootstrap_is_empty_without_latent_change():
+    source, _, attention = _reference_inputs()
+
+    bootstrap = (
+        identity_module.build_reference_identity_bootstrap(
+            source_latent=source,
+            target_latent=source.clone(),
+            target_attention=attention,
+        )
+    )
+
+    assert torch.count_nonzero(bootstrap.change_score) == 0
+    assert torch.count_nonzero(bootstrap.joint_score) == 0
+    assert torch.count_nonzero(bootstrap.write_weight) == 0
+
+
+def test_reference_bootstrap_validates_alignment():
+    source, target, attention = _reference_inputs()
+
+    with pytest.raises(ValueError, match="share shape"):
+        identity_module.build_reference_identity_bootstrap(
+            source_latent=source,
+            target_latent=target[:, :, :, :, :-1],
+            target_attention=attention,
+        )
+
+    with pytest.raises(ValueError, match="token grid"):
+        identity_module.build_reference_identity_bootstrap(
+            source_latent=source,
+            target_latent=target,
+            target_attention=attention[:, :-1],
+        )
+
+
+def test_reference_identity_bootstrap_is_authoritative_and_single_use():
+    key = torch.randn((1, 4, 1, 2))
+    value = torch.randn_like(key)
+    memory = identity_module.SlowTargetIdentityMemory(
+        layers=(0,),
+        num_prototypes=2,
+    )
+
+    update = memory.bootstrap_reference(
+        _cache(key, value),
+        write_weight=torch.ones((1, 4)),
+    )
+    valid_evidence = memory.states[0].evidence > 0
+
+    assert memory.reference_bootstrapped
+    assert torch.all(memory.states[0].evidence[valid_evidence] == 1)
+    assert torch.all(
+        update.accumulated_evidence[0][valid_evidence] == 1
+    )
+    with pytest.raises(RuntimeError, match="already bootstrapped"):
+        memory.bootstrap_reference(
+            _cache(key, value),
+            write_weight=torch.ones((1, 4)),
+        )
+
+
+def test_reference_identity_resists_low_confidence_online_update():
+    key = torch.randn((1, 4, 1, 2))
+    value = torch.randn_like(key)
+    memory = identity_module.SlowTargetIdentityMemory(
+        layers=(0,),
+        num_prototypes=2,
+    )
+    memory.bootstrap_reference(
+        _cache(key, value),
+        write_weight=torch.ones((1, 4)),
+    )
+    reference_value = memory.states[0].value.float().clone()
+
+    update = memory.update(
+        _cache(key, value + 20.0),
+        write_weight=torch.full((1, 4), 0.05),
+    )
+
+    assert update.update_gain.max() < 0.1
+    assert (
+        memory.states[0].value.float() - reference_value
+    ).abs().max() < 2.0
 
 
 def test_slow_identity_update_resists_low_precision_overwrite():

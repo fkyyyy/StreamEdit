@@ -31,6 +31,7 @@ from .memory_consolidation import (
 from .target_identity_memory import (
     SlowTargetIdentityMemory,
     TargetIdentityUpdate,
+    build_reference_identity_bootstrap,
     strengthen_belief_with_target_identity,
 )
 from .role_router import (
@@ -250,6 +251,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_customized_kv",
             }
         ):
             rollout_hand_role_inferencer = HandRoleInferencer(
@@ -275,6 +277,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "hand_role_bayes_flow_consolidated_kv",
                         "hand_role_bayes_flow_commitment_kv",
                         "hand_role_bayes_flow_identity_kv",
+                        "hand_role_bayes_flow_customized_kv",
                     }
                 ),
             )
@@ -285,6 +288,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_customized_kv",
             }
         ):
             rollout_memory_consolidator = CausalMemoryConsolidator()
@@ -294,13 +298,17 @@ class EditCausalInferencePipeline(torch.nn.Module):
             and routing_mode in {
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_customized_kv",
             }
         ):
             rollout_commitment_controller = EditCommitmentController()
         rollout_target_identity_memory = _target_identity_memory
         if (
             rollout_target_identity_memory is None
-            and routing_mode == "hand_role_bayes_flow_identity_kv"
+            and routing_mode in {
+                "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_customized_kv",
+            }
         ):
             rollout_target_identity_memory = SlowTargetIdentityMemory(
                 layers=hand_query_layers,
@@ -545,6 +553,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
             "hand_role_bayes_flow_identity_kv",
+            "hand_role_bayes_flow_customized_kv",
         }
         adaptive_role_enabled = routing_mode in {
             "hand_role_adaptive_kv",
@@ -554,6 +563,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
             "hand_role_bayes_flow_identity_kv",
+            "hand_role_bayes_flow_customized_kv",
         }
         posterior_flow_enabled = (
             routing_mode == "hand_role_posterior_flow_kv"
@@ -565,6 +575,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_customized_kv",
             }
         )
         aligned_belief_kv_enabled = (
@@ -575,16 +586,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_customized_kv",
             }
         )
         edit_commitment_enabled = (
             routing_mode in {
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_customized_kv",
             }
         )
         target_identity_enabled = (
-            routing_mode == "hand_role_bayes_flow_identity_kv"
+            routing_mode in {
+                "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_customized_kv",
+            }
+        )
+        reference_identity_enabled = (
+            routing_mode == "hand_role_bayes_flow_customized_kv"
         )
         belief_memory_enabled = (
             aligned_belief_kv_enabled
@@ -605,8 +624,27 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
             "hand_role_bayes_flow_identity_kv",
+            "hand_role_bayes_flow_customized_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
+        reference_already_bootstrapped = (
+            reference_identity_enabled
+            and _target_identity_memory is not None
+            and _target_identity_memory.reference_bootstrapped
+        )
+        if reference_identity_enabled and not reference_already_bootstrapped:
+            if (
+                src_initial_latent is None
+                or trg_initial_latent is None
+                or not independent_first_frame
+                or src_initial_latent.shape[1] != 1
+                or trg_initial_latent.shape[1] != 1
+            ):
+                raise ValueError(
+                    "Customized identity mode requires one spatially "
+                    "aligned edited reference through independent "
+                    "src/trg initial latents"
+                )
         if not 0.0 <= contact_target_weight <= 1.0:
             raise ValueError(
                 "contact_target_weight must lie in [0, 1], got "
@@ -1026,7 +1064,57 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     crossattn_cache=crossattn_cache_trg,
                     current_start=left * self.frame_seq_length,
                 )
-                _, trg_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_trg)
+                (
+                    trg_fg_mask_soft,
+                    trg_fg_mask_bin,
+                    _,
+                    _,
+                ) = self._aggregate_crossattn_mask(
+                    crossattn_cache_trg
+                )
+                if (
+                    reference_identity_enabled
+                    and not target_identity_memory.reference_bootstrapped
+                ):
+                    reference_hand_mask = hand_only_mask[
+                        :, :right - left
+                    ]
+                    reference_bootstrap = (
+                        build_reference_identity_bootstrap(
+                            source_latent=current_src_ref_latents,
+                            target_latent=current_trg_ref_latents,
+                            target_attention=trg_fg_mask_soft,
+                            hand_mask=reference_hand_mask,
+                        )
+                    )
+                    reference_update = (
+                        target_identity_memory.bootstrap_reference(
+                            kv_cache=kv_cache_trg,
+                            write_weight=(
+                                reference_bootstrap.write_weight
+                            ),
+                        )
+                    )
+                    print(
+                        "REFERENCE_IDENTITY_BOOTSTRAP "
+                        "change="
+                        f"{reference_bootstrap.change_score.mean().item():.4f} "
+                        "semantic="
+                        f"{reference_bootstrap.semantic_score.mean().item():.4f} "
+                        "joint="
+                        f"{reference_bootstrap.joint_score.mean().item():.4f} "
+                        "write="
+                        f"{reference_bootstrap.write_weight.mean().item():.4f} "
+                        "support="
+                        f"{(reference_bootstrap.write_weight > 0).float().mean().item():.4f} "
+                        "evidence="
+                        f"{reference_update.accumulated_evidence.mean().item():.4f}"
+                    )
+                    if save_role_dir is not None:
+                        self._save_reference_identity_debug(
+                            save_role_dir,
+                            reference_bootstrap.as_debug_maps(),
+                        )
 
                 #✨ src & trg union
                 current_trg_fg_mask = trg_fg_mask_bin | src_fg_mask_bin
@@ -2257,6 +2345,35 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     save_dir,
                     f"block_{block_index:03d}_{name}.png",
                 )
+            )
+
+    @staticmethod
+    def _save_reference_identity_debug(save_dir, debug):
+        np.savez_compressed(
+            os.path.join(
+                save_dir,
+                "reference_identity_bootstrap.npz",
+            ),
+            **{
+                name: value.detach().float().cpu().numpy()
+                for name, value in debug.items()
+            },
+        )
+        for name, value in debug.items():
+            strip = value[0].detach().float().cpu().numpy()
+            strip = np.concatenate(
+                list(
+                    (strip * 255)
+                    .clip(0, 255)
+                    .astype(np.uint8)
+                ),
+                axis=0,
+            )
+            Image.fromarray(strip, mode="L").resize(
+                (832, strip.shape[0] * 16),
+                Image.Resampling.NEAREST,
+            ).save(
+                os.path.join(save_dir, f"{name}.png")
             )
 
     @staticmethod
