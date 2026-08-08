@@ -17,8 +17,10 @@ from .contact_graph import (
     build_oracle_contact_graphs,
     contact_graph_stats,
 )
+from .control_belief import CausalControlBeliefBuilder
 from .hand_role_inference import HandRoleInferencer
 from .role_router import (
+    BayesResidualFlowRouter,
     PosteriorResidualFlowRouter,
     ResidualRoleFlowRouter,
     RoleFlowRouter,
@@ -214,6 +216,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             and routing_mode in {
                 "hand_role_adaptive_kv",
                 "hand_role_posterior_flow_kv",
+                "hand_role_bayes_flow_kv",
             }
         ):
             rollout_hand_role_inferencer = HandRoleInferencer(
@@ -234,6 +237,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     routing_mode in {
                         "hand_role_adaptive_kv",
                         "hand_role_posterior_flow_kv",
+                        "hand_role_bayes_flow_kv",
                     }
                 ),
             )
@@ -456,13 +460,18 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_residual_kv",
             "hand_role_adaptive_kv",
             "hand_role_posterior_flow_kv",
+            "hand_role_bayes_flow_kv",
         }
         adaptive_role_enabled = routing_mode in {
             "hand_role_adaptive_kv",
             "hand_role_posterior_flow_kv",
+            "hand_role_bayes_flow_kv",
         }
         posterior_flow_enabled = (
             routing_mode == "hand_role_posterior_flow_kv"
+        )
+        bayes_flow_enabled = (
+            routing_mode == "hand_role_bayes_flow_kv"
         )
         consistent_role_kv_enabled = oracle_kv_enabled or hand_role_enabled
         if routing_mode not in {
@@ -474,6 +483,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_residual_kv",
             "hand_role_adaptive_kv",
             "hand_role_posterior_flow_kv",
+            "hand_role_bayes_flow_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
         if not 0.0 <= contact_target_weight <= 1.0:
@@ -633,6 +643,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     f"use_field={posterior_flow_use_field} "
                     "contact_split=posterior"
                 )
+            if bayes_flow_enabled:
+                print(
+                    "BAYES_RESIDUAL_FLOW "
+                    "beliefs=non_exclusive "
+                    "precision=online_fp32 "
+                    "field_role=precision_only"
+                )
         elif hand_role_enabled:
             print(
                 "HAND_ROLE_RESIDUAL "
@@ -759,6 +776,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
         role_flow_router = RoleFlowRouter()
         residual_role_flow_router = ResidualRoleFlowRouter()
         posterior_residual_flow_router = PosteriorResidualFlowRouter()
+        bayes_residual_flow_router = BayesResidualFlowRouter()
+        control_belief_builder = CausalControlBeliefBuilder()
         hand_role_inferencer = _hand_role_inferencer
         if hand_role_inferencer is None:
             hand_role_inferencer = HandRoleInferencer(
@@ -901,6 +920,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             contact_graphs = None
             hand_role_debug = None
             hand_role_inference = None
+            current_control_belief = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
                 role_right = role_left + current_num_frames
@@ -1148,11 +1168,20 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         (
                             adaptive_role_enabled
                             and (
-                                not posterior_flow_enabled
-                                or posterior_flow_use_field
+                                (
+                                    not posterior_flow_enabled
+                                    and not bayes_flow_enabled
+                                )
+                                or (
+                                    posterior_flow_enabled
+                                    and posterior_flow_use_field
+                                )
                             )
                         )
-                        or hand_field_update_mode == "posterior"
+                        or (
+                            not bayes_flow_enabled
+                            and hand_field_update_mode == "posterior"
+                        )
                     )
                     hand_role_inference = (
                         hand_role_inferencer.refine_with_field(
@@ -1226,6 +1255,42 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             block_index,
                             hand_role_debug,
                         )
+                if bayes_flow_enabled and index == 0:
+                    current_control_belief = control_belief_builder(
+                        debug=hand_role_debug,
+                        hand_mask=hand_only_mask[
+                            :, role_left:role_right
+                        ],
+                    )
+                    hand_role_debug.update({
+                        f"control_{name}": value
+                        for name, value
+                        in current_control_belief.as_dict().items()
+                    })
+                    print(
+                        "CAUSAL_CONTROL_BELIEF "
+                        "block="
+                        f"{current_start_frame // self.num_frame_per_block} "
+                        "edit="
+                        f"{current_control_belief.edit_belief.mean().item():.4f} "
+                        "preserve="
+                        f"{current_control_belief.preserve_belief.mean().item():.4f} "
+                        "edit_precision="
+                        f"{current_control_belief.edit_precision.mean().item():.4f} "
+                        "preserve_precision="
+                        f"{current_control_belief.preserve_precision.mean().item():.4f} "
+                        "conflict="
+                        f"{current_control_belief.conflict.mean().item():.4f} "
+                        "uncertainty="
+                        f"{current_control_belief.uncertainty.mean().item():.4f}"
+                    )
+                    if save_role_dir is not None:
+                        self._save_hand_role_debug(
+                            save_role_dir,
+                            current_start_frame
+                            // self.num_frame_per_block,
+                            hand_role_debug,
+                        )
                 # #region debug-point B:velocity-collapse
                 if current_roles is not None and index in {
                     0,
@@ -1259,7 +1324,43 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     )
                 # #endregion
                 
-                if posterior_flow_enabled:
+                if bayes_flow_enabled:
+                    if current_control_belief is None:
+                        raise RuntimeError(
+                            "Missing causal control belief for Bayes routing"
+                        )
+                    v_t, bayes_flow_debug = bayes_residual_flow_router(
+                        target_velocity=v_trg,
+                        source_velocity=v_src,
+                        source_reconstruction_velocity=v_gt,
+                        belief=current_control_belief,
+                    )
+                    if index == 0:
+                        hand_role_debug.update({
+                            f"bayes_{name}": value.squeeze(2)
+                            for name, value in bayes_flow_debug.items()
+                        })
+                        print(
+                            "BAYES_FLOW "
+                            "block="
+                            f"{current_start_frame // self.num_frame_per_block} "
+                            "edit_action="
+                            f"{bayes_flow_debug['edit_action_weight'].mean().item():.4f} "
+                            "preserve_action="
+                            f"{bayes_flow_debug['preserve_action_weight'].mean().item():.4f} "
+                            "sum_error="
+                            f"{bayes_flow_debug['action_sum_error'].max().item():.2e} "
+                            "no_evidence="
+                            f"{bayes_flow_debug['no_evidence'].mean().item():.4f}"
+                        )
+                        if save_role_dir is not None:
+                            self._save_hand_role_debug(
+                                save_role_dir,
+                                current_start_frame
+                                // self.num_frame_per_block,
+                                hand_role_debug,
+                            )
+                elif posterior_flow_enabled:
                     v_t, posterior_flow_debug = (
                         posterior_residual_flow_router(
                             target_velocity=v_trg,

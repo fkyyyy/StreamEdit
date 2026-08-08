@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
+
+if TYPE_CHECKING:
+    from .control_belief import CausalControlBelief
 
 
 def _dilate(mask: torch.Tensor, radius: int) -> torch.Tensor:
@@ -328,5 +333,104 @@ class PosteriorResidualFlowRouter:
             "contact_residual_weight": contact_residual_weight,
             "role_entropy": entropy.to(target_velocity),
             "role_probabilities": probabilities,
+        }
+        return routed_velocity, diagnostics
+
+
+class BayesResidualFlowRouter:
+    """Precision-weighted Bayes action for non-exclusive control beliefs."""
+
+    def __init__(self, eps: float = 1e-6):
+        if eps <= 0:
+            raise ValueError("eps must be positive")
+        self.eps = eps
+
+    @staticmethod
+    def _resize_map(
+        value: torch.Tensor,
+        spatial_size,
+    ) -> torch.Tensor:
+        batch, frames, height, width = value.shape
+        resized = F.interpolate(
+            value.float().reshape(batch * frames, 1, height, width),
+            size=spatial_size,
+            mode="bilinear",
+            align_corners=False,
+        )
+        return resized.reshape(batch, frames, 1, *spatial_size)
+
+    def __call__(
+        self,
+        target_velocity: torch.Tensor,
+        source_velocity: torch.Tensor,
+        source_reconstruction_velocity: torch.Tensor,
+        belief: CausalControlBelief,
+    ):
+        velocity_shapes = {
+            tuple(target_velocity.shape),
+            tuple(source_velocity.shape),
+            tuple(source_reconstruction_velocity.shape),
+        }
+        if len(velocity_shapes) != 1:
+            raise ValueError(
+                "Target, source, and source reconstruction velocities must "
+                f"have the same shape, got {sorted(velocity_shapes)}"
+            )
+        belief.validate()
+        spatial_size = target_velocity.shape[-2:]
+        edit_belief = self._resize_map(
+            belief.edit_belief,
+            spatial_size,
+        )
+        preserve_belief = self._resize_map(
+            belief.preserve_belief,
+            spatial_size,
+        )
+        edit_precision = self._resize_map(
+            belief.edit_precision,
+            spatial_size,
+        )
+        preserve_precision = self._resize_map(
+            belief.preserve_precision,
+            spatial_size,
+        )
+
+        edit_strength = edit_belief * edit_precision
+        preserve_strength = preserve_belief * preserve_precision
+        total_strength = edit_strength + preserve_strength
+        no_evidence = total_strength <= self.eps
+        edit_action_weight = torch.where(
+            no_evidence,
+            torch.zeros_like(total_strength),
+            edit_strength / total_strength.clamp_min(self.eps),
+        )
+        preserve_action_weight = torch.where(
+            no_evidence,
+            torch.ones_like(total_strength),
+            preserve_strength / total_strength.clamp_min(self.eps),
+        )
+
+        target_f32 = target_velocity.float()
+        source_residual_f32 = (
+            source_reconstruction_velocity.float()
+            - source_velocity.float()
+        )
+        routed_velocity = (
+            target_f32
+            + preserve_action_weight * source_residual_f32
+        ).to(target_velocity.dtype)
+        diagnostics = {
+            "edit_belief": edit_belief,
+            "preserve_belief": preserve_belief,
+            "edit_precision": edit_precision,
+            "preserve_precision": preserve_precision,
+            "edit_strength": edit_strength,
+            "preserve_strength": preserve_strength,
+            "edit_action_weight": edit_action_weight,
+            "preserve_action_weight": preserve_action_weight,
+            "action_sum_error": (
+                edit_action_weight + preserve_action_weight - 1.0
+            ).abs(),
+            "no_evidence": no_evidence.float(),
         }
         return routed_velocity, diagnostics

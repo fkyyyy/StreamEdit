@@ -31,6 +31,46 @@ def _soft_roles():
     )
 
 
+class _ControlBelief:
+    def __init__(
+        self,
+        edit_belief,
+        preserve_belief,
+        edit_precision,
+        preserve_precision,
+    ):
+        self.edit_belief = edit_belief
+        self.preserve_belief = preserve_belief
+        self.edit_precision = edit_precision
+        self.preserve_precision = preserve_precision
+
+    def validate(self):
+        values = (
+            self.edit_belief,
+            self.preserve_belief,
+            self.edit_precision,
+            self.preserve_precision,
+        )
+        assert len({tuple(value.shape) for value in values}) == 1
+
+
+def _control_belief(
+    edit_belief=0.8,
+    preserve_belief=0.6,
+    edit_precision=0.5,
+    preserve_precision=1.0,
+):
+    def value(x):
+        return torch.full((1, 1, 1, 1), x)
+
+    return _ControlBelief(
+        value(edit_belief),
+        value(preserve_belief),
+        value(edit_precision),
+        value(preserve_precision),
+    )
+
+
 def test_residual_router_applies_role_specific_source_correction():
     target = torch.full((1, 1, 1, 2, 2), 10.0)
     source = torch.full_like(target, 3.0)
@@ -227,6 +267,70 @@ def test_posterior_router_supports_bfloat16():
     assert routed.dtype == torch.bfloat16
     assert debug["target_expert_weight"].dtype == torch.bfloat16
     assert torch.isfinite(routed.float()).all()
+
+
+def test_bayes_router_matches_precision_weighted_closed_form():
+    target = torch.full((1, 1, 1, 1, 1), 10.0)
+    source = torch.full_like(target, 3.0)
+    source_reconstruction = torch.full_like(target, 5.0)
+
+    routed, debug = role_router.BayesResidualFlowRouter()(
+        target_velocity=target,
+        source_velocity=source,
+        source_reconstruction_velocity=source_reconstruction,
+        belief=_control_belief(),
+    )
+
+    # edit strength=0.8*0.5=0.4, preserve strength=0.6*1=0.6.
+    assert torch.allclose(
+        debug["preserve_action_weight"],
+        torch.full_like(target, 0.6),
+    )
+    assert torch.allclose(routed, torch.full_like(target, 11.2))
+    assert debug["action_sum_error"].max().item() < 1e-6
+
+
+def test_bayes_router_preserves_when_both_beliefs_are_absent():
+    target = torch.full((1, 1, 1, 1, 1), 10.0)
+    source = torch.full_like(target, 3.0)
+    source_reconstruction = torch.full_like(target, 5.0)
+
+    routed, debug = role_router.BayesResidualFlowRouter()(
+        target_velocity=target,
+        source_velocity=source,
+        source_reconstruction_velocity=source_reconstruction,
+        belief=_control_belief(
+            edit_belief=0.0,
+            preserve_belief=0.0,
+        ),
+    )
+
+    assert torch.equal(routed, torch.full_like(target, 12.0))
+    assert torch.equal(
+        debug["no_evidence"],
+        torch.ones_like(target),
+    )
+
+
+def test_bayes_router_uses_fp32_weights_with_bfloat16_velocity():
+    target = torch.full(
+        (1, 1, 1, 1, 1),
+        10.0,
+        dtype=torch.bfloat16,
+    )
+    source = torch.full_like(target, 3.0)
+    source_reconstruction = torch.full_like(target, 5.0)
+
+    routed, debug = role_router.BayesResidualFlowRouter()(
+        target_velocity=target,
+        source_velocity=source,
+        source_reconstruction_velocity=source_reconstruction,
+        belief=_control_belief(),
+    )
+
+    assert routed.dtype == torch.bfloat16
+    assert debug["preserve_action_weight"].dtype == torch.float32
+    assert debug["action_sum_error"].max().item() < 1e-6
 
 
 def test_legacy_role_router_behavior_is_unchanged():
