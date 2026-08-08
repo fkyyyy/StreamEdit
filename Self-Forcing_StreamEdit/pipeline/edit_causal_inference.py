@@ -753,7 +753,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     print(
                         "PERSISTENT_EDIT_COMMITMENT "
                         "trigger=hand_interaction "
-                        "transport=source_query_affinity "
+                        "transport=committed_token_forward_splat "
                         "presence=semantic_match "
                         "preserve_release=object_core"
                     )

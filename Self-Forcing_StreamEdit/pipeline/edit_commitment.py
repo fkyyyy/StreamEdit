@@ -121,9 +121,9 @@ class EditCommitmentController:
         reference_precision: torch.Tensor,
     ):
         similarity = torch.einsum(
-            "bnd,bmd->bnm",
-            current_features,
+            "bmd,bnd->bmn",
             reference_features,
+            current_features,
         ).clamp(-1.0, 1.0)
         topk = min(self.topk, similarity.shape[-1])
         top_similarity, top_index = similarity.topk(topk, dim=-1)
@@ -144,24 +144,10 @@ class EditCommitmentController:
         temperature = (
             similarity_high - similarity_low
         ).clamp(0.03, 0.20).unsqueeze(-1)
-        affinity = torch.softmax(
+        splat_weight = torch.softmax(
             top_similarity / temperature,
             dim=-1,
         )
-
-        def gather(value: torch.Tensor) -> torch.Tensor:
-            return value.unsqueeze(1).expand(
-                -1,
-                current_features.shape[1],
-                -1,
-            ).gather(2, top_index)
-
-        transported = (
-            affinity * gather(reference_commitment)
-        ).sum(dim=-1)
-        transported_precision = (
-            affinity * gather(reference_precision)
-        ).sum(dim=-1)
 
         median_similarity = torch.quantile(
             best_similarity,
@@ -191,7 +177,51 @@ class EditCommitmentController:
         match_confidence = torch.sqrt(
             relative_confidence * absolute_confidence
         )
-        return transported, transported_precision, match_confidence
+
+        precision_contribution = (
+            splat_weight
+            * match_confidence.unsqueeze(-1)
+            * reference_precision.unsqueeze(-1)
+        )
+        action_contribution = (
+            precision_contribution
+            * reference_commitment.unsqueeze(-1)
+        )
+        active_reference = (
+            reference_precision > self.eps
+        ).float().unsqueeze(-1)
+        match_contribution = (
+            splat_weight
+            * match_confidence.unsqueeze(-1)
+            * active_reference
+        )
+
+        batch, current_tokens, _ = current_features.shape
+
+        def splat(value: torch.Tensor) -> torch.Tensor:
+            output = value.new_zeros(batch, current_tokens)
+            output.scatter_add_(
+                1,
+                top_index.reshape(batch, -1),
+                value.reshape(batch, -1),
+            )
+            return output
+
+        precision_mass = splat(precision_contribution)
+        action_mass = splat(action_contribution)
+        match_mass = splat(match_contribution)
+        transported = torch.where(
+            precision_mass > self.eps,
+            action_mass / precision_mass.clamp_min(self.eps),
+            torch.zeros_like(action_mass),
+        ).clamp(0.0, 1.0)
+        transported_precision = precision_mass.clamp(0.0, 1.0)
+        current_match_confidence = match_mass.clamp(0.0, 1.0)
+        return (
+            transported,
+            transported_precision,
+            current_match_confidence,
+        )
 
     def __call__(
         self,

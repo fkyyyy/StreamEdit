@@ -246,6 +246,29 @@ def test_interaction_anchor_recovers_lost_short_term_commitment():
     assert recovered.effective_commitment.max() > 0.5
 
 
+def test_transport_splats_only_from_committed_reference_tokens():
+    controller = commitment_module.EditCommitmentController(topk=1)
+    reference_features = _features()
+    current_features = reference_features[:, [1, 2, 0, 3]]
+    reference_commitment = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    reference_precision = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+
+    transported, precision, match = controller._transport(
+        current_features,
+        reference_features,
+        reference_commitment,
+        reference_precision,
+    )
+
+    assert transported.argmax(dim=-1).item() == 2
+    assert precision.argmax(dim=-1).item() == 2
+    assert transported[0, 2] > 0.99
+    assert precision[0, 2] > 0.99
+    assert torch.count_nonzero(precision) == 1
+    assert match[0, 2] > 0.99
+    assert torch.count_nonzero(match) == 1
+
+
 def test_commitment_uses_fp32_state_with_bfloat16_features():
     result = commitment_module.EditCommitmentController()(
         belief=_belief(edit=0.8),
