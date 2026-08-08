@@ -172,6 +172,7 @@ if __name__ == '__main__':
             "hand_role_posterior_flow_kv",
             "hand_role_bayes_flow_kv",
             "hand_role_bayes_flow_dual_kv",
+            "hand_role_bayes_flow_consolidated_kv",
         ],
         default="dynamic_sog",
     )
@@ -345,6 +346,7 @@ if __name__ == '__main__':
         "hand_role_posterior_flow_kv",
         "hand_role_bayes_flow_kv",
         "hand_role_bayes_flow_dual_kv",
+        "hand_role_bayes_flow_consolidated_kv",
     }
     if oracle_role_enabled and (
         args.object_mask_video is None or args.hand_mask_video is None

@@ -20,6 +20,10 @@ from .contact_graph import (
 from .belief_kv import build_belief_kv_weights
 from .control_belief import CausalControlBeliefBuilder
 from .hand_role_inference import HandRoleInferencer
+from .memory_consolidation import (
+    CausalMemoryConsolidator,
+    MemoryConsolidationPlan,
+)
 from .role_router import (
     BayesResidualFlowRouter,
     PosteriorResidualFlowRouter,
@@ -134,6 +138,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         contact_graph_seed: int = 0,
         save_role_dir: Optional[str] = None,
         _hand_role_inferencer: Optional[HandRoleInferencer] = None,
+        _memory_consolidator: Optional[
+            CausalMemoryConsolidator
+        ] = None,
     ) -> torch.Tensor:
         expected_role_shape = (
             src_video.shape[0], src_video.shape[1],
@@ -208,6 +215,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 contact_graph_layer_end=contact_graph_layer_end,
                 contact_graph_seed=contact_graph_seed,
                 save_role_dir=save_role_dir,
+                _hand_role_inferencer=_hand_role_inferencer,
+                _memory_consolidator=_memory_consolidator,
             )
 
         rollout_overlap = rollout_overlap_block_num * self.num_frame_per_block
@@ -219,6 +228,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_posterior_flow_kv",
                 "hand_role_bayes_flow_kv",
                 "hand_role_bayes_flow_dual_kv",
+                "hand_role_bayes_flow_consolidated_kv",
             }
         ):
             rollout_hand_role_inferencer = HandRoleInferencer(
@@ -241,9 +251,17 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "hand_role_posterior_flow_kv",
                         "hand_role_bayes_flow_kv",
                         "hand_role_bayes_flow_dual_kv",
+                        "hand_role_bayes_flow_consolidated_kv",
                     }
                 ),
             )
+        rollout_memory_consolidator = _memory_consolidator
+        if (
+            rollout_memory_consolidator is None
+            and routing_mode
+            == "hand_role_bayes_flow_consolidated_kv"
+        ):
+            rollout_memory_consolidator = CausalMemoryConsolidator()
 
         total_frame_num = src_video.shape[1]
         ret_latent_list = []
@@ -348,6 +366,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 contact_graph_seed=contact_graph_seed,
                 save_role_dir=save_role_dir,
                 _hand_role_inferencer=rollout_hand_role_inferencer,
+                _memory_consolidator=rollout_memory_consolidator,
             )
 
             # store results
@@ -444,6 +463,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         contact_graph_seed: int = 0,
         save_role_dir: Optional[str] = None,
         _hand_role_inferencer: Optional[HandRoleInferencer] = None,
+        _memory_consolidator: Optional[
+            CausalMemoryConsolidator
+        ] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
         independent_first_frame = independent_first_frame or self.independent_first_frame
@@ -465,12 +487,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_posterior_flow_kv",
             "hand_role_bayes_flow_kv",
             "hand_role_bayes_flow_dual_kv",
+            "hand_role_bayes_flow_consolidated_kv",
         }
         adaptive_role_enabled = routing_mode in {
             "hand_role_adaptive_kv",
             "hand_role_posterior_flow_kv",
             "hand_role_bayes_flow_kv",
             "hand_role_bayes_flow_dual_kv",
+            "hand_role_bayes_flow_consolidated_kv",
         }
         posterior_flow_enabled = (
             routing_mode == "hand_role_posterior_flow_kv"
@@ -479,10 +503,19 @@ class EditCausalInferencePipeline(torch.nn.Module):
             routing_mode in {
                 "hand_role_bayes_flow_kv",
                 "hand_role_bayes_flow_dual_kv",
+                "hand_role_bayes_flow_consolidated_kv",
             }
         )
-        belief_dual_kv_enabled = (
+        aligned_belief_kv_enabled = (
             routing_mode == "hand_role_bayes_flow_dual_kv"
+        )
+        memory_consolidation_enabled = (
+            routing_mode
+            == "hand_role_bayes_flow_consolidated_kv"
+        )
+        belief_memory_enabled = (
+            aligned_belief_kv_enabled
+            or memory_consolidation_enabled
         )
         consistent_role_kv_enabled = oracle_kv_enabled or hand_role_enabled
         if routing_mode not in {
@@ -496,6 +529,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_posterior_flow_kv",
             "hand_role_bayes_flow_kv",
             "hand_role_bayes_flow_dual_kv",
+            "hand_role_bayes_flow_consolidated_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
         if not 0.0 <= contact_target_weight <= 1.0:
@@ -662,7 +696,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     "precision=online_fp32 "
                     "field_role=precision_only"
                 )
-                if belief_dual_kv_enabled:
+                if aligned_belief_kv_enabled:
                     print(
                         "BELIEF_DUAL_KV "
                         "target_memory=edit_belief "
@@ -671,6 +705,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "memory=aligned_fusion "
                         "attention=native_single_pass "
                         "current_context=native"
+                    )
+                if memory_consolidation_enabled:
+                    print(
+                        "CAUSAL_MEMORY_CONSOLIDATION "
+                        "transport=source_query_affinity "
+                        "update=precision_filter "
+                        "state=sufficient_statistics "
+                        "materialization=aligned_kv"
                     )
         elif hand_role_enabled:
             print(
@@ -783,7 +825,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 batch_size=batch_size,
                 device=src_video.device,
             )
-            if belief_dual_kv_enabled
+            if belief_memory_enabled
             else None
         )
         crossattn_cache_src = self._initialize_crossattn_cache(
@@ -826,6 +868,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 field_candidate_radius=hand_field_candidate_radius,
                 adaptive=adaptive_role_enabled,
             )
+        memory_consolidator = _memory_consolidator
+        if memory_consolidation_enabled and memory_consolidator is None:
+            memory_consolidator = CausalMemoryConsolidator()
 
         # get trigger token indices
         trans_tokenizer = self.text_encoder.tokenizer.tokenizer
@@ -887,7 +932,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 #✨ src & trg union
                 current_trg_fg_mask = trg_fg_mask_bin | src_fg_mask_bin
                 self._update_trg_fg_mask_cache(trg_fg_mask_cache, current_trg_fg_mask, kv_cache_trg)
-                if belief_dual_kv_enabled:
+                if belief_memory_enabled:
                     self._update_belief_kv_weight_cache(
                         belief_kv_weight_cache,
                         current_preserve_action=torch.zeros_like(
@@ -961,6 +1006,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
             hand_role_inference = None
             current_control_belief = None
             current_belief_kv_weights = None
+            current_memory_plan: Optional[
+                MemoryConsolidationPlan
+            ] = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
                 role_right = role_left + current_num_frames
@@ -1114,7 +1162,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         block_index,
                         hand_role_debug,
                     )
-                if belief_dual_kv_enabled:
+                if belief_memory_enabled:
                     current_control_belief = control_belief_builder(
                         debug=hand_role_debug,
                         hand_mask=hand_only_mask[
@@ -1143,7 +1191,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 effective_src_fg_mask,
                 belief_kv_weight_cache=(
                     belief_kv_weight_cache
-                    if belief_dual_kv_enabled
+                    if belief_memory_enabled
                     else None
                 ),
             )
@@ -1323,7 +1371,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         for name, value
                         in current_control_belief.as_dict().items()
                     })
-                    if belief_dual_kv_enabled:
+                    if belief_memory_enabled:
                         current_belief_kv_weights = (
                             build_belief_kv_weights(
                                 current_control_belief,
@@ -1332,6 +1380,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 ),
                             )
                         )
+                        if memory_consolidation_enabled:
+                            current_memory_plan = memory_consolidator(
+                                belief=current_control_belief,
+                                weights=current_belief_kv_weights,
+                                source_features=source_query_features,
+                            )
                         hand_role_debug.update({
                             "dual_kv_edit_weight": (
                                 current_belief_kv_weights.edit_map
@@ -1350,6 +1404,19 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 current_belief_kv_weights.conflict_map
                             ),
                         })
+                        if current_memory_plan is not None:
+                            hand_role_debug.update(
+                                current_memory_plan.as_debug_maps(
+                                    height=(
+                                        current_belief_kv_weights
+                                        .edit_map.shape[-2]
+                                    ),
+                                    width=(
+                                        current_belief_kv_weights
+                                        .edit_map.shape[-1]
+                                    ),
+                                )
+                            )
                         self._inject_masks_to_kv_cache(
                             kv_cache_dual,
                             trg_fg_mask_cache,
@@ -1375,7 +1442,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "uncertainty="
                         f"{current_control_belief.uncertainty.mean().item():.4f}"
                     )
-                    if belief_dual_kv_enabled:
+                    if aligned_belief_kv_enabled:
                         print(
                             "BELIEF_DUAL_KV "
                             "block="
@@ -1390,6 +1457,36 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             f"{current_belief_kv_weights.preserve_action.mean().item():.4f} "
                             "conflict="
                             f"{current_belief_kv_weights.conflict_map.mean().item():.4f}"
+                        )
+                    elif memory_consolidation_enabled:
+                        print(
+                            "BELIEF_MEMORY_OBSERVATION "
+                            "block="
+                            f"{current_start_frame // self.num_frame_per_block} "
+                            "edit_action="
+                            f"{current_belief_kv_weights.edit_action.mean().item():.4f} "
+                            "preserve_action="
+                            f"{current_belief_kv_weights.preserve_action.mean().item():.4f} "
+                            "conflict="
+                            f"{current_belief_kv_weights.conflict_map.mean().item():.4f}"
+                        )
+                    if current_memory_plan is not None:
+                        print(
+                            "CAUSAL_MEMORY_WRITE "
+                            "block="
+                            f"{current_start_frame // self.num_frame_per_block} "
+                            "observation_precision="
+                            f"{current_memory_plan.observation_precision.mean().item():.4f} "
+                            "transport_precision="
+                            f"{current_memory_plan.transported_precision.mean().item():.4f} "
+                            "observation_gain="
+                            f"{current_memory_plan.observation_gain.mean().item():.4f} "
+                            "consolidated_edit="
+                            f"{current_memory_plan.consolidated_edit_action.mean().item():.4f} "
+                            "consolidated_precision="
+                            f"{current_memory_plan.consolidated_precision.mean().item():.4f} "
+                            "materialized_edit="
+                            f"{current_memory_plan.materialized_edit_action.mean().item():.4f}"
                         )
                     if save_role_dir is not None:
                         self._save_hand_role_debug(
@@ -1694,15 +1791,30 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 else trg_fg_mask_bin | src_fg_mask_bin
             )
             self._update_trg_fg_mask_cache(trg_fg_mask_cache, current_trg_fg_mask, kv_cache_trg)
-            if belief_dual_kv_enabled:
+            if belief_memory_enabled:
                 if current_belief_kv_weights is None:
                     raise RuntimeError(
-                        "Missing belief KV weights for dual-KV cache update"
+                        "Missing belief weights for memory cache update"
+                    )
+                if (
+                    memory_consolidation_enabled
+                    and current_memory_plan is None
+                ):
+                    raise RuntimeError(
+                        "Missing consolidated memory write plan"
                     )
                 self._update_belief_kv_weight_cache(
                     belief_kv_weight_cache,
                     current_preserve_action=(
-                        current_belief_kv_weights.preserve_action
+                        1.0
+                        - current_memory_plan
+                        .materialized_edit_action.reshape(
+                            current_belief_kv_weights
+                            .preserve_action.shape
+                        )
+                        if current_memory_plan is not None
+                        else current_belief_kv_weights
+                        .preserve_action
                     ),
                     kv_cache_trg=kv_cache_trg,
                 )
