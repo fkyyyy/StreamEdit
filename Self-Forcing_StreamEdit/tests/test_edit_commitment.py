@@ -102,6 +102,7 @@ def test_commitment_persists_after_hand_leaves_while_object_is_present():
 
     assert result.trigger.max() == 0
     assert result.semantic_presence.max() > 0.9
+    assert torch.count_nonzero(result.semantic_absence) == 0
     assert result.effective_commitment.max() > 0.5
     assert result.belief.edit_belief.max() > 0.5
     assert result.belief.preserve_belief.min() < 0.5
@@ -123,7 +124,12 @@ def test_commitment_closes_when_semantic_object_disappears():
     )
 
     assert torch.count_nonzero(result.effective_commitment) == 0
-    assert torch.count_nonzero(result.belief.edit_belief) == 0
+    assert result.semantic_absence.max() > 0.9
+    edit_strength = (
+        result.belief.edit_belief
+        * result.belief.edit_precision
+    )
+    assert torch.count_nonzero(edit_strength) == 0
     assert torch.allclose(
         result.belief.preserve_belief,
         torch.ones_like(result.belief.preserve_belief),
@@ -156,6 +162,88 @@ def test_commitment_keeps_contact_preservation_responsibility():
         torch.ones_like(result.belief.preserve_belief[hand]),
     )
     assert result.belief.preserve_belief[0, 0, -1, -1] == 1.0
+    assert result.belief.preserve_belief[0, 0, 0, 2] < 1.0
+
+
+def test_weak_presence_does_not_compound_state_precision():
+    controller = commitment_module.EditCommitmentController()
+    result = controller(
+        belief=_belief(edit=0.8),
+        debug=_debug(),
+        hand_mask=_hand(),
+        source_features=_features(),
+    )
+    initial_state_precision = result.state_precision.max()
+
+    for _ in range(5):
+        result = controller(
+            belief=_belief(edit=0.0, visibility=0.0),
+            debug=_debug(attention=0.25, proximity=0.0),
+            hand_mask=_hand(present=False),
+            source_features=_features(),
+        )
+
+    assert torch.allclose(
+        result.state_precision.max(),
+        initial_state_precision,
+        atol=1e-6,
+    )
+    assert result.commitment_precision.max() > 0
+    assert result.effective_commitment.max() > 0
+
+
+def test_confident_absence_suppresses_action_but_keeps_latent_state():
+    controller = commitment_module.EditCommitmentController()
+    initial = controller(
+        belief=_belief(edit=0.8),
+        debug=_debug(),
+        hand_mask=_hand(),
+        source_features=_features(),
+    )
+    absent = controller(
+        belief=_belief(edit=0.0, visibility=0.0),
+        debug=_debug(attention=0.0, proximity=0.0),
+        hand_mask=_hand(present=False),
+        source_features=_features(),
+    )
+    recovered = controller(
+        belief=_belief(edit=0.0, visibility=0.0),
+        debug=_debug(attention=1.0, proximity=0.0),
+        hand_mask=_hand(present=False),
+        source_features=_features(),
+    )
+
+    assert torch.count_nonzero(absent.effective_commitment) == 0
+    assert torch.allclose(
+        absent.state_precision.max(),
+        initial.state_precision.max(),
+        atol=1e-6,
+    )
+    assert recovered.effective_commitment.max() > 0.5
+
+
+def test_interaction_anchor_recovers_lost_short_term_commitment():
+    controller = commitment_module.EditCommitmentController()
+    controller(
+        belief=_belief(edit=0.8),
+        debug=_debug(),
+        hand_mask=_hand(),
+        source_features=_features(),
+    )
+    controller.previous_commitment.zero_()
+    controller.previous_precision.zero_()
+
+    recovered = controller(
+        belief=_belief(edit=0.0, visibility=0.0),
+        debug=_debug(attention=1.0, proximity=0.0),
+        hand_mask=_hand(present=False),
+        source_features=_features(),
+    )
+
+    assert recovered.transported.max() == 0
+    assert recovered.anchor_transport.max() > 0.5
+    assert recovered.anchor_precision.max() > 0.5
+    assert recovered.effective_commitment.max() > 0.5
 
 
 def test_commitment_uses_fp32_state_with_bfloat16_features():

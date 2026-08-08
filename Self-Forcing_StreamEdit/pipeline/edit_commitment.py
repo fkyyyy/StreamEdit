@@ -15,9 +15,13 @@ class EditCommitmentResult:
     trigger: torch.Tensor
     transported: torch.Tensor
     transport_precision: torch.Tensor
+    anchor_transport: torch.Tensor
+    anchor_precision: torch.Tensor
     semantic_presence: torch.Tensor
+    semantic_absence: torch.Tensor
     commitment: torch.Tensor
     commitment_precision: torch.Tensor
+    state_precision: torch.Tensor
     effective_commitment: torch.Tensor
     edit_support: torch.Tensor
 
@@ -26,9 +30,13 @@ class EditCommitmentResult:
             "trigger": self.trigger,
             "transported": self.transported,
             "transport_precision": self.transport_precision,
+            "anchor_transport": self.anchor_transport,
+            "anchor_precision": self.anchor_precision,
             "semantic_presence": self.semantic_presence,
+            "semantic_absence": self.semantic_absence,
             "commitment": self.commitment,
             "commitment_precision": self.commitment_precision,
+            "state_precision": self.state_precision,
             "effective_commitment": self.effective_commitment,
             "edit_support": self.edit_support,
         }
@@ -57,11 +65,21 @@ class EditCommitmentResult:
             "commitment_transport_precision": (
                 self.transport_precision.float()
             ),
+            "commitment_anchor_transport": (
+                self.anchor_transport.float()
+            ),
+            "commitment_anchor_precision": (
+                self.anchor_precision.float()
+            ),
             "commitment_semantic_presence": (
                 self.semantic_presence.float()
             ),
+            "commitment_semantic_absence": (
+                self.semantic_absence.float()
+            ),
             "commitment_posterior": self.commitment.float(),
             "commitment_precision": self.commitment_precision.float(),
+            "commitment_state_precision": self.state_precision.float(),
             "commitment_effective": self.effective_commitment.float(),
             "commitment_edit_support": self.edit_support.float(),
         }
@@ -80,6 +98,10 @@ class EditCommitmentController:
         self.previous_features = None
         self.previous_commitment = None
         self.previous_precision = None
+        self.anchor_features = None
+        self.anchor_commitment = None
+        self.anchor_precision = None
+        self.anchor_score = None
 
     @staticmethod
     def _required(
@@ -266,33 +288,36 @@ class EditCommitmentController:
 
         transported_values = []
         transported_precisions = []
+        anchor_values = []
+        anchor_precisions = []
         semantic_presences = []
+        semantic_absences = []
         commitments = []
         commitment_precisions = []
+        state_precisions = []
 
         reference_features = self.previous_features
         reference_commitment = self.previous_commitment
         reference_precision = self.previous_precision
+        anchor_features = self.anchor_features
+        anchor_commitment = self.anchor_commitment
+        anchor_precision = self.anchor_precision
+        anchor_score = self.anchor_score
         for frame_index in range(frames):
             current_features = features[:, frame_index]
             current_attention = source_attention[:, frame_index]
             current_edit_belief = edit_belief[:, frame_index]
             current_trigger_precision = trigger_precision[:, frame_index]
 
-            if (
+            has_reference = not (
                 reference_features is None
                 or reference_commitment is None
                 or reference_precision is None
-            ):
-                transported = torch.zeros_like(current_edit_belief)
-                transported_precision = torch.zeros_like(
-                    current_trigger_precision
-                )
-                semantic_presence = torch.zeros_like(current_attention)
-            else:
+            )
+            if has_reference:
                 (
                     transported,
-                    transported_precision,
+                    transported_state_precision,
                     match_confidence,
                 ) = self._transport(
                     current_features,
@@ -300,60 +325,199 @@ class EditCommitmentController:
                     reference_commitment,
                     reference_precision,
                 )
-                semantic_presence = torch.sqrt(
+            else:
+                transported = torch.zeros_like(current_edit_belief)
+                transported_state_precision = torch.zeros_like(
+                    current_trigger_precision
+                )
+                match_confidence = torch.zeros_like(current_attention)
+
+            has_anchor = not (
+                anchor_features is None
+                or anchor_commitment is None
+                or anchor_precision is None
+            )
+            if has_anchor:
+                (
+                    anchor_transport,
+                    anchor_state_precision,
+                    anchor_match_confidence,
+                ) = self._transport(
+                    current_features,
+                    anchor_features,
+                    anchor_commitment,
+                    anchor_precision,
+                )
+            else:
+                anchor_transport = torch.zeros_like(current_edit_belief)
+                anchor_state_precision = torch.zeros_like(
+                    current_trigger_precision
+                )
+                anchor_match_confidence = torch.zeros_like(
+                    current_attention
+                )
+
+            temporal_absence = (
+                match_confidence * (1.0 - current_attention)
+            ).clamp(0.0, 1.0)
+            anchor_absence = (
+                anchor_match_confidence * (1.0 - current_attention)
+            ).clamp(0.0, 1.0)
+            temporal_localized_precision = (
+                transported_state_precision * (1.0 - temporal_absence)
+            ).clamp(0.0, 1.0)
+            anchor_localized_precision = (
+                anchor_state_precision * (1.0 - anchor_absence)
+            ).clamp(0.0, 1.0)
+
+            prior_precision_sum = (
+                transported_state_precision + anchor_state_precision
+            )
+            prior_commitment = torch.where(
+                prior_precision_sum > self.eps,
+                (
+                    transported * transported_state_precision
+                    + anchor_transport * anchor_state_precision
+                )
+                / prior_precision_sum.clamp_min(self.eps),
+                torch.zeros_like(current_edit_belief),
+            )
+            prior_state_precision = torch.maximum(
+                transported_state_precision,
+                anchor_state_precision,
+            )
+            localized_precision = torch.maximum(
+                temporal_localized_precision,
+                anchor_localized_precision,
+            )
+            semantic_presence = torch.maximum(
+                torch.sqrt(
                     (
                         current_attention * match_confidence
                     ).clamp_min(0.0)
-                )
-                transported_precision = (
-                    transported_precision * semantic_presence
-                ).clamp(0.0, 1.0)
+                ),
+                torch.sqrt(
+                    (
+                        current_attention
+                        * anchor_match_confidence
+                    ).clamp_min(0.0)
+                ),
+            )
+            semantic_absence = torch.where(
+                prior_state_precision > self.eps,
+                (
+                    1.0
+                    - localized_precision
+                    / prior_state_precision.clamp_min(self.eps)
+                ),
+                torch.zeros_like(current_attention),
+            ).clamp(0.0, 1.0)
 
-            total_precision = (
-                transported_precision + current_trigger_precision
+            state_total_precision = (
+                prior_state_precision + current_trigger_precision
             )
             commitment = torch.where(
-                total_precision > self.eps,
+                state_total_precision > self.eps,
                 (
-                    transported * transported_precision
+                    prior_commitment * prior_state_precision
                     + current_edit_belief
                     * current_trigger_precision
                 )
-                / total_precision.clamp_min(self.eps),
+                / state_total_precision.clamp_min(self.eps),
                 torch.zeros_like(current_edit_belief),
+            ).clamp(0.0, 1.0)
+            state_precision = (
+                1.0
+                - (1.0 - prior_state_precision)
+                * (1.0 - current_trigger_precision)
             ).clamp(0.0, 1.0)
             commitment_precision = (
                 1.0
-                - (1.0 - transported_precision)
+                - (1.0 - localized_precision)
                 * (1.0 - current_trigger_precision)
             ).clamp(0.0, 1.0)
 
             transported_values.append(transported)
-            transported_precisions.append(transported_precision)
+            transported_precisions.append(localized_precision)
+            anchor_values.append(anchor_transport)
+            anchor_precisions.append(anchor_localized_precision)
             semantic_presences.append(semantic_presence)
+            semantic_absences.append(semantic_absence)
             commitments.append(commitment)
             commitment_precisions.append(commitment_precision)
+            state_precisions.append(state_precision)
 
             reference_features = current_features
             reference_commitment = commitment
-            reference_precision = commitment_precision
+            reference_precision = state_precision
+
+            current_anchor_score = current_trigger_precision.mean(
+                dim=-1,
+                keepdim=True,
+            )
+            if anchor_score is None:
+                anchor_score = torch.zeros_like(current_anchor_score)
+                anchor_features = torch.zeros_like(current_features)
+                anchor_commitment = torch.zeros_like(commitment)
+                anchor_precision = torch.zeros_like(state_precision)
+            replace_anchor = current_anchor_score > anchor_score
+            anchor_score = torch.where(
+                replace_anchor,
+                current_anchor_score,
+                anchor_score,
+            )
+            anchor_features = torch.where(
+                replace_anchor.unsqueeze(-1),
+                current_features,
+                anchor_features,
+            )
+            anchor_commitment = torch.where(
+                replace_anchor,
+                commitment,
+                anchor_commitment,
+            )
+            anchor_precision = torch.where(
+                replace_anchor,
+                state_precision,
+                anchor_precision,
+            )
 
         self.previous_features = reference_features.detach()
         self.previous_commitment = reference_commitment.detach()
         self.previous_precision = reference_precision.detach()
+        self.anchor_features = anchor_features.detach()
+        self.anchor_commitment = anchor_commitment.detach()
+        self.anchor_precision = anchor_precision.detach()
+        self.anchor_score = anchor_score.detach()
 
         transported = torch.stack(transported_values, dim=1)
         transport_precision = torch.stack(
             transported_precisions,
             dim=1,
         )
+        anchor_transport = torch.stack(
+            anchor_values,
+            dim=1,
+        )
+        anchor_precision = torch.stack(
+            anchor_precisions,
+            dim=1,
+        )
         semantic_presence = torch.stack(
             semantic_presences,
+            dim=1,
+        )
+        semantic_absence = torch.stack(
+            semantic_absences,
             dim=1,
         )
         commitment = torch.stack(commitments, dim=1)
         commitment_precision = torch.stack(
             commitment_precisions,
+            dim=1,
+        )
+        state_precision = torch.stack(
+            state_precisions,
             dim=1,
         )
         effective_commitment = (
@@ -404,29 +568,26 @@ class EditCommitmentController:
             align_corners=False,
         ).reshape(batch, frames, height, width).clamp(0.0, 1.0)
 
-        hand_probability_full = hand_mask.float().clamp(0.0, 1.0)
-        hand_band = F.max_pool2d(
-            hand_probability_full.reshape(
-                batch * frames,
-                1,
-                height,
-                width,
-            ),
-            kernel_size=3,
-            stride=1,
-            padding=1,
-        ).reshape_as(hand_probability_full)
-        edit_belief_full = (
-            1.0
-            - (1.0 - belief.edit_belief.float())
-            * (1.0 - commitment_map)
-        ).clamp(0.0, 1.0)
-        edit_precision_full = torch.maximum(
-            belief.edit_precision.float(),
-            precision_map,
+        hand_core = hand_mask.float().clamp(0.0, 1.0)
+        base_edit_belief = belief.edit_belief.float()
+        base_edit_precision = belief.edit_precision.float()
+        unique_commitment = (
+            commitment_map * (1.0 - base_edit_belief)
         )
+        edit_belief_full = (
+            base_edit_belief + unique_commitment
+        ).clamp(0.0, 1.0)
+        edit_precision_full = torch.where(
+            edit_belief_full > self.eps,
+            (
+                base_edit_belief * base_edit_precision
+                + unique_commitment * precision_map
+            )
+            / edit_belief_full.clamp_min(self.eps),
+            base_edit_precision,
+        ).clamp(0.0, 1.0)
         preserve_release = (
-            effective_full * (1.0 - hand_band)
+            effective_full * (1.0 - hand_core)
         )
         preserve_belief_full = (
             belief.preserve_belief.float()
@@ -469,9 +630,13 @@ class EditCommitmentController:
             trigger=token_map(trigger),
             transported=token_map(transported),
             transport_precision=token_map(transport_precision),
+            anchor_transport=token_map(anchor_transport),
+            anchor_precision=token_map(anchor_precision),
             semantic_presence=token_map(semantic_presence),
+            semantic_absence=token_map(semantic_absence),
             commitment=token_map(commitment),
             commitment_precision=token_map(commitment_precision),
+            state_precision=token_map(state_precision),
             effective_commitment=effective_map,
             edit_support=F.max_pool2d(
                 edit_support.float().reshape(
