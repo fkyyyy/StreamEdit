@@ -842,6 +842,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "slots=4 write=precision_statistics "
                         "read=value_only "
                         "belief_feedback=identity_match"
+                        + (
+                            " reference_prior=8"
+                            if reference_identity_enabled
+                            else ""
+                        )
                     )
         elif hand_role_enabled:
             print(
@@ -1131,6 +1136,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         f"{reference_bootstrap.semantic_score.mean().item():.4f} "
                         "joint="
                         f"{reference_bootstrap.joint_score.mean().item():.4f} "
+                        "hand_contact="
+                        f"{reference_bootstrap.hand_contact_score.mean().item():.4f} "
                         "write="
                         f"{reference_bootstrap.write_weight.mean().item():.4f} "
                         "support="
@@ -1832,7 +1839,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 f"{current_start_frame // self.num_frame_per_block} "
                                 "radius="
                                 f"{edit_commitment_controller.last_spatial_radius} "
-                                "mode=causal_local_forward_splat"
+                                "budget="
+                                f"{edit_commitment_controller.reference_support_budget.float().mean().item():.1f} "
+                                "precision_scale="
+                                f"{edit_commitment_controller.last_reference_precision_scale.mean().item():.4f} "
+                                "mode=previous_only_local_splat"
                             )
                     if current_identity_support is not None:
                         print(

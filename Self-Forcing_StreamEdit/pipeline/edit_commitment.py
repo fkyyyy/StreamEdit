@@ -113,7 +113,9 @@ class EditCommitmentController:
         self.anchor_precision = None
         self.anchor_score = None
         self.reference_bootstrapped = False
+        self.reference_support_budget = None
         self.last_spatial_radius = None
+        self.last_reference_precision_scale = None
         self._spatial_mask_cache = {}
 
     @torch.no_grad()
@@ -177,6 +179,9 @@ class EditCommitmentController:
         self.anchor_commitment = commitment.clone()
         self.anchor_precision = precision.clone()
         self.anchor_score = precision.mean(dim=-1, keepdim=True)
+        self.reference_support_budget = (
+            precision > self.eps
+        ).sum(dim=-1)
         self.reference_bootstrapped = True
         return commitment, precision
 
@@ -350,6 +355,71 @@ class EditCommitmentController:
             current_match_confidence,
         )
 
+    def _calibrate_active_precision(
+        self,
+        precision: torch.Tensor,
+    ):
+        calibrated = torch.zeros_like(precision)
+        scales = precision.new_zeros(
+            precision.shape[0],
+            1,
+        )
+        for batch_index in range(precision.shape[0]):
+            active = precision[batch_index] > self.eps
+            if not active.any():
+                continue
+            scale = torch.quantile(
+                precision[batch_index][active],
+                0.90,
+            ).clamp_min(self.eps)
+            scales[batch_index] = scale
+            calibrated[batch_index] = torch.where(
+                active,
+                (
+                    precision[batch_index] / scale
+                ).clamp(0.0, 1.0),
+                torch.zeros_like(precision[batch_index]),
+            )
+        return calibrated, scales
+
+    def _prune_to_reference_budget(
+        self,
+        transported: torch.Tensor,
+        precision: torch.Tensor,
+        match_confidence: torch.Tensor,
+    ):
+        if self.reference_support_budget is None:
+            raise RuntimeError(
+                "Missing reference transport support budget"
+            )
+        keep = torch.zeros_like(precision, dtype=torch.bool)
+        for batch_index in range(precision.shape[0]):
+            budget = min(
+                int(
+                    self.reference_support_budget[
+                        batch_index
+                    ].item()
+                ),
+                precision.shape[1],
+            )
+            active_count = int(
+                (
+                    precision[batch_index] > self.eps
+                ).sum().item()
+            )
+            keep_count = min(budget, active_count)
+            if keep_count <= 0:
+                continue
+            index = precision[batch_index].topk(
+                keep_count,
+            ).indices
+            keep[batch_index, index] = True
+        return (
+            transported * keep.float(),
+            precision * keep.float(),
+            match_confidence * keep.float(),
+        )
+
     def __call__(
         self,
         belief: CausalControlBelief,
@@ -472,6 +542,7 @@ class EditCommitmentController:
         anchor_commitment = self.anchor_commitment
         anchor_precision = self.anchor_precision
         anchor_score = self.anchor_score
+        reference_precision_scales = []
         for frame_index in range(frames):
             current_features = features[:, frame_index]
             current_attention = source_attention[:, frame_index]
@@ -496,6 +567,25 @@ class EditCommitmentController:
                     spatial_shape=spatial_shape,
                     spatial_radius=spatial_radius,
                 )
+                if self.reference_bootstrapped:
+                    (
+                        transported,
+                        transported_state_precision,
+                        match_confidence,
+                    ) = self._prune_to_reference_budget(
+                        transported,
+                        transported_state_precision,
+                        match_confidence,
+                    )
+                    (
+                        transported_state_precision,
+                        reference_precision_scale,
+                    ) = self._calibrate_active_precision(
+                        transported_state_precision
+                    )
+                    reference_precision_scales.append(
+                        reference_precision_scale
+                    )
             else:
                 transported = torch.zeros_like(current_edit_belief)
                 transported_state_precision = torch.zeros_like(
@@ -507,6 +597,7 @@ class EditCommitmentController:
                 anchor_features is None
                 or anchor_commitment is None
                 or anchor_precision is None
+                or self.reference_bootstrapped
             )
             if has_anchor:
                 (
@@ -662,6 +753,14 @@ class EditCommitmentController:
         self.anchor_commitment = anchor_commitment.detach()
         self.anchor_precision = anchor_precision.detach()
         self.anchor_score = anchor_score.detach()
+        self.last_reference_precision_scale = (
+            torch.stack(
+                reference_precision_scales,
+                dim=1,
+            ).detach()
+            if reference_precision_scales
+            else None
+        )
 
         transported = torch.stack(transported_values, dim=1)
         transport_precision = torch.stack(

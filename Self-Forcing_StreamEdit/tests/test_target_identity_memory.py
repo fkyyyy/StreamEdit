@@ -94,6 +94,44 @@ def test_reference_bootstrap_localizes_semantic_latent_change():
     ) == 0
 
 
+def test_reference_component_filter_keeps_one_edited_instance():
+    weight = torch.zeros((1, 1, 4, 5))
+    weight[0, 0, 0, 0] = 0.8
+    weight[0, 0, 0, 1] = 0.8
+    weight[0, 0, 2, 2] = 0.3
+    weight[0, 0, 2, 3] = 0.3
+    weight[0, 0, 3, 3] = 0.3
+
+    selected = identity_module._largest_weighted_component_mask(
+        weight,
+        eps=1e-6,
+    )
+
+    assert torch.count_nonzero(selected) == 2
+    assert selected[0, 0, 0, 0]
+    assert selected[0, 0, 0, 1]
+    assert not selected[0, 0, 2, 2]
+
+
+def test_reference_component_filter_prefers_hand_contact():
+    weight = torch.zeros((1, 1, 4, 5))
+    weight[0, 0, 0, :3] = 1.0
+    weight[0, 0, 3, 3:] = 0.8
+    contact = torch.zeros_like(weight)
+    contact[0, 0, 3, 3:] = 1.0
+
+    selected = identity_module._largest_weighted_component_mask(
+        weight,
+        eps=1e-6,
+        hand_contact_score=contact,
+    )
+
+    assert torch.count_nonzero(selected) == 2
+    assert selected[0, 0, 3, 3]
+    assert selected[0, 0, 3, 4]
+    assert not selected[0, 0, 0, 0]
+
+
 def test_reference_bootstrap_excludes_hand_core():
     source, target, attention = _reference_inputs()
     hand = torch.zeros((1, 1, 4, 4))
@@ -197,9 +235,13 @@ def test_reference_identity_bootstrap_is_authoritative_and_single_use():
     valid_evidence = memory.states[0].evidence > 0
 
     assert memory.reference_bootstrapped
-    assert torch.all(memory.states[0].evidence[valid_evidence] == 1)
     assert torch.all(
-        update.accumulated_evidence[0][valid_evidence] == 1
+        memory.states[0].evidence[valid_evidence]
+        == memory.reference_prior_evidence
+    )
+    assert torch.all(
+        update.accumulated_evidence[0][valid_evidence]
+        == memory.reference_prior_evidence
     )
     with pytest.raises(RuntimeError, match="already bootstrapped"):
         memory.bootstrap_reference(

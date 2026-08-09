@@ -94,6 +94,7 @@ class ReferenceIdentityBootstrap:
     change_score: torch.Tensor
     semantic_score: torch.Tensor
     joint_score: torch.Tensor
+    hand_contact_score: torch.Tensor
 
     def validate(self) -> None:
         if self.write_weight.ndim != 2:
@@ -110,6 +111,7 @@ class ReferenceIdentityBootstrap:
                 self.change_score,
                 self.semantic_score,
                 self.joint_score,
+                self.hand_contact_score,
             )
         }
         if len(shapes) != 1:
@@ -128,6 +130,7 @@ class ReferenceIdentityBootstrap:
             ("change_score", self.change_score),
             ("semantic_score", self.semantic_score),
             ("joint_score", self.joint_score),
+            ("hand_contact_score", self.hand_contact_score),
         ):
             if not torch.isfinite(value.float()).all():
                 raise ValueError(
@@ -143,10 +146,130 @@ class ReferenceIdentityBootstrap:
             "reference_identity_change": self.change_score.float(),
             "reference_identity_semantic": self.semantic_score.float(),
             "reference_identity_joint": self.joint_score.float(),
+            "reference_identity_hand_contact": (
+                self.hand_contact_score.float()
+            ),
             "reference_identity_write": self.write_weight.reshape_as(
                 self.joint_score
             ).float(),
         }
+
+
+def _largest_weighted_component_mask(
+    weight: torch.Tensor,
+    eps: float,
+    hand_contact_score: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Select one 8-connected edited instance per reference frame."""
+    if weight.ndim != 4:
+        raise ValueError(
+            "Reference component weights must have shape [B,T,H,W]"
+        )
+    if (
+        hand_contact_score is not None
+        and hand_contact_score.shape != weight.shape
+    ):
+        raise ValueError(
+            "Reference hand contact and component weights must align"
+        )
+    candidate = (weight.detach().float() > eps).cpu()
+    cpu_weight = weight.detach().float().cpu()
+    cpu_contact = (
+        hand_contact_score.detach().float().cpu()
+        if hand_contact_score is not None
+        else torch.zeros_like(cpu_weight)
+    )
+    selected = torch.zeros_like(candidate)
+    batch, frames, height, width = candidate.shape
+    neighbors = (
+        (-1, -1), (-1, 0), (-1, 1),
+        (0, -1), (0, 1),
+        (1, -1), (1, 0), (1, 1),
+    )
+    for batch_index in range(batch):
+        for frame_index in range(frames):
+            visited = torch.zeros(
+                (height, width),
+                dtype=torch.bool,
+            )
+            best_component = []
+            best_score = (-1.0, -1.0, -1)
+            for row in range(height):
+                for col in range(width):
+                    if (
+                        visited[row, col]
+                        or not candidate[
+                            batch_index,
+                            frame_index,
+                            row,
+                            col,
+                        ]
+                    ):
+                        continue
+                    stack = [(row, col)]
+                    visited[row, col] = True
+                    component = []
+                    mass = 0.0
+                    contact_mass = 0.0
+                    while stack:
+                        current_row, current_col = stack.pop()
+                        component.append(
+                            (current_row, current_col)
+                        )
+                        mass += float(
+                            cpu_weight[
+                                batch_index,
+                                frame_index,
+                                current_row,
+                                current_col,
+                            ]
+                        )
+                        contact_mass += float(
+                            cpu_weight[
+                                batch_index,
+                                frame_index,
+                                current_row,
+                                current_col,
+                            ]
+                            * cpu_contact[
+                                batch_index,
+                                frame_index,
+                                current_row,
+                                current_col,
+                            ]
+                        )
+                        for row_offset, col_offset in neighbors:
+                            next_row = current_row + row_offset
+                            next_col = current_col + col_offset
+                            if (
+                                0 <= next_row < height
+                                and 0 <= next_col < width
+                                and not visited[next_row, next_col]
+                                and candidate[
+                                    batch_index,
+                                    frame_index,
+                                    next_row,
+                                    next_col,
+                                ]
+                            ):
+                                visited[next_row, next_col] = True
+                                stack.append((next_row, next_col))
+                    score = (
+                        contact_mass,
+                        mass,
+                        len(component),
+                    )
+                    if score > best_score:
+                        best_score = score
+                        best_component = component
+            for row, col in best_component:
+                selected[
+                    batch_index,
+                    frame_index,
+                    row,
+                    col,
+                ] = True
+    return selected.to(device=weight.device)
 
 
 def build_reference_identity_bootstrap(
@@ -246,6 +369,7 @@ def build_reference_identity_bootstrap(
         change_score,
     )
 
+    hand_contact_score = torch.zeros_like(joint_score)
     if hand_mask is not None:
         hand_core = F.avg_pool2d(
             hand_mask.float().reshape(
@@ -257,6 +381,21 @@ def build_reference_identity_bootstrap(
             kernel_size=patch_size,
             stride=patch_size,
         ).reshape_as(joint_score).clamp(0.0, 1.0)
+        contact_radius = max(
+            1,
+            round(min(token_height, token_width) * 0.067),
+        )
+        hand_contact_score = F.max_pool2d(
+            hand_core.reshape(
+                batch * frames,
+                1,
+                token_height,
+                token_width,
+            ),
+            kernel_size=2 * contact_radius + 1,
+            stride=1,
+            padding=contact_radius,
+        ).reshape_as(joint_score)
         joint_score = joint_score * (1.0 - hand_core)
 
     flat_joint = joint_score.flatten(2)
@@ -291,6 +430,14 @@ def build_reference_identity_bootstrap(
         high > threshold + eps,
         write_weight,
         torch.zeros_like(write_weight),
+    ).reshape(batch, frames, token_height, token_width)
+    component_mask = _largest_weighted_component_mask(
+        write_weight,
+        eps=eps,
+        hand_contact_score=hand_contact_score,
+    )
+    write_weight = (
+        write_weight * component_mask.float()
     ).reshape(batch, -1)
 
     result = ReferenceIdentityBootstrap(
@@ -298,6 +445,7 @@ def build_reference_identity_bootstrap(
         change_score=change_score.float(),
         semantic_score=semantic_score.float(),
         joint_score=joint_score.float(),
+        hand_contact_score=hand_contact_score.float(),
     )
     result.validate()
     return result
@@ -310,6 +458,7 @@ class SlowTargetIdentityMemory:
         self,
         layers: Iterable[int] = (8, 12, 16, 20),
         num_prototypes: int = 4,
+        reference_prior_evidence: float = 8.0,
         eps: float = 1e-6,
     ):
         self.layers = tuple(layers)
@@ -325,9 +474,16 @@ class SlowTargetIdentityMemory:
             raise ValueError(
                 "num_prototypes must be positive"
             )
+        if reference_prior_evidence <= 0:
+            raise ValueError(
+                "reference_prior_evidence must be positive"
+            )
         if eps <= 0:
             raise ValueError("eps must be positive")
         self.num_prototypes = num_prototypes
+        self.reference_prior_evidence = (
+            float(reference_prior_evidence)
+        )
         self.eps = eps
         self.states: Dict[int, TargetIdentityLayerState] = {}
         self.reference_bootstrapped = False
@@ -650,7 +806,10 @@ class SlowTargetIdentityMemory:
         for layer, state in tuple(self.states.items()):
             authoritative_evidence = torch.where(
                 state.evidence > self.eps,
-                torch.ones_like(state.evidence),
+                torch.full_like(
+                    state.evidence,
+                    self.reference_prior_evidence,
+                ),
                 torch.zeros_like(state.evidence),
             )
             anchored_state = TargetIdentityLayerState(

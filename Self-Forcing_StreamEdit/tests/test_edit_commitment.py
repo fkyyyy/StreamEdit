@@ -167,12 +167,15 @@ def test_reference_bootstrap_starts_commitment_without_hand():
     )
 
     assert torch.count_nonzero(result.trigger) == 0
-    assert result.anchor_transport.max() == 1
-    assert result.anchor_precision.max() == 1
+    assert result.transported.max() == 1
+    assert result.transport_precision.max() == 1
+    assert torch.count_nonzero(result.anchor_transport) == 0
+    assert torch.count_nonzero(result.anchor_precision) == 0
     assert result.effective_commitment.max() == 1
     assert result.belief.edit_belief.max() == 1
     assert result.belief.preserve_belief.min() == 0
     assert controller.last_spatial_radius == 1
+    assert controller.reference_support_budget.item() == 1
 
 
 def test_empty_reference_bootstrap_does_not_create_edit_support():
@@ -363,6 +366,46 @@ def test_reference_transport_rejects_distant_global_match():
     assert global_precision[0, 8] > 0
     assert local_precision[0, 8] == 0
     assert local_precision[0, 1] > 0
+
+
+def test_reference_precision_is_calibrated_over_active_matches():
+    controller = commitment_module.EditCommitmentController()
+    precision = torch.tensor(
+        [[0.0, 0.02, 0.05, 0.10]]
+    )
+
+    calibrated, scale = (
+        controller._calibrate_active_precision(precision)
+    )
+
+    assert calibrated[0, 0] == 0
+    assert calibrated[0, 3] == 1
+    assert calibrated[0, 2] > calibrated[0, 1] > 0
+    assert 0.05 < scale.item() < 0.10
+
+
+def test_reference_transport_keeps_initial_support_budget():
+    controller = commitment_module.EditCommitmentController()
+    controller.reference_support_budget = torch.tensor([2])
+    transported = torch.ones((1, 5))
+    precision = torch.tensor(
+        [[0.1, 0.8, 0.3, 0.9, 0.2]]
+    )
+    match = torch.ones_like(precision)
+
+    transported, precision, match = (
+        controller._prune_to_reference_budget(
+            transported,
+            precision,
+            match,
+        )
+    )
+
+    assert torch.count_nonzero(precision) == 2
+    assert precision[0, 1] == 0.8
+    assert precision[0, 3] == 0.9
+    assert transported[0, 0] == 0
+    assert match[0, 4] == 0
 
 
 def test_commitment_uses_fp32_state_with_bfloat16_features():
