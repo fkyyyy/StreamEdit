@@ -88,12 +88,22 @@ class EditCommitmentResult:
 class EditCommitmentController:
     """Turn hand-triggered edits into persistent, presence-gated state."""
 
-    def __init__(self, topk: int = 4, eps: float = 1e-6):
+    def __init__(
+        self,
+        topk: int = 4,
+        reference_radius_ratio: float = 0.15,
+        eps: float = 1e-6,
+    ):
         if topk <= 0:
             raise ValueError("topk must be positive")
+        if not 0.0 < reference_radius_ratio <= 0.5:
+            raise ValueError(
+                "reference_radius_ratio must lie in (0, 0.5]"
+            )
         if eps <= 0:
             raise ValueError("eps must be positive")
         self.topk = topk
+        self.reference_radius_ratio = reference_radius_ratio
         self.eps = eps
         self.previous_features = None
         self.previous_commitment = None
@@ -103,6 +113,8 @@ class EditCommitmentController:
         self.anchor_precision = None
         self.anchor_score = None
         self.reference_bootstrapped = False
+        self.last_spatial_radius = None
+        self._spatial_mask_cache = {}
 
     @torch.no_grad()
     def bootstrap_reference(
@@ -184,12 +196,62 @@ class EditCommitmentController:
         reference_features: torch.Tensor,
         reference_commitment: torch.Tensor,
         reference_precision: torch.Tensor,
+        spatial_shape=None,
+        spatial_radius=None,
     ):
         similarity = torch.einsum(
             "bmd,bnd->bmn",
             reference_features,
             current_features,
         ).clamp(-1.0, 1.0)
+        if (spatial_shape is None) != (spatial_radius is None):
+            raise ValueError(
+                "spatial_shape and spatial_radius must be set together"
+            )
+        if spatial_shape is not None:
+            token_height, token_width = spatial_shape
+            token_count = token_height * token_width
+            if (
+                token_count != reference_features.shape[1]
+                or token_count != current_features.shape[1]
+            ):
+                raise ValueError(
+                    "Spatial transport grid and feature tokens must align"
+                )
+            if spatial_radius <= 0:
+                raise ValueError(
+                    "spatial_radius must be positive"
+                )
+            device = current_features.device
+            cache_key = (
+                token_height,
+                token_width,
+                int(spatial_radius),
+                device.type,
+                device.index,
+            )
+            local_mask = self._spatial_mask_cache.get(cache_key)
+            if local_mask is None:
+                rows = torch.arange(
+                    token_height,
+                    device=device,
+                ).repeat_interleave(token_width)
+                cols = torch.arange(
+                    token_width,
+                    device=device,
+                ).repeat(token_height)
+                local_mask = (
+                    (rows[:, None] - rows[None, :]).abs()
+                    <= spatial_radius
+                ) & (
+                    (cols[:, None] - cols[None, :]).abs()
+                    <= spatial_radius
+                )
+                self._spatial_mask_cache[cache_key] = local_mask
+            similarity = similarity.masked_fill(
+                ~local_mask.unsqueeze(0),
+                torch.finfo(similarity.dtype).min,
+            )
         topk = min(self.topk, similarity.shape[-1])
         top_similarity, top_index = similarity.topk(topk, dim=-1)
 
@@ -319,6 +381,18 @@ class EditCommitmentController:
             source_attention.shape
         )
         tokens_per_frame = token_height * token_width
+        spatial_shape = None
+        spatial_radius = None
+        if self.reference_bootstrapped:
+            spatial_shape = (token_height, token_width)
+            spatial_radius = max(
+                1,
+                round(
+                    min(token_height, token_width)
+                    * self.reference_radius_ratio
+                ),
+            )
+        self.last_spatial_radius = spatial_radius
         expected_tokens = frames * tokens_per_frame
         if source_features.shape[:2] != (batch, expected_tokens):
             raise ValueError(
@@ -419,6 +493,8 @@ class EditCommitmentController:
                     reference_features,
                     reference_commitment,
                     reference_precision,
+                    spatial_shape=spatial_shape,
+                    spatial_radius=spatial_radius,
                 )
             else:
                 transported = torch.zeros_like(current_edit_belief)
@@ -442,6 +518,8 @@ class EditCommitmentController:
                     anchor_features,
                     anchor_commitment,
                     anchor_precision,
+                    spatial_shape=spatial_shape,
+                    spatial_radius=spatial_radius,
                 )
             else:
                 anchor_transport = torch.zeros_like(current_edit_belief)

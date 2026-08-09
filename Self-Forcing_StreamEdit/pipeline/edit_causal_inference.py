@@ -1825,6 +1825,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             "edit_support="
                             f"{current_commitment.edit_support.float().mean().item():.4f}"
                         )
+                        if reference_identity_enabled:
+                            print(
+                                "REFERENCE_LOCAL_TRANSPORT "
+                                "block="
+                                f"{current_start_frame // self.num_frame_per_block} "
+                                "radius="
+                                f"{edit_commitment_controller.last_spatial_radius} "
+                                "mode=causal_local_forward_splat"
+                            )
                     if current_identity_support is not None:
                         print(
                             "TARGET_IDENTITY_READ "

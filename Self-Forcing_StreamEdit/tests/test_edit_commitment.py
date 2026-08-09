@@ -172,6 +172,7 @@ def test_reference_bootstrap_starts_commitment_without_hand():
     assert result.effective_commitment.max() == 1
     assert result.belief.edit_belief.max() == 1
     assert result.belief.preserve_belief.min() == 0
+    assert controller.last_spatial_radius == 1
 
 
 def test_empty_reference_bootstrap_does_not_create_edit_support():
@@ -325,6 +326,43 @@ def test_transport_splats_only_from_committed_reference_tokens():
     assert torch.count_nonzero(precision) == 1
     assert match[0, 2] > 0.99
     assert torch.count_nonzero(match) == 1
+
+
+def test_reference_transport_rejects_distant_global_match():
+    controller = commitment_module.EditCommitmentController(topk=1)
+    reference_features = torch.tensor(
+        [[[-1.0, 0.0]] * 9]
+    )
+    reference_features[:, 0] = torch.tensor([1.0, 0.0])
+    current_features = torch.tensor(
+        [[[0.5, 0.0]] * 9]
+    )
+    current_features[:, 1] = torch.tensor([0.9, 0.0])
+    current_features[:, 8] = torch.tensor([1.0, 0.0])
+    reference_commitment = torch.zeros((1, 9))
+    reference_commitment[:, 0] = 1.0
+    reference_precision = reference_commitment.clone()
+
+    _, global_precision, _ = controller._transport(
+        current_features,
+        reference_features,
+        reference_commitment,
+        reference_precision,
+    )
+    _, local_precision, _ = controller._transport(
+        current_features,
+        reference_features,
+        reference_commitment,
+        reference_precision,
+        spatial_shape=(3, 3),
+        spatial_radius=1,
+    )
+
+    assert global_precision.argmax(dim=-1).item() == 8
+    assert local_precision.argmax(dim=-1).item() == 1
+    assert global_precision[0, 8] > 0
+    assert local_precision[0, 8] == 0
+    assert local_precision[0, 1] > 0
 
 
 def test_commitment_uses_fp32_state_with_bfloat16_features():
