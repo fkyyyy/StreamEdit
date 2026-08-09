@@ -861,7 +861,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 f"field_mode={hand_field_update_mode} "
                 f"query_layers={hand_query_layers}"
             )
-        # #region debug-point B:network-reporter
+        # #region debug-point H1:network-reporter
         def _debug_report(hypothesis_id, location, msg, data):
             try:
                 import json
@@ -869,11 +869,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 import urllib.request
                 url = os.environ.get(
                     "DEBUG_SERVER_URL",
-                    "http://10.74.55.101:7777/event",
+                    "http://10.254.206.67:7777/event",
                 )
                 payload = {
                     "sessionId": os.environ.get(
-                        "DEBUG_SESSION_ID", "oracle-edit-collapse"
+                        "DEBUG_SESSION_ID",
+                        "reference-source-regression",
                     ),
                     "runId": os.environ.get("DEBUG_RUN_ID", "pre-fix"),
                     "hypothesisId": hypothesis_id,
@@ -1154,6 +1155,46 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "anchor_score="
                         f"{edit_commitment_controller.anchor_score.mean().item():.4f}"
                     )
+                    # #region debug-point H3:reference-bootstrap
+                    _debug_selected = (
+                        reference_bootstrap.write_weight > 0
+                    )
+                    _debug_selected_count = (
+                        _debug_selected.sum().clamp_min(1)
+                    )
+                    _debug_contact = (
+                        reference_bootstrap.hand_contact_score.reshape(
+                            reference_bootstrap.write_weight.shape
+                        )
+                    )
+                    _debug_report(
+                        "H3",
+                        "edit_causal_inference.py:reference-bootstrap",
+                        "Reference bootstrap support and contact",
+                        {
+                            "support_coverage": (
+                                _debug_selected.float().mean().item()
+                            ),
+                            "support_tokens": int(
+                                _debug_selected.sum().item()
+                            ),
+                            "write_on_support": (
+                                reference_bootstrap.write_weight[
+                                    _debug_selected
+                                ].sum()
+                                / _debug_selected_count
+                            ).item(),
+                            "hand_contact_on_support": (
+                                _debug_contact[_debug_selected].sum()
+                                / _debug_selected_count
+                            ).item(),
+                            "reference_evidence": (
+                                reference_update.accumulated_evidence
+                                .mean().item()
+                            ),
+                        },
+                    )
+                    # #endregion
                     if save_role_dir is not None:
                         self._save_reference_identity_debug(
                             save_role_dir,
@@ -1791,6 +1832,104 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 belief_kv_weight_cache
                             ),
                         )
+                    # #region debug-point H1-H3:commitment-to-belief
+                    if current_commitment is not None:
+                        _debug_pre_edit = (
+                            hand_role_debug[
+                                "precommit_control_edit_belief"
+                            ]
+                            * hand_role_debug[
+                                "precommit_control_edit_precision"
+                            ]
+                        )
+                        _debug_pre_preserve = (
+                            hand_role_debug[
+                                "precommit_control_preserve_belief"
+                            ]
+                            * hand_role_debug[
+                                "precommit_control_preserve_precision"
+                            ]
+                        )
+                        _debug_post_edit = (
+                            current_control_belief.edit_belief
+                            * current_control_belief.edit_precision
+                        )
+                        _debug_post_preserve = (
+                            current_control_belief.preserve_belief
+                            * current_control_belief.preserve_precision
+                        )
+                        _debug_effective = F.interpolate(
+                            current_commitment.effective_commitment.reshape(
+                                batch_size * current_num_frames,
+                                1,
+                                *current_commitment
+                                .effective_commitment.shape[-2:],
+                            ),
+                            size=_debug_post_edit.shape[-2:],
+                            mode="bilinear",
+                            align_corners=False,
+                        ).reshape_as(_debug_post_edit)
+                        _debug_active = _debug_effective > 0.05
+                        _debug_active_count = (
+                            _debug_active.sum().clamp_min(1)
+                        )
+                        _debug_pre_action = (
+                            _debug_pre_preserve
+                            / (
+                                _debug_pre_edit
+                                + _debug_pre_preserve
+                            ).clamp_min(1e-6)
+                        )
+                        _debug_post_action = (
+                            _debug_post_preserve
+                            / (
+                                _debug_post_edit
+                                + _debug_post_preserve
+                            ).clamp_min(1e-6)
+                        )
+                        _debug_report(
+                            "H1-H3",
+                            "edit_causal_inference.py:commitment-belief",
+                            "Commitment effect on final control belief",
+                            {
+                                "block": (
+                                    current_start_frame
+                                    // self.num_frame_per_block
+                                ),
+                                "active_coverage": (
+                                    _debug_active.float().mean().item()
+                                ),
+                                "effective_on_active": (
+                                    _debug_effective[
+                                        _debug_active
+                                    ].sum()
+                                    / _debug_active_count
+                                ).item(),
+                                "pre_preserve_action_active": (
+                                    _debug_pre_action[
+                                        _debug_active
+                                    ].sum()
+                                    / _debug_active_count
+                                ).item(),
+                                "post_preserve_action_active": (
+                                    _debug_post_action[
+                                        _debug_active
+                                    ].sum()
+                                    / _debug_active_count
+                                ).item(),
+                                "post_edit_action_active": (
+                                    1.0
+                                    - _debug_post_action[
+                                        _debug_active
+                                    ].sum()
+                                    / _debug_active_count
+                                ).item(),
+                                "post_preserve_action_global": (
+                                    _debug_post_action.mean().item()
+                                ),
+                            },
+                        )
+                    # #endregion
                     print(
                         "CAUSAL_CONTROL_BELIEF "
                         "block="
@@ -1955,6 +2094,102 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         belief=current_control_belief,
                     )
                     if index == 0:
+                        # #region debug-point H2-H4:velocity-routing
+                        if current_commitment is not None:
+                            _debug_action = bayes_flow_debug[
+                                "preserve_action_weight"
+                            ].float()
+                            _debug_effective = F.interpolate(
+                                current_commitment
+                                .effective_commitment.reshape(
+                                    batch_size * current_num_frames,
+                                    1,
+                                    *current_commitment
+                                    .effective_commitment.shape[-2:],
+                                ),
+                                size=v_trg.shape[-2:],
+                                mode="bilinear",
+                                align_corners=False,
+                            ).reshape(
+                                batch_size,
+                                current_num_frames,
+                                1,
+                                *v_trg.shape[-2:],
+                            )
+                            _debug_active = _debug_effective > 0.05
+                            _debug_active_channels = (
+                                _debug_active.expand_as(v_trg)
+                            )
+                            _debug_map_count = (
+                                _debug_active.sum().clamp_min(1)
+                            )
+                            _debug_value_count = (
+                                _debug_active_channels.sum().clamp_min(1)
+                            )
+                            _debug_residual = (
+                                v_gt.float() - v_src.float()
+                            )
+                            _debug_contribution = (
+                                _debug_action * _debug_residual
+                            )
+                            _debug_target_abs = (
+                                v_trg.float().abs()[
+                                    _debug_active_channels
+                                ].sum()
+                                / _debug_value_count
+                            )
+                            _debug_contribution_abs = (
+                                _debug_contribution.abs()[
+                                    _debug_active_channels
+                                ].sum()
+                                / _debug_value_count
+                            )
+                            _debug_report(
+                                "H2-H4",
+                                "edit_causal_inference.py:bayes-router",
+                                "Final action and velocity terms on commitment",
+                                {
+                                    "block": (
+                                        current_start_frame
+                                        // self.num_frame_per_block
+                                    ),
+                                    "preserve_action_active": (
+                                        _debug_action[
+                                            _debug_active
+                                        ].sum()
+                                        / _debug_map_count
+                                    ).item(),
+                                    "preserve_action_global": (
+                                        _debug_action.mean().item()
+                                    ),
+                                    "target_velocity_abs": (
+                                        _debug_target_abs.item()
+                                    ),
+                                    "source_residual_abs": (
+                                        _debug_residual.abs()[
+                                            _debug_active_channels
+                                        ].sum()
+                                        / _debug_value_count
+                                    ).item(),
+                                    "source_contribution_abs": (
+                                        _debug_contribution_abs.item()
+                                    ),
+                                    "contribution_target_ratio": (
+                                        _debug_contribution_abs
+                                        / _debug_target_abs.clamp_min(
+                                            1e-6
+                                        )
+                                    ).item(),
+                                    "routed_delta_error": (
+                                        (
+                                            v_t.float()
+                                            - v_trg.float()
+                                            - _debug_contribution
+                                        ).abs().max().item()
+                                    ),
+                                },
+                            )
+                        # #endregion
                         hand_role_debug.update({
                             f"bayes_{name}": value.squeeze(2)
                             for name, value in bayes_flow_debug.items()
