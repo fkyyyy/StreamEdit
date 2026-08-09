@@ -3,6 +3,7 @@ from pathlib import Path
 import sys
 import types
 
+import pytest
 import torch
 
 
@@ -146,6 +147,63 @@ def test_commitment_does_not_start_without_hand_interaction():
 
     assert torch.count_nonzero(result.trigger) == 0
     assert torch.count_nonzero(result.effective_commitment) == 0
+
+
+def test_reference_bootstrap_starts_commitment_without_hand():
+    controller = commitment_module.EditCommitmentController(topk=1)
+    reference_precision = torch.tensor(
+        [[1.0, 0.0, 0.0, 0.0]]
+    )
+    controller.bootstrap_reference(
+        source_features=_features(),
+        edit_precision=reference_precision,
+    )
+
+    result = controller(
+        belief=_belief(edit=0.0, visibility=0.0),
+        debug=_debug(attention=1.0, proximity=0.0),
+        hand_mask=_hand(present=False),
+        source_features=_features(),
+    )
+
+    assert torch.count_nonzero(result.trigger) == 0
+    assert result.anchor_transport.max() == 1
+    assert result.anchor_precision.max() == 1
+    assert result.effective_commitment.max() == 1
+    assert result.belief.edit_belief.max() == 1
+    assert result.belief.preserve_belief.min() == 0
+
+
+def test_empty_reference_bootstrap_does_not_create_edit_support():
+    controller = commitment_module.EditCommitmentController(topk=1)
+    controller.bootstrap_reference(
+        source_features=_features(),
+        edit_precision=torch.zeros((1, 4)),
+    )
+
+    result = controller(
+        belief=_belief(edit=0.0, visibility=0.0),
+        debug=_debug(attention=1.0, proximity=0.0),
+        hand_mask=_hand(present=False),
+        source_features=_features(),
+    )
+
+    assert torch.count_nonzero(result.effective_commitment) == 0
+    assert torch.count_nonzero(result.edit_support) == 0
+
+
+def test_reference_commitment_bootstrap_is_single_use():
+    controller = commitment_module.EditCommitmentController()
+    controller.bootstrap_reference(
+        source_features=_features(),
+        edit_precision=torch.ones((1, 4)),
+    )
+
+    with pytest.raises(RuntimeError, match="already bootstrapped"):
+        controller.bootstrap_reference(
+            source_features=_features(),
+            edit_precision=torch.ones((1, 4)),
+        )
 
 
 def test_commitment_keeps_contact_preservation_responsibility():

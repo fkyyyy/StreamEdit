@@ -1044,6 +1044,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 #✨ src and src mask
                 current_src_ref_latents = src_initial_latent[:, left: right]
                 self._register_crossattn_mask_gatherer(crossattn_cache_src, tok_src, layers=mask_layers, fg_scale=fg_scale)
+                if (
+                    reference_identity_enabled
+                    and not target_identity_memory.reference_bootstrapped
+                ):
+                    self._register_query_capture(
+                        kv_cache_src,
+                        hand_query_layers,
+                    )
                 self.generator(
                     noisy_image_or_video=current_src_ref_latents,
                     conditional_dict=src_conditional_dict,
@@ -1053,6 +1061,17 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     current_start=left * self.frame_seq_length,
                 )
                 _, src_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_src)
+                reference_source_features = None
+                if (
+                    reference_identity_enabled
+                    and not target_identity_memory.reference_bootstrapped
+                ):
+                    reference_source_features = (
+                        self._aggregate_query_features(
+                            kv_cache_src,
+                            hand_query_layers,
+                        )
+                    )
                 #✨ trg and trg mask
                 current_trg_ref_latents = trg_initial_latent[:, left: right]
                 self._register_crossattn_mask_gatherer(crossattn_cache_trg, tok_trg, layers=mask_layers, fg_scale=fg_scale)
@@ -1095,6 +1114,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             ),
                         )
                     )
+                    (
+                        reference_commitment,
+                        reference_commitment_precision,
+                    ) = edit_commitment_controller.bootstrap_reference(
+                        source_features=reference_source_features,
+                        edit_precision=(
+                            reference_bootstrap.write_weight
+                        ),
+                    )
                     print(
                         "REFERENCE_IDENTITY_BOOTSTRAP "
                         "change="
@@ -1109,6 +1137,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         f"{(reference_bootstrap.write_weight > 0).float().mean().item():.4f} "
                         "evidence="
                         f"{reference_update.accumulated_evidence.mean().item():.4f}"
+                    )
+                    print(
+                        "REFERENCE_EDIT_COMMITMENT "
+                        "commitment="
+                        f"{reference_commitment.mean().item():.4f} "
+                        "precision="
+                        f"{reference_commitment_precision.mean().item():.4f} "
+                        "anchor_score="
+                        f"{edit_commitment_controller.anchor_score.mean().item():.4f}"
                     )
                     if save_role_dir is not None:
                         self._save_reference_identity_debug(

@@ -102,6 +102,71 @@ class EditCommitmentController:
         self.anchor_commitment = None
         self.anchor_precision = None
         self.anchor_score = None
+        self.reference_bootstrapped = False
+
+    @torch.no_grad()
+    def bootstrap_reference(
+        self,
+        source_features: torch.Tensor,
+        edit_precision: torch.Tensor,
+    ):
+        """Seed persistent edit responsibility from an aligned reference."""
+        if self.reference_bootstrapped:
+            raise RuntimeError(
+                "Edit commitment reference was already bootstrapped"
+            )
+        if any(
+            state is not None
+            for state in (
+                self.previous_features,
+                self.previous_commitment,
+                self.previous_precision,
+                self.anchor_features,
+                self.anchor_commitment,
+                self.anchor_precision,
+            )
+        ):
+            raise RuntimeError(
+                "Edit commitment reference must be bootstrapped before "
+                "online updates"
+            )
+        if source_features.ndim != 3:
+            raise ValueError(
+                "Reference source_features must have shape [B,L,D]"
+            )
+        if edit_precision.ndim != 2:
+            raise ValueError(
+                "Reference edit_precision must have shape [B,L]"
+            )
+        if source_features.shape[:2] != edit_precision.shape:
+            raise ValueError(
+                "Reference source features and edit precision must align"
+            )
+        if not torch.isfinite(source_features.float()).all():
+            raise ValueError(
+                "Reference source features must be finite"
+            )
+        if not torch.isfinite(edit_precision.float()).all():
+            raise ValueError(
+                "Reference edit precision must be finite"
+            )
+
+        features = F.normalize(
+            source_features.detach().float(),
+            dim=-1,
+        )
+        precision = edit_precision.detach().float().clamp(0.0, 1.0)
+        commitment = (precision > self.eps).float()
+
+        self.previous_features = features
+        self.previous_commitment = commitment
+        self.previous_precision = precision
+        self.anchor_features = features.clone()
+        self.anchor_commitment = commitment.clone()
+        self.anchor_precision = precision.clone()
+        self.anchor_score = precision.mean(dim=-1, keepdim=True)
+        self.reference_bootstrapped = True
+        return commitment, precision
 
     @staticmethod
     def _required(
