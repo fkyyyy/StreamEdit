@@ -1,0 +1,275 @@
+Self-Forcing_StreamEdit/pipeline/edit_causal_inference.py
+  s_84848dcc7c7af8::t_c664343891e8cd 1139-1140 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a785eb2cf50fe984ec30e0e","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Range":[1139,1140]}]}]}
+Self-Forcing_StreamEdit/tests/test_target_identity_memory.py
+  s_84848dcc7c7af8::t_5b63afd6fa94d2 98,105-108,110,116-134,241 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a785ea3cf50fe984ec30de7","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":98},{"Range":[105,108]},{"Single":110},{"Range":[116,134]},{"Single":241}]}]}
+  s_84848dcc7c7af8::t_10ebe7288c0b23 97
+  s_84848dcc7c7af8::t_7d25e4b5523710 99-104
+  s_84848dcc7c7af8::t_8b9e2f59499faa 109
+  s_84848dcc7c7af8::t_cc4ea192ba1af0 111-115
+  s_84848dcc7c7af8::t_ee9f32bd7ebfeb 239-240
+  s_84848dcc7c7af8::t_6b02f7e3d88018 242-244
+Self-Forcing_StreamEdit/pipeline/target_identity_memory.py
+  s_84848dcc7c7af8::t_9fd39e3bfbd793 97,114,133,149-151,158-261 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a785e8acf50fe984ec30d9d","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":97},{"Single":114},{"Single":133},{"Range":[149,151]},{"Range":[158,261]}]}]}
+  s_84848dcc7c7af8::t_4cc15c8853075b 372,384-398,433-440,448,486 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a785e97cf50fe984ec30dc2","tool_type":"agent","tool_id":"apply_patch","line_ranges":[{"Single":372},{"Range":[384,398]},{"Range":[433,440]},{"Single":448},{"Single":486}]}]}
+  s_84848dcc7c7af8::t_19b1c228ae9368 262-264
+  s_84848dcc7c7af8::t_343d70f1041d44 484-485
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "b9162feef04817e1dcc35dbeff2ceefd4739744b",
+  "prompts": {},
+  "sessions": {
+    "s_84848dcc7c7af8": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a7351b9cf50fe984ec2b5f8",
+        "model": "gpt-5.6-sol__dev"
+      },
+      "human_author": "kunyufeng <kunyufeng@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {
+    "Self-Forcing_StreamEdit/pipeline/edit_causal_inference.py": [
+      {
+        "hash": "s_84848dcc7c7af8::t_c664343891e8cd",
+        "line_ranges": [
+          {
+            "Range": [
+              1139,
+              1140
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a785eb2cf50fe984ec30e0e",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Range": [
+                  1139,
+                  1140
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "Self-Forcing_StreamEdit/pipeline/target_identity_memory.py": [
+      {
+        "hash": "s_84848dcc7c7af8::t_9fd39e3bfbd793",
+        "line_ranges": [
+          {
+            "Single": 97
+          },
+          {
+            "Single": 114
+          },
+          {
+            "Single": 133
+          },
+          {
+            "Range": [
+              149,
+              151
+            ]
+          },
+          {
+            "Range": [
+              158,
+              261
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a785e8acf50fe984ec30d9d",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 97
+              },
+              {
+                "Single": 114
+              },
+              {
+                "Single": 133
+              },
+              {
+                "Range": [
+                  149,
+                  151
+                ]
+              },
+              {
+                "Range": [
+                  158,
+                  261
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "hash": "s_84848dcc7c7af8::t_4cc15c8853075b",
+        "line_ranges": [
+          {
+            "Single": 372
+          },
+          {
+            "Range": [
+              384,
+              398
+            ]
+          },
+          {
+            "Range": [
+              433,
+              440
+            ]
+          },
+          {
+            "Single": 448
+          },
+          {
+            "Single": 486
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a785e97cf50fe984ec30dc2",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 372
+              },
+              {
+                "Range": [
+                  384,
+                  398
+                ]
+              },
+              {
+                "Range": [
+                  433,
+                  440
+                ]
+              },
+              {
+                "Single": 448
+              },
+              {
+                "Single": 486
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "Self-Forcing_StreamEdit/tests/test_target_identity_memory.py": [
+      {
+        "hash": "s_84848dcc7c7af8::t_5b63afd6fa94d2",
+        "line_ranges": [
+          {
+            "Single": 98
+          },
+          {
+            "Range": [
+              105,
+              108
+            ]
+          },
+          {
+            "Single": 110
+          },
+          {
+            "Range": [
+              116,
+              134
+            ]
+          },
+          {
+            "Single": 241
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a785ea3cf50fe984ec30de7",
+            "tool_type": "agent",
+            "tool_id": "apply_patch",
+            "line_ranges": [
+              {
+                "Single": 98
+              },
+              {
+                "Range": [
+                  105,
+                  108
+                ]
+              },
+              {
+                "Single": 110
+              },
+              {
+                "Range": [
+                  116,
+                  134
+                ]
+              },
+              {
+                "Single": 241
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "s_84848dcc7c7af8": {
+      "tool": "trae",
+      "conversation_id": "6a7351b9cf50fe984ec2b5f8",
+      "session_id": "6a7351b9cf50fe984ec2b5f8",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_84848dcc7c7af8::t_4cc15c8853075b": {
+      "tool": "trae",
+      "conversation_id": "6a7351b9cf50fe984ec2b5f8",
+      "session_id": "6a7351b9cf50fe984ec2b5f8",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_84848dcc7c7af8::t_5b63afd6fa94d2": {
+      "tool": "trae",
+      "conversation_id": "6a7351b9cf50fe984ec2b5f8",
+      "session_id": "6a7351b9cf50fe984ec2b5f8",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_84848dcc7c7af8::t_9fd39e3bfbd793": {
+      "tool": "trae",
+      "conversation_id": "6a7351b9cf50fe984ec2b5f8",
+      "session_id": "6a7351b9cf50fe984ec2b5f8",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_84848dcc7c7af8::t_c664343891e8cd": {
+      "tool": "trae",
+      "conversation_id": "6a7351b9cf50fe984ec2b5f8",
+      "session_id": "6a7351b9cf50fe984ec2b5f8",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
