@@ -35,9 +35,9 @@ python inference_edit_streamedit.py \
   --hand_query_layers 8 12 16 20 \
   --mask_white_threshold 245 \
   --src_prompt "A person is holding a white plastic seasoning shaker with a blue cap in a kitchen." \
-  --trg_prompt "A person is holding a ribbed silver aluminum can with horizontal ribs in a kitchen." \
+  --trg_prompt "A person is holding a red Coca-Cola aluminum soda can with a white Coca-Cola logo in a kitchen." \
   --src_word "white plastic seasoning shaker" \
-  --trg_word "ribbed silver aluminum can" \
+  --trg_word "red Coca-Cola aluminum soda can" \
   --fg_boost_factor 4 \
   --blend_power 2 \
   --step "$STEP" \

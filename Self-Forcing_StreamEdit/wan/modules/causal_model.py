@@ -445,6 +445,17 @@ class CausalWanSelfAttention(nn.Module):
                             target_value_list,
                             dim=0,
                         )
+                        # Reference attention persistence: scale ref keys
+                        _ref_num = shared_dict.get(
+                            "reference_kv_num_tokens", 0
+                        )
+                        _ref_scale = shared_dict.get(
+                            "reference_attention_scale", 1.0
+                        )
+                        if _ref_num > 0 and _ref_scale != 1.0:
+                            target_memory_key[:_ref_num] = (
+                                target_memory_key[:_ref_num] * _ref_scale
+                            )
                         b_query = (
                             trg_query[b_idx] * blender_rate
                             + src_query[b_idx] * (1 - blender_rate)
@@ -491,6 +502,17 @@ class CausalWanSelfAttention(nn.Module):
                     # store and concatenate key and value
                     b_trg_key = torch.cat(b_key_list, dim=0)
                     b_trg_value = torch.cat(b_value_list, dim=0)
+                    # Reference attention persistence: scale ref keys
+                    _ref_num = shared_dict.get(
+                        "reference_kv_num_tokens", 0
+                    )
+                    _ref_scale = shared_dict.get(
+                        "reference_attention_scale", 1.0
+                    )
+                    if _ref_num > 0 and _ref_scale != 1.0:
+                        b_trg_key[:_ref_num] = (
+                            b_trg_key[:_ref_num] * _ref_scale
+                        )
 
                     #✨ query blending
                     b_query = trg_query[b_idx] * blender_rate + src_query[b_idx] * (1 - blender_rate)

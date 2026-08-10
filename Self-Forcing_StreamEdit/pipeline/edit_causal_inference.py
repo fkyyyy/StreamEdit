@@ -1310,9 +1310,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 device=src_video.device,
                 dtype=torch.float32
             ) * self.args.context_noise
-            
+
             # obtain currently inprocessed kv_cache for dual branch
             shared_dict_dual = dict()
+            if reference_kv_available:
+                shared_dict_dual["reference_kv_num_tokens"] = (
+                    _reference_kv_cache["trg"][0]["num_tokens"]
+                )
+                shared_dict_dual["reference_attention_scale"] = 2.0
             kv_cache_dual = self._concat_kv_cache(kv_cache_src, kv_cache_trg, shared_dict=shared_dict_dual)
 
             #✨ forward clean source video to get source mask, and store into kv_cache
