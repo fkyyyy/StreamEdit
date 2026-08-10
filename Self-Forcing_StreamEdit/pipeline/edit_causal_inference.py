@@ -988,14 +988,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
         )
         if reference_kv_available:
             self._prepend_reference_kv(
-                kv_cache_src, _reference_kv_cache["src"]
-            )
-            self._prepend_reference_kv(
                 kv_cache_trg, _reference_kv_cache["trg"]
             )
             print(
-                "REFERENCE_KV_INJECTED "
-                f"src_tokens={_reference_kv_cache['src'][0]['num_tokens']} "
+                "REFERENCE_KV_INJECTED mode=target_only "
                 f"trg_tokens={_reference_kv_cache['trg'][0]['num_tokens']}"
             )
         trg_fg_mask_cache = self._initialize_trg_fg_mask_cache(
@@ -1280,14 +1276,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
             and _reference_kv_cache is not None
         ):
             ref_num_tokens = kv_cache_trg[0]["local_end_index"].item()
-            _reference_kv_cache["src"] = self._extract_reference_kv(
-                kv_cache_src, ref_num_tokens
-            )
             _reference_kv_cache["trg"] = self._extract_reference_kv(
                 kv_cache_trg, ref_num_tokens
             )
+            _reference_kv_cache["ref_target_latent"] = (
+                trg_initial_latent.clone()
+            )
             print(
-                f"REFERENCE_KV_STORED tokens={ref_num_tokens}"
+                f"REFERENCE_KV_STORED mode=target_only tokens={ref_num_tokens} "
+                f"ref_latent_shape={list(trg_initial_latent.shape)}"
             )
 
         if profile:
@@ -2166,177 +2163,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         source_reconstruction_velocity=v_gt,
                         belief=current_control_belief,
                     )
-                    if (
-                        reference_identity_enabled
-                        and target_identity_memory is not None
-                        and target_identity_memory.reference_bootstrapped
-                        and current_identity_support is not None
-                    ):
-                        identity_spatial = F.interpolate(
-                            current_identity_support.reshape(
-                                batch_size * current_num_frames,
-                                1,
-                                *current_identity_support.shape[-2:],
-                            ),
-                            size=v_trg.shape[-2:],
-                            mode="bilinear",
-                            align_corners=False,
-                        ).reshape(
-                            batch_size,
-                            current_num_frames,
-                            1,
-                            *v_trg.shape[-2:],
-                        ).clamp(0.0, 1.0)
-                        identity_dilated = F.max_pool2d(
-                            identity_spatial.reshape(
-                                batch_size * current_num_frames,
-                                1,
-                                *v_trg.shape[-2:],
-                            ),
-                            kernel_size=5,
-                            stride=1,
-                            padding=2,
-                        ).reshape_as(identity_spatial)
-                        identity_gate = identity_dilated.pow(0.3)
-                        source_residual = (
-                            v_gt.float() - v_src.float()
-                        )
-                        preserve_action = bayes_flow_debug[
-                            "preserve_action_weight"
-                        ]
-                        suppressed_residual = (
-                            preserve_action * source_residual
-                            * (1.0 - identity_gate)
-                        )
-                        v_t = (
-                            v_trg.float() + suppressed_residual
-                        ).to(v_trg.dtype)
-                        if index == 0:
-                            print(
-                                "IDENTITY_VELOCITY_OVERRIDE "
-                                f"block={current_start_frame // self.num_frame_per_block} "
-                                f"gate_mean={identity_gate.mean().item():.4f} "
-                                f"gate_peak={identity_gate.max().item():.4f}"
-                            )
                     if index == 0:
-                        # #region debug-point H2-H4:velocity-routing
-                        if current_commitment is not None:
-                            _debug_action = bayes_flow_debug[
-                                "preserve_action_weight"
-                            ].float()
-                            _debug_effective = F.interpolate(
-                                current_commitment
-                                .effective_commitment.reshape(
-                                    batch_size * current_num_frames,
-                                    1,
-                                    *current_commitment
-                                    .effective_commitment.shape[-2:],
-                                ),
-                                size=v_trg.shape[-2:],
-                                mode="bilinear",
-                                align_corners=False,
-                            ).reshape(
-                                batch_size,
-                                current_num_frames,
-                                1,
-                                *v_trg.shape[-2:],
-                            )
-                            _debug_active = _debug_effective > 0.05
-                            _debug_active_channels = (
-                                _debug_active.expand_as(v_trg)
-                            )
-                            _debug_map_count = (
-                                _debug_active.sum().clamp_min(1)
-                            )
-                            _debug_value_count = (
-                                _debug_active_channels.sum().clamp_min(1)
-                            )
-                            _debug_residual = (
-                                v_gt.float() - v_src.float()
-                            )
-                            _debug_contribution = (
-                                _debug_action * _debug_residual
-                            )
-                            hand_role_debug.update({
-                                "velocity_target_abs": (
-                                    v_trg.float().abs().mean(dim=2)
-                                ),
-                                "velocity_source_residual_abs": (
-                                    _debug_residual.abs().mean(dim=2)
-                                ),
-                                "velocity_source_contribution_abs": (
-                                    _debug_contribution.abs().mean(dim=2)
-                                ),
-                                "velocity_routed_abs": (
-                                    v_t.float().abs().mean(dim=2)
-                                ),
-                                "velocity_target_source_gap_abs": (
-                                    (v_trg.float() - v_src.float())
-                                    .abs().mean(dim=2)
-                                ),
-                                "velocity_target_exact_source_gap_abs": (
-                                    (v_trg.float() - v_gt.float())
-                                    .abs().mean(dim=2)
-                                ),
-                            })
-                            _debug_target_abs = (
-                                v_trg.float().abs()[
-                                    _debug_active_channels
-                                ].sum()
-                                / _debug_value_count
-                            )
-                            _debug_contribution_abs = (
-                                _debug_contribution.abs()[
-                                    _debug_active_channels
-                                ].sum()
-                                / _debug_value_count
-                            )
-                            _debug_report(
-                                "H2-H4",
-                                "edit_causal_inference.py:bayes-router",
-                                "Final action and velocity terms on commitment",
-                                {
-                                    "block": (
-                                        current_start_frame
-                                        // self.num_frame_per_block
-                                    ),
-                                    "preserve_action_active": (
-                                        _debug_action[
-                                            _debug_active
-                                        ].sum()
-                                        / _debug_map_count
-                                    ).item(),
-                                    "preserve_action_global": (
-                                        _debug_action.mean().item()
-                                    ),
-                                    "target_velocity_abs": (
-                                        _debug_target_abs.item()
-                                    ),
-                                    "source_residual_abs": (
-                                        _debug_residual.abs()[
-                                            _debug_active_channels
-                                        ].sum()
-                                        / _debug_value_count
-                                    ).item(),
-                                    "source_contribution_abs": (
-                                        _debug_contribution_abs.item()
-                                    ),
-                                    "contribution_target_ratio": (
-                                        _debug_contribution_abs
-                                        / _debug_target_abs.clamp_min(
-                                            1e-6
-                                        )
-                                    ).item(),
-                                    "routed_delta_error": (
-                                        (
-                                            v_t.float()
-                                            - v_trg.float()
-                                            - _debug_contribution
-                                        ).abs().max().item()
-                                    ),
-                                },
-                            )
-                        # #endregion
                         hand_role_debug.update({
                             f"bayes_{name}": value.squeeze(2)
                             for name, value in bayes_flow_debug.items()
@@ -2490,6 +2317,58 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     bg_mask = 1 - fg_mask
                     v_t = v_trg + bg_mask * (v_gt - v_src)
                 denoised_pred = noisy_pred_input - t_i * v_t
+
+                # Trajectory anchoring: pull object-region latents toward reference
+                if (
+                    reference_identity_enabled
+                    and _reference_kv_cache is not None
+                    and "ref_target_latent" in _reference_kv_cache
+                    and target_identity_memory is not None
+                    and target_identity_memory.reference_bootstrapped
+                    and current_identity_support is not None
+                ):
+                    ref_latent = _reference_kv_cache["ref_target_latent"]
+                    anchor_mask = F.interpolate(
+                        current_identity_support.reshape(
+                            batch_size * current_num_frames,
+                            1,
+                            *current_identity_support.shape[-2:],
+                        ),
+                        size=denoised_pred.shape[-2:],
+                        mode="bilinear",
+                        align_corners=False,
+                    ).reshape(
+                        batch_size,
+                        current_num_frames,
+                        1,
+                        *denoised_pred.shape[-2:],
+                    ).clamp(0.0, 1.0)
+                    anchor_mask = F.max_pool2d(
+                        anchor_mask.reshape(
+                            batch_size * current_num_frames,
+                            1,
+                            *denoised_pred.shape[-2:],
+                        ),
+                        kernel_size=5,
+                        stride=1,
+                        padding=2,
+                    ).reshape_as(anchor_mask)
+                    progress = 1.0 - t_i
+                    anchor_strength = 0.4 * anchor_mask * progress
+                    ref_broadcast = ref_latent.expand_as(denoised_pred)
+                    denoised_pred = (
+                        denoised_pred
+                        + anchor_strength * (ref_broadcast - denoised_pred)
+                    )
+                    if index == 0:
+                        print(
+                            "TRAJECTORY_ANCHOR "
+                            f"block={current_start_frame // self.num_frame_per_block} "
+                            f"strength={anchor_strength.mean().item():.4f} "
+                            f"mask_mean={anchor_mask.mean().item():.4f} "
+                            f"mask_peak={anchor_mask.max().item():.4f} "
+                            f"progress={progress:.4f}"
+                        )
 
                 #✨ target mask grounding
                 if index == len(denoising_step_list) // 2:
