@@ -1012,6 +1012,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         )
         if reference_kv_available and belief_kv_weight_cache is not None:
             ref_num_tokens = _reference_kv_cache["trg"][0]["num_tokens"]
+            belief_kv_weight_cache["preserve_action"][:, :ref_num_tokens] = 0.0
             belief_kv_weight_cache["local_end_index"].fill_(ref_num_tokens)
             belief_kv_weight_cache["global_end_index"].fill_(ref_num_tokens)
         crossattn_cache_src = self._initialize_crossattn_cache(
