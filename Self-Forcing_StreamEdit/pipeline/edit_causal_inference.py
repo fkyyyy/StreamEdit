@@ -88,6 +88,30 @@ class EditCausalInferencePipeline(torch.nn.Module):
         return ret_list
 
 
+    @staticmethod
+    def _extract_reference_kv(kv_cache, num_tokens):
+        """Extract reference frame KV entries from cache for cross-chunk persistence."""
+        reference_kv = []
+        for layer_cache in kv_cache:
+            reference_kv.append({
+                "k": layer_cache["k"][:, :num_tokens].clone(),
+                "v": layer_cache["v"][:, :num_tokens].clone(),
+                "num_tokens": num_tokens,
+            })
+        return reference_kv
+
+    @staticmethod
+    def _prepend_reference_kv(kv_cache, reference_kv):
+        """Prepend stored reference KV into a fresh kv_cache."""
+        for layer_idx, (layer_cache, ref_entry) in enumerate(
+            zip(kv_cache, reference_kv)
+        ):
+            num_tokens = ref_entry["num_tokens"]
+            layer_cache["k"][:, :num_tokens] = ref_entry["k"]
+            layer_cache["v"][:, :num_tokens] = ref_entry["v"]
+            layer_cache["local_end_index"].fill_(num_tokens)
+            layer_cache["global_end_index"].fill_(num_tokens)
+
     def rollout_inference(
         self,
         src_video: torch.Tensor,
@@ -102,7 +126,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
         independent_first_frame: bool = False,
         triple_first_frame: bool = False,
-        src_initial_latent: Optional[torch.Tensor] = None,  
+        src_initial_latent: Optional[torch.Tensor] = None,
         trg_initial_latent: Optional[torch.Tensor] = None,
 
         fg_boost_factor=2.0,
@@ -313,6 +337,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
             rollout_target_identity_memory = SlowTargetIdentityMemory(
                 layers=hand_query_layers,
             )
+        rollout_reference_kv_cache = (
+            {} if routing_mode == "hand_role_bayes_flow_customized_kv"
+            else None
+        )
 
         total_frame_num = src_video.shape[1]
         ret_latent_list = []
@@ -424,6 +452,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 _target_identity_memory=(
                     rollout_target_identity_memory
                 ),
+                _reference_kv_cache=rollout_reference_kv_cache,
             )
 
             # store results
@@ -529,10 +558,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
         _target_identity_memory: Optional[
             SlowTargetIdentityMemory
         ] = None,
+        _reference_kv_cache: Optional[list] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
         independent_first_frame = independent_first_frame or self.independent_first_frame
-        
+
         batch_size, num_frames, num_channels, height, width = src_video.shape
         oracle_role_enabled = routing_mode in {
             "oracle_role_flow",
@@ -631,6 +661,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
             reference_identity_enabled
             and _target_identity_memory is not None
             and _target_identity_memory.reference_bootstrapped
+        )
+        reference_kv_available = (
+            reference_already_bootstrapped
+            and _reference_kv_cache is not None
+            and len(_reference_kv_cache) > 0
         )
         if reference_identity_enabled and not reference_already_bootstrapped:
             if (
@@ -951,10 +986,26 @@ class EditCausalInferencePipeline(torch.nn.Module):
             dtype=src_video.dtype,
             device=src_video.device
         )
+        if reference_kv_available:
+            self._prepend_reference_kv(
+                kv_cache_src, _reference_kv_cache["src"]
+            )
+            self._prepend_reference_kv(
+                kv_cache_trg, _reference_kv_cache["trg"]
+            )
+            print(
+                "REFERENCE_KV_INJECTED "
+                f"src_tokens={_reference_kv_cache['src'][0]['num_tokens']} "
+                f"trg_tokens={_reference_kv_cache['trg'][0]['num_tokens']}"
+            )
         trg_fg_mask_cache = self._initialize_trg_fg_mask_cache(
             batch_size=batch_size,
             device=src_video.device
         )
+        if reference_kv_available:
+            ref_num_tokens = _reference_kv_cache["trg"][0]["num_tokens"]
+            trg_fg_mask_cache["local_end_index"].fill_(ref_num_tokens)
+            trg_fg_mask_cache["global_end_index"].fill_(ref_num_tokens)
         belief_kv_weight_cache = (
             self._initialize_belief_kv_weight_cache(
                 batch_size=batch_size,
@@ -963,6 +1014,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
             if belief_memory_enabled
             else None
         )
+        if reference_kv_available and belief_kv_weight_cache is not None:
+            ref_num_tokens = _reference_kv_cache["trg"][0]["num_tokens"]
+            belief_kv_weight_cache["local_end_index"].fill_(ref_num_tokens)
+            belief_kv_weight_cache["global_end_index"].fill_(ref_num_tokens)
         crossattn_cache_src = self._initialize_crossattn_cache(
             batch_size=batch_size,
             dtype=src_video.dtype,
@@ -1216,6 +1271,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
                 output[:, left: right] = current_trg_ref_latents
                 current_start_frame = right
+
+        if (
+            reference_identity_enabled
+            and not reference_kv_available
+            and target_identity_memory is not None
+            and target_identity_memory.reference_bootstrapped
+            and _reference_kv_cache is not None
+        ):
+            ref_num_tokens = kv_cache_trg[0]["local_end_index"].item()
+            _reference_kv_cache["src"] = self._extract_reference_kv(
+                kv_cache_src, ref_num_tokens
+            )
+            _reference_kv_cache["trg"] = self._extract_reference_kv(
+                kv_cache_trg, ref_num_tokens
+            )
+            print(
+                f"REFERENCE_KV_STORED tokens={ref_num_tokens}"
+            )
 
         if profile:
             init_end.record()
