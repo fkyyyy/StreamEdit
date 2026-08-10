@@ -18,9 +18,11 @@
 | H4 | Source residual dominates the target field after commitment weakens | High | Medium | Confirmed: object-region contribution/target rises to 0.60-0.68 as preserve reaches 0.82-0.89 |
 | H5 | Reference state is overwritten by generic hand-trigger state before fixed-budget pruning | High | Low | Confirmed as a secondary bug, but rejected as the visual root cause by post-fix output |
 | H6 | Hidden reference prefill is the common cause of source regression | High | Medium | Rejected: prompt-only has the same identity drift and late blue-cap regression |
-| H7 | The target velocity itself becomes source-like after early blocks | High | Medium | Confirmed: global target/source gap is only 3-9% of target magnitude after block 1; object-region gap is 8-18% in late blocks |
-| H8 | Scalar current Q/K blending collapses the target branch toward source dynamics | High | Medium | Strongly supported: the first denoising step uses only 13% target Q/K and the observed target/source field gap collapses; causal ablation pending |
-| H9 | Residual routing cannot exactly preserve background when the target prompt leaks outside the object | High | Low | Confirmed algebraically and by maps: at preserve=1 the routed field is `v_gt + (v_trg-v_src)`; block-0 background target/source gap is 31.7% of target magnitude |
+| H7 | The target velocity itself becomes source-like after early blocks | High | Medium | Confirmed: global target/source gap is only 3-9% of target magnitude after block 1 |
+| H8 | Removing current Q/K source blend can restore identity without harming motion | High | Medium | Rejected: edit gap increases 2-2.6x, but hand/action become autonomously generated |
+| H9 | Residual routing exactly preserves background when preserve action is one | High | Low | Rejected: it leaves `v_trg-v_src`; block-0 background gap is 31.7% of target magnitude |
+| H10 | Q/K ablation changed source role inference rather than target generation | Medium | Low | Rejected: source attention, hand probability, and object posterior are bit-identical |
+| H11 | Target-side writeback amplifies the Q/K intervention over blocks | High | Low | Confirmed: identity-support map diverges after block 0 and reaches max difference 0.694 |
 
 ## Log Evidence
 Instrumentation added for:
@@ -62,47 +64,46 @@ Post-fix evidence from commit `266c54d`:
   root cause. Stronger block-0 commitment is insufficient to alter generation.
 - The state-separation behavior is reverted rather than accumulated.
 
-Ablation evidence from commit `37557f8`:
+Ablation evidence from commits `37557f8` and `820c573`:
 
-- `prompt_only` has no reference or customized bootstrap, but still changes
-  target identity across blocks and regresses to the source blue cap. This
-  rejects hidden reference prefill as the common root cause.
-- Prompt-only edit-token coverage is 5.79%, 10.19%, 9.64%, 11.97%, 8.35%,
-  2.74%, and finally 0%. Object-region preserve action rises to 0.817 and
-  0.891 in the last two blocks.
-- Prompt-only object-region source contribution relative to target velocity
-  rises from 0.336 in block 3 to 0.598 and 0.683 in blocks 5 and 6.
-- After block 1, the global target/source velocity gap is only 3.2%-8.8% of
-  target magnitude; in the inferred object region it is 8.1%-17.8% in the
-  late blocks. The nominal target branch has already become source-like.
-- In block 0 background, preserve action is 0.999 but the target/source gap
-  is still 31.7% of target magnitude. The current residual equation leaves
-  this prompt delta untouched, explaining Coca-Cola text in the pan.
-- Prefill-only changes early field magnitudes but follows the same late
-  support and source-contribution trajectory. It is not a persistent target
-  force.
-- The overlap rollout overwrites prefill-only
-  `block_001_hand_role_debug.npz`; that artifact is the final overlap call,
-  not the original block 1.
+- Prompt-only has no reference or customized bootstrap, but still changes
+  target identity and regresses to the source blue cap. Hidden prefill is not
+  the common root cause.
+- Prompt-only edit-token coverage falls from 5.79%-11.97% to 2.74% and then
+  zero. Object-region preserve rises to 0.817 and 0.891.
+- Object-region source contribution relative to target velocity rises to
+  0.598 and 0.683 in the final two blocks.
+- Q/K unblending causally increases object-region target/source field gap:
+  block 2 rises from 0.105 to 0.271 and block 3 from 0.133 to 0.328.
+- It also increases the hand-region gap: block 2 rises from 0.050 to 0.144
+  and block 3 from 0.084 to 0.202. Between 18% and 36% of Q/K edit support
+  overlaps the hand in active blocks.
+- Source attention, hand probability, and object posterior are exactly equal
+  between prompt-only and Q/K-unblended runs in every block. The source role
+  detector did not drift.
+- Target-side identity support diverges after the first block; its maximum
+  map difference reaches 0.647 in block 3 and 0.694 in block 4. Generated
+  target output is written back and amplifies the intervention.
+- User verification reports complete autonomous generation: source hand and
+  action are no longer preserved. The pure-target Q/K ablation is rejected
+  and reverted.
 
 ## Verification Conclusion
 
-The failure is not reference-specific. There are two distinct mechanisms:
+Current Q/K source blending is not simply an unwanted source bias. It is the
+motion and hand-geometry anchor. Removing it increases target semantics, but
+destroys source motion because the inferred edit support overlaps the hand
+and self-attention propagates the intervention nonlocally.
 
-1. Scalar source-heavy current Q/K blending and source-latent initialization
-   make the target branch converge toward source dynamics.
-2. The residual router is not an exact source endpoint. Even full preserve
-   leaves `v_trg-v_src`, so globally leaked target semantics remain in the
-   background.
-
-Late hand/object support collapse then raises preserve action inside the
-object and exposes source identity. No additional memory-strength fix is
-justified. The next causal test should remove source Q/K blending only on
-current edit-support tokens while leaving background behavior unchanged.
+The remaining failure must be solved without changing current Q/K. Appearance
+control should operate on target V or on the semantic velocity residual
+`v_trg-v_src`, while source Q/K continues to anchor motion. Target-side
+writeback must not consolidate an autonomously generated observation as new
+identity evidence.
 
 ## Next Instrumentation
 
-- Add an opt-in spatial Q/K ablation: current edit-support tokens use pure
-  target Q/K while background retains the original timestep blend.
-- Keep the existing velocity maps for pre/post comparison.
-- Fix rollout debug indexing before using overlap artifacts quantitatively.
+- Keep the original scalar current Q/K blend.
+- Do not use generated prompt-only identity as authoritative evidence.
+- Design the next causal test on appearance-only V/semantic-delta control,
+  with target writeback disabled for the test so feedback cannot confound it.

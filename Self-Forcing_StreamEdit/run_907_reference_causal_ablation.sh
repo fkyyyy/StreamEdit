@@ -13,15 +13,15 @@ STEP="${STEP:-15}"
 CUDA_DEVICE="${CUDA_DEVICE:-0}"
 
 case "$ABLATION" in
-  all|prompt_only|prefill_only|qk_unblend)
+  all|prompt_only|prefill_only)
     ;;
   *)
-    echo "ABLATION must be all, prompt_only, prefill_only, or qk_unblend." >&2
+    echo "ABLATION must be all, prompt_only, or prefill_only." >&2
     exit 2
     ;;
 esac
 
-if [[ "$ABLATION" == "all" || "$ABLATION" == "prefill_only" ]]; then
+if [[ "$ABLATION" != "prompt_only" ]]; then
   if [[ -z "$REFERENCE_IMAGE" ]]; then
     echo "Set REFERENCE_IMAGE for the prefill-only ablation." >&2
     exit 2
@@ -70,8 +70,4 @@ fi
 
 if [[ "$ABLATION" == "all" || "$ABLATION" == "prefill_only" ]]; then
   run_case prefill_only --first_frame_edit "$REFERENCE_IMAGE"
-fi
-
-if [[ "$ABLATION" == "qk_unblend" ]]; then
-  run_case qk_unblend --edit_qk_unblend
 fi

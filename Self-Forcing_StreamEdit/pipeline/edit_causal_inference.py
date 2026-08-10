@@ -107,7 +107,6 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
         fg_boost_factor=2.0,
         blend_power=2.0,
-        edit_qk_unblend=False,
 
         mask_layers: Iterable = range(20),
         enhance_layers: Iterable = range(30),
@@ -199,7 +198,6 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 fg_boost_factor=fg_boost_factor,
 
                 blend_power=blend_power,
-                edit_qk_unblend=edit_qk_unblend,
                 routing_mode=routing_mode,
                 oracle_object_mask=oracle_object_mask,
                 oracle_hand_mask=oracle_hand_mask,
@@ -385,7 +383,6 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 fg_boost_factor=fg_boost_factor,
 
                 blend_power=blend_power,
-                edit_qk_unblend=edit_qk_unblend,
                 routing_mode=routing_mode,
                 oracle_object_mask=rollout_object_mask,
                 oracle_hand_mask=rollout_hand_mask,
@@ -485,7 +482,6 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
         fg_boost_factor=2.0,
         blend_power=2.0,
-        edit_qk_unblend=False,
 
         mask_layers: Iterable = range(20),
         enhance_layers: Iterable = range(30),
@@ -1469,7 +1465,6 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     if target_identity_enabled
                     else {}
                 ),
-                "edit_qk_unblend": edit_qk_unblend,
             })
             effective_src_fg_mask = (
                 role_edit_tokens
