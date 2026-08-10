@@ -15,8 +15,10 @@
 | H1 | Commitment updates belief after the Bayes action was already computed | High | Low | Rejected: region-level Bayes action equals the post-commit action |
 | H2 | Velocity routing consumes a stale pre-commit preserve map | High | Low | Rejected: saved Bayes action exactly matches the final control belief |
 | H3 | Reference transport loses effective object support over time | Medium | Low | Confirmed: effective support falls from 0.0239 to 0.0016 and edit support reaches zero |
-| H4 | Source residual dominates the target field after commitment weakens | Medium | Medium | Partially confirmed: active-region preserve rises to 0.77-0.87; field magnitudes were not saved |
-| H5 | Reference state is overwritten by generic hand-trigger state before fixed-budget pruning | High | Low | Confirmed: block-0 state expands from 43 to 347 tokens and 95-100% of its top state overlaps trigger support |
+| H4 | Source residual dominates the target field after commitment weakens | High | Medium | Pending direct field maps; active-region preserve rises to 0.77-0.87 |
+| H5 | Reference state is overwritten by generic hand-trigger state before fixed-budget pruning | High | Low | Confirmed as a secondary bug, but rejected as the visual root cause by post-fix output |
+| H6 | Hidden reference prefill changes temporal initialization without supplying a persistent target force | High | Medium | Pending prompt-only versus prefill-only ablation |
+| H7 | The target velocity itself remains source-like despite reference KV/identity support | High | Medium | Pending target-to-source and target-to-exact-source field maps |
 
 ## Log Evidence
 Instrumentation added for:
@@ -46,22 +48,32 @@ Evidence from commit `0b4d31c`:
   arrays differ from `0b4d31c` by at most 1.19e-7. This excludes randomness
   and the server environment as explanations.
 
+Post-fix evidence from commit `266c54d`:
+
+- The state-separation patch changed the internal trajectory, so it was
+  executed correctly.
+- Block-0 transported posterior stayed at 1.0 and top-region preserve fell to
+  0.18, but the rendered video was visually unchanged.
+- The isolated reference precision then collapsed: mean transport was 0.0009
+  in block 1 and exactly zero from block 2 onward.
+- Therefore reference/trigger state pollution is real but is not the visual
+  root cause. Stronger block-0 commitment is insufficient to alter generation.
+- The state-separation behavior is reverted rather than accumulated.
+
 ## Verification Conclusion
-The bootstrap component and identity prior are not the failure. The reference
-commitment and generic hand-trigger commitment share one state. Online trigger
-expands and overwrites the reference state in block 0; fixed-budget pruning in
-the next block retains a mixed 43-token subset rather than an authoritative
-reference track. The resulting commitment collapse restores a strong source
-residual. Reference and online trigger states must be separated before any
-further routing-strength changes.
 
-## Minimal Fix
+The decisive failure is now upstream or downstream of commitment: either the
+hidden reference prefill changes causal initialization without producing a
+persistent target field, the model's target velocity is already source-like,
+or source initialization/residual routing overwhelms the target field. The
+next evidence must compare prompt-only and reference-prefill-only executions
+and save velocity magnitudes spatially. No additional memory-strength fix is
+justified before those results.
 
-- In customized reference mode, transported reference posterior and precision
-  are now the only values written back to the persistent reference track.
-- Generic hand-trigger evidence is combined with reference evidence only for
-  the current control action and cannot overwrite the reference track.
-- The non-reference commitment path retains the original weighted update.
-- Added a regression test in which a reference token and a disjoint hand
-  trigger are both active; only the reference token may persist to the next
-  frame.
+## Next Instrumentation
+
+- Save target velocity, source residual, routed source contribution, final
+  routed velocity, target-source gap, and target-exact-source gap maps.
+- Run `hand_role_bayes_flow_identity_kv` with the Coca-Cola prompt and no
+  reference.
+- Run the identical mode with only hidden first-frame prefill enabled.

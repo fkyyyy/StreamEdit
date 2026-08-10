@@ -680,38 +680,21 @@ class EditCommitmentController:
             state_total_precision = (
                 prior_state_precision + current_trigger_precision
             )
-            if self.reference_bootstrapped:
-                trigger_commitment = torch.where(
-                    current_trigger_precision > self.eps,
-                    current_edit_belief,
-                    torch.zeros_like(current_edit_belief),
+            commitment = torch.where(
+                state_total_precision > self.eps,
+                (
+                    prior_commitment * prior_state_precision
+                    + current_edit_belief
+                    * current_trigger_precision
                 )
-                commitment = (
-                    1.0
-                    - (1.0 - prior_commitment)
-                    * (1.0 - trigger_commitment)
-                ).clamp(0.0, 1.0)
-                state_precision = prior_state_precision
-                next_commitment = prior_commitment
-                next_precision = prior_state_precision
-            else:
-                commitment = torch.where(
-                    state_total_precision > self.eps,
-                    (
-                        prior_commitment * prior_state_precision
-                        + current_edit_belief
-                        * current_trigger_precision
-                    )
-                    / state_total_precision.clamp_min(self.eps),
-                    torch.zeros_like(current_edit_belief),
-                ).clamp(0.0, 1.0)
-                state_precision = (
-                    1.0
-                    - (1.0 - prior_state_precision)
-                    * (1.0 - current_trigger_precision)
-                ).clamp(0.0, 1.0)
-                next_commitment = commitment
-                next_precision = state_precision
+                / state_total_precision.clamp_min(self.eps),
+                torch.zeros_like(current_edit_belief),
+            ).clamp(0.0, 1.0)
+            state_precision = (
+                1.0
+                - (1.0 - prior_state_precision)
+                * (1.0 - current_trigger_precision)
+            ).clamp(0.0, 1.0)
             commitment_precision = (
                 1.0
                 - (1.0 - localized_precision)
@@ -729,8 +712,8 @@ class EditCommitmentController:
             state_precisions.append(state_precision)
 
             reference_features = current_features
-            reference_commitment = next_commitment
-            reference_precision = next_precision
+            reference_commitment = commitment
+            reference_precision = state_precision
 
             current_anchor_score = current_trigger_precision.mean(
                 dim=-1,

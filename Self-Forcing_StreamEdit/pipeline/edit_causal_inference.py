@@ -2132,6 +2132,28 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             _debug_contribution = (
                                 _debug_action * _debug_residual
                             )
+                            hand_role_debug.update({
+                                "velocity_target_abs": (
+                                    v_trg.float().abs().mean(dim=2)
+                                ),
+                                "velocity_source_residual_abs": (
+                                    _debug_residual.abs().mean(dim=2)
+                                ),
+                                "velocity_source_contribution_abs": (
+                                    _debug_contribution.abs().mean(dim=2)
+                                ),
+                                "velocity_routed_abs": (
+                                    v_t.float().abs().mean(dim=2)
+                                ),
+                                "velocity_target_source_gap_abs": (
+                                    (v_trg.float() - v_src.float())
+                                    .abs().mean(dim=2)
+                                ),
+                                "velocity_target_exact_source_gap_abs": (
+                                    (v_trg.float() - v_gt.float())
+                                    .abs().mean(dim=2)
+                                ),
+                            })
                             _debug_target_abs = (
                                 v_trg.float().abs()[
                                     _debug_active_channels
