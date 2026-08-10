@@ -1618,6 +1618,64 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 t_i = current_timestep / 1000
                 v_src, v_trg = velocity_pred.chunk(2, dim=0)
                 v_gt = fwd_noise - src_input
+                # Diagnostic: measure target branch editing signal
+                if index == 0:
+                    _diag_cos = F.cosine_similarity(
+                        v_trg.float().flatten(2),
+                        v_src.float().flatten(2),
+                        dim=-1,
+                    ).mean().item()
+                    _diag_cos_gt = F.cosine_similarity(
+                        v_trg.float().flatten(2),
+                        v_gt.float().flatten(2),
+                        dim=-1,
+                    ).mean().item()
+                    _diag_residual_norm = (
+                        (v_gt - v_src).float().norm(dim=2).mean().item()
+                    )
+                    _diag_trg_src_gap = (
+                        (v_trg - v_src).float().norm(dim=2).mean().item()
+                    )
+                    _diag_trg_gt_gap = (
+                        (v_trg - v_gt).float().norm(dim=2).mean().item()
+                    )
+                    print(
+                        "VELOCITY_DIAGNOSTIC "
+                        f"block={current_start_frame // self.num_frame_per_block} "
+                        f"cos_trg_src={_diag_cos:.4f} "
+                        f"cos_trg_gt={_diag_cos_gt:.4f} "
+                        f"residual_norm={_diag_residual_norm:.4f} "
+                        f"trg_src_gap={_diag_trg_src_gap:.4f} "
+                        f"trg_gt_gap={_diag_trg_gt_gap:.4f}"
+                    )
+                    # Check reference token mask state
+                    if (
+                        reference_kv_available
+                        and trg_fg_mask_cache is not None
+                    ):
+                        _ref_tokens = _reference_kv_cache["trg"][0]["num_tokens"]
+                        _mask_data = trg_fg_mask_cache.get("trg_fg_mask")
+                        if _mask_data is not None:
+                            _ref_mask = _mask_data[:, :_ref_tokens]
+                            _nonref_mask = _mask_data[:, _ref_tokens:]
+                            print(
+                                "REFERENCE_MASK_STATE "
+                                f"block={current_start_frame // self.num_frame_per_block} "
+                                f"ref_tokens={_ref_tokens} "
+                                f"ref_fg_ratio={_ref_mask.float().mean().item():.4f} "
+                                f"nonref_fg_ratio={_nonref_mask.float().mean().item():.4f}"
+                            )
+                        if belief_kv_weight_cache is not None:
+                            _bkv = belief_kv_weight_cache.get("preserve_action")
+                            if _bkv is not None:
+                                _ref_bkv = _bkv[:, :_ref_tokens]
+                                _nonref_bkv = _bkv[:, _ref_tokens:]
+                                print(
+                                    "REFERENCE_BELIEF_KV "
+                                    f"block={current_start_frame // self.num_frame_per_block} "
+                                    f"ref_preserve_action={_ref_bkv.float().mean().item():.4f} "
+                                    f"nonref_preserve_action={_nonref_bkv.float().mean().item():.4f}"
+                                )
                 if (
                     hand_role_enabled
                     and index == 0
