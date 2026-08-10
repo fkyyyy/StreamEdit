@@ -1,0 +1,202 @@
+Free VRAM 104.0135498046875 GB
+KV inference with 3 frames per block
+81 960 1280
+HAND_ROLE_INPUT hand=0.0590 artifact=outputs/907_reference_causal_ablation/prefill_only/907-prefill_only.hand_role_input.npz
+HAND_ROLE_ADAPTIVE online_radius=True online_visibility=True online_temporal=True online_threshold=True online_field_reliability=True
+BAYES_RESIDUAL_FLOW beliefs=non_exclusive precision=online_fp32 field_role=precision_only
+CAUSAL_MEMORY_CONSOLIDATION transport=source_query_affinity update=precision_filter state=sufficient_statistics materialization=aligned_kv
+PERSISTENT_EDIT_COMMITMENT trigger=hand_interaction transport=committed_token_forward_splat presence=semantic_match preserve_release=object_core
+SLOW_TARGET_IDENTITY_MEMORY layers=(8, 12, 16, 20) slots=4 write=precision_statistics read=value_only belief_feedback=identity_match
+[[5, 6, 7, 8, 9, 10]] [[5, 6, 7, 8, 9, 10, 11]]
+  0%|          | 0/6 [00:00<?, ?it/s]HAND_ROLE_FLOW block=0 edit_tokens=0.0628 visible=1.0000 temporal=0.0098 adaptive=1 object=0.0211 boundary=0.0194 hand=0.0377 background=0.9218 radius=4.000 attention_reliability=0.741 threshold=0.169 budget=0.186
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:04<01:02,  4.46s/it][A
+ 13%|█▎        | 2/15 [00:05<00:30,  2.35s/it][A
+ 20%|██        | 3/15 [00:06<00:20,  1.68s/it][A
+ 27%|██▋       | 4/15 [00:07<00:14,  1.36s/it][A
+ 33%|███▎      | 5/15 [00:07<00:11,  1.19s/it][A
+ 40%|████      | 6/15 [00:08<00:09,  1.08s/it][A
+ 47%|████▋     | 7/15 [00:09<00:08,  1.01s/it][A
+ 53%|█████▎    | 8/15 [00:10<00:07,  1.04s/it][A
+ 60%|██████    | 9/15 [00:11<00:06,  1.01s/it][A
+ 67%|██████▋   | 10/15 [00:12<00:04,  1.00it/s][A
+ 73%|███████▎  | 11/15 [00:13<00:03,  1.01it/s][A
+ 80%|████████  | 12/15 [00:14<00:02,  1.02it/s][A
+ 87%|████████▋ | 13/15 [00:15<00:01,  1.03it/s][A
+ 93%|█████████▎| 14/15 [00:16<00:00,  1.03it/s][A
+100%|██████████| 15/15 [00:17<00:00,  1.03it/s][A
+                                               [A 17%|█▋        | 1/6 [00:20<01:42, 20.60s/it]HAND_ROLE_FIELD block=0 mode=adaptive applied=0 edit_tokens=0.0628 field=0.1445 observation=0.6374 reliability=0.4281
+CAUSAL_CONTROL_BELIEF block=0 edit=0.0632 preserve=0.8821 edit_precision=0.1996 preserve_precision=0.7699 conflict=0.0346 uncertainty=0.2417
+EDIT_COMMITMENT block=0 trigger=0.0152 transport=0.0280 anchor=0.0280 presence=0.0497 absence=0.0288 precision=0.0246 state_precision=0.0250 effective=0.0166 edit_support=0.0421
+TARGET_IDENTITY_READ block=0 support=0.0000 peak=0.0000 edit_tokens=0.0000
+BELIEF_MEMORY_OBSERVATION block=0 edit_action=0.0394 preserve_action=0.9606 conflict=0.0347
+CAUSAL_MEMORY_WRITE block=0 observation_precision=0.7583 transport_precision=0.1875 observation_gain=0.8622 consolidated_edit=0.0372 consolidated_precision=0.8056 materialized_edit=0.0274
+BAYES_FLOW block=0 edit_action=0.0394 preserve_action=0.9606 sum_error=1.19e-07 no_evidence=0.0000
+TARGET_IDENTITY_WRITE block=0 weight=0.0207 observation_evidence=0.3073 gain=1.0000 accumulated_evidence=0.3073
+HAND_ROLE_FLOW block=1 edit_tokens=0.0389 visible=0.3333 temporal=0.0017 adaptive=1 object=0.0071 boundary=0.0152 hand=0.0758 background=0.9018 radius=4.667 attention_reliability=0.803 threshold=0.454 budget=0.237
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:04<01:07,  4.79s/it][A
+ 13%|█▎        | 2/15 [00:05<00:32,  2.52s/it][A
+ 20%|██        | 3/15 [00:06<00:21,  1.79s/it][A
+ 27%|██▋       | 4/15 [00:07<00:15,  1.45s/it][A
+ 33%|███▎      | 5/15 [00:08<00:12,  1.26s/it][A
+ 40%|████      | 6/15 [00:09<00:10,  1.15s/it][A
+ 47%|████▋     | 7/15 [00:10<00:08,  1.08s/it][A
+ 53%|█████▎    | 8/15 [00:11<00:07,  1.10s/it][A
+ 60%|██████    | 9/15 [00:12<00:06,  1.08s/it][A
+ 67%|██████▋   | 10/15 [00:13<00:05,  1.08s/it][A
+ 73%|███████▎  | 11/15 [00:14<00:04,  1.07s/it][A
+ 80%|████████  | 12/15 [00:15<00:03,  1.07s/it][A
+ 87%|████████▋ | 13/15 [00:16<00:02,  1.06s/it][A
+ 93%|█████████▎| 14/15 [00:17<00:01,  1.07s/it][A
+100%|██████████| 15/15 [00:18<00:00,  1.07s/it][A
+                                               [A 33%|███▎      | 2/6 [00:42<01:25, 21.32s/it]HAND_ROLE_FIELD block=1 mode=adaptive applied=0 edit_tokens=0.0389 field=0.1101 observation=0.8874 reliability=0.2312
+CAUSAL_CONTROL_BELIEF block=1 edit=0.0889 preserve=0.9386 edit_precision=0.2121 preserve_precision=0.8235 conflict=0.0737 uncertainty=0.2190
+EDIT_COMMITMENT block=1 trigger=0.0102 transport=0.0421 anchor=0.0412 presence=0.0689 absence=0.1026 precision=0.0161 state_precision=0.0171 effective=0.0107 edit_support=0.0177
+TARGET_IDENTITY_READ block=1 support=0.0186 peak=0.3076 edit_tokens=0.1000
+BELIEF_MEMORY_OBSERVATION block=1 edit_action=0.0256 preserve_action=0.9744 conflict=0.0738
+CAUSAL_MEMORY_WRITE block=1 observation_precision=0.7810 transport_precision=0.3036 observation_gain=0.7897 consolidated_edit=0.0241 consolidated_precision=0.8471 materialized_edit=0.0182
+BAYES_FLOW block=1 edit_action=0.0256 preserve_action=0.9744 sum_error=1.19e-07 no_evidence=0.0000
+TARGET_IDENTITY_WRITE block=1 weight=0.0137 observation_evidence=0.3465 gain=0.5370 accumulated_evidence=0.6538
+HAND_ROLE_FLOW block=2 edit_tokens=0.0184 visible=0.6667 temporal=0.0030 adaptive=1 object=0.0088 boundary=0.0126 hand=0.0681 background=0.9105 radius=4.000 attention_reliability=0.765 threshold=0.556 budget=0.213
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:04<01:08,  4.93s/it][A
+ 13%|█▎        | 2/15 [00:05<00:34,  2.63s/it][A
+ 20%|██        | 3/15 [00:06<00:22,  1.90s/it][A
+ 27%|██▋       | 4/15 [00:08<00:17,  1.55s/it][A
+ 33%|███▎      | 5/15 [00:09<00:13,  1.36s/it][A
+ 40%|████      | 6/15 [00:10<00:11,  1.25s/it][A
+ 47%|████▋     | 7/15 [00:11<00:09,  1.18s/it][A
+ 53%|█████▎    | 8/15 [00:12<00:08,  1.20s/it][A
+ 60%|██████    | 9/15 [00:13<00:07,  1.17s/it][A
+ 67%|██████▋   | 10/15 [00:14<00:05,  1.15s/it][A
+ 73%|███████▎  | 11/15 [00:15<00:04,  1.13s/it][A
+ 80%|████████  | 12/15 [00:16<00:03,  1.13s/it][A
+ 87%|████████▋ | 13/15 [00:17<00:02,  1.12s/it][A
+ 93%|█████████▎| 14/15 [00:18<00:01,  1.11s/it][A
+100%|██████████| 15/15 [00:20<00:00,  1.12s/it][A
+                                               [A 50%|█████     | 3/6 [01:05<01:06, 22.09s/it]HAND_ROLE_FIELD block=2 mode=adaptive applied=0 edit_tokens=0.0184 field=0.1398 observation=0.6792 reliability=0.3749
+CAUSAL_CONTROL_BELIEF block=2 edit=0.1474 preserve=0.8946 edit_precision=0.1181 preserve_precision=0.7866 conflict=0.1171 uncertainty=0.2943
+EDIT_COMMITMENT block=2 trigger=0.0076 transport=0.0978 anchor=0.0437 presence=0.1148 absence=0.1807 precision=0.0157 state_precision=0.0173 effective=0.0094 edit_support=0.0209
+TARGET_IDENTITY_READ block=2 support=0.0380 peak=0.6551 edit_tokens=0.1000
+BELIEF_MEMORY_OBSERVATION block=2 edit_action=0.0372 preserve_action=0.9628 conflict=0.1172
+CAUSAL_MEMORY_WRITE block=2 observation_precision=0.7057 transport_precision=0.2886 observation_gain=0.7827 consolidated_edit=0.0306 consolidated_precision=0.7896 materialized_edit=0.0218
+BAYES_FLOW block=2 edit_action=0.0372 preserve_action=0.9628 sum_error=1.19e-07 no_evidence=0.0000
+TARGET_IDENTITY_WRITE block=2 weight=0.0098 observation_evidence=0.3448 gain=0.3480 accumulated_evidence=0.9986
+HAND_ROLE_FLOW block=3 edit_tokens=0.0359 visible=0.6667 temporal=0.0029 adaptive=1 object=0.0163 boundary=0.0225 hand=0.0847 background=0.8765 radius=5.000 attention_reliability=0.790 threshold=0.513 budget=0.236
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:04<01:09,  4.99s/it][A
+ 13%|█▎        | 2/15 [00:06<00:34,  2.68s/it][A
+ 20%|██        | 3/15 [00:07<00:23,  1.95s/it][A
+ 27%|██▋       | 4/15 [00:08<00:17,  1.60s/it][A
+ 33%|███▎      | 5/15 [00:09<00:14,  1.41s/it][A
+ 40%|████      | 6/15 [00:10<00:11,  1.29s/it][A
+ 47%|████▋     | 7/15 [00:11<00:09,  1.22s/it][A
+ 53%|█████▎    | 8/15 [00:12<00:08,  1.24s/it][A
+ 60%|██████    | 9/15 [00:13<00:07,  1.24s/it][A
+ 67%|██████▋   | 10/15 [00:15<00:06,  1.24s/it][A
+ 73%|███████▎  | 11/15 [00:16<00:04,  1.23s/it][A
+ 80%|████████  | 12/15 [00:17<00:03,  1.23s/it][A
+ 87%|████████▋ | 13/15 [00:18<00:02,  1.23s/it][A
+ 93%|█████████▎| 14/15 [00:20<00:01,  1.23s/it][A
+100%|██████████| 15/15 [00:21<00:00,  1.24s/it][A
+                                               [A 67%|██████▋   | 4/6 [01:29<00:46, 23.00s/it]HAND_ROLE_FIELD block=3 mode=adaptive applied=0 edit_tokens=0.0359 field=0.1366 observation=0.6634 reliability=0.3643
+CAUSAL_CONTROL_BELIEF block=3 edit=0.1825 preserve=0.8623 edit_precision=0.1379 preserve_precision=0.8088 conflict=0.1360 uncertainty=0.2800
+EDIT_COMMITMENT block=3 trigger=0.0168 transport=0.1011 anchor=0.0569 presence=0.1169 absence=0.2114 precision=0.0289 state_precision=0.0308 effective=0.0196 edit_support=0.0376
+TARGET_IDENTITY_READ block=3 support=0.0547 peak=0.9104 edit_tokens=0.1000
+BELIEF_MEMORY_OBSERVATION block=3 edit_action=0.0625 preserve_action=0.9375 conflict=0.1361
+CAUSAL_MEMORY_WRITE block=3 observation_precision=0.7200 transport_precision=0.2858 observation_gain=0.7855 consolidated_edit=0.0600 consolidated_precision=0.8006 materialized_edit=0.0420
+BAYES_FLOW block=3 edit_action=0.0625 preserve_action=0.9375 sum_error=1.19e-07 no_evidence=0.0000
+TARGET_IDENTITY_WRITE block=3 weight=0.0205 observation_evidence=0.4065 gain=0.2908 accumulated_evidence=1.4051
+HAND_ROLE_FLOW block=4 edit_tokens=0.0062 visible=0.3333 temporal=0.0017 adaptive=1 object=0.0047 boundary=0.0027 hand=0.0641 background=0.9285 radius=4.000 attention_reliability=0.612 threshold=0.669 budget=0.212
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:05<01:11,  5.07s/it][A
+ 13%|█▎        | 2/15 [00:06<00:36,  2.78s/it][A
+ 20%|██        | 3/15 [00:07<00:24,  2.04s/it][A
+ 27%|██▋       | 4/15 [00:08<00:18,  1.70s/it][A
+ 33%|███▎      | 5/15 [00:09<00:15,  1.51s/it][A
+ 40%|████      | 6/15 [00:10<00:12,  1.39s/it][A
+ 47%|████▋     | 7/15 [00:12<00:10,  1.32s/it][A
+ 53%|█████▎    | 8/15 [00:13<00:09,  1.34s/it][A
+ 60%|██████    | 9/15 [00:14<00:07,  1.33s/it][A
+ 67%|██████▋   | 10/15 [00:16<00:06,  1.33s/it][A
+ 73%|███████▎  | 11/15 [00:17<00:05,  1.33s/it][A
+ 80%|████████  | 12/15 [00:18<00:03,  1.32s/it][A
+ 87%|████████▋ | 13/15 [00:20<00:02,  1.32s/it][A
+ 93%|█████████▎| 14/15 [00:21<00:01,  1.32s/it][A
+100%|██████████| 15/15 [00:22<00:00,  1.33s/it][A
+                                               [A 83%|████████▎ | 5/6 [01:55<00:24, 24.01s/it]HAND_ROLE_FIELD block=4 mode=adaptive applied=0 edit_tokens=0.0062 field=0.1442 observation=0.9680 reliability=0.1029
+CAUSAL_CONTROL_BELIEF block=4 edit=0.1733 preserve=0.9052 edit_precision=0.1329 preserve_precision=0.6467 conflict=0.1408 uncertainty=0.4260
+EDIT_COMMITMENT block=4 trigger=0.0008 transport=0.1010 anchor=0.0626 presence=0.1209 absence=0.2167 precision=0.0095 state_precision=0.0140 effective=0.0052 edit_support=0.0098
+TARGET_IDENTITY_READ block=4 support=0.0579 peak=0.9522 edit_tokens=0.1000
+BELIEF_MEMORY_OBSERVATION block=4 edit_action=0.0507 preserve_action=0.9493 conflict=0.1411
+CAUSAL_MEMORY_WRITE block=4 observation_precision=0.5740 transport_precision=0.2835 observation_gain=0.7560 consolidated_edit=0.0463 consolidated_precision=0.6922 materialized_edit=0.0282
+BAYES_FLOW block=4 edit_action=0.0507 preserve_action=0.9493 sum_error=1.19e-07 no_evidence=0.0000
+TARGET_IDENTITY_WRITE block=4 weight=0.0012 observation_evidence=0.1036 gain=0.0694 accumulated_evidence=1.5087
+HAND_ROLE_FLOW block=5 edit_tokens=0.0000 visible=0.0000 temporal=0.0014 adaptive=1 object=0.0000 boundary=0.0000 hand=0.0202 background=0.9798 radius=2.667 attention_reliability=0.549 threshold=0.860 budget=0.114
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:04<01:09,  4.98s/it][A
+ 13%|█▎        | 2/15 [00:06<00:35,  2.76s/it][A
+ 20%|██        | 3/15 [00:07<00:24,  2.05s/it][A
+ 27%|██▋       | 4/15 [00:08<00:18,  1.72s/it][A
+ 33%|███▎      | 5/15 [00:09<00:15,  1.54s/it][A
+ 40%|████      | 6/15 [00:11<00:12,  1.43s/it][A
+ 47%|████▋     | 7/15 [00:12<00:10,  1.36s/it][A
+ 53%|█████▎    | 8/15 [00:13<00:09,  1.38s/it][A
+ 60%|██████    | 9/15 [00:15<00:08,  1.37s/it][A
+ 67%|██████▋   | 10/15 [00:16<00:06,  1.37s/it][A
+ 73%|███████▎  | 11/15 [00:17<00:05,  1.36s/it][A
+ 80%|████████  | 12/15 [00:19<00:04,  1.36s/it][A
+ 87%|████████▋ | 13/15 [00:20<00:02,  1.36s/it][A
+ 93%|█████████▎| 14/15 [00:21<00:01,  1.36s/it][A
+100%|██████████| 15/15 [00:23<00:00,  1.36s/it][A
+                                               [A100%|██████████| 6/6 [02:21<00:00, 24.78s/it]100%|██████████| 6/6 [02:21<00:00, 23.65s/it]
+HAND_ROLE_FIELD block=5 mode=adaptive applied=0 edit_tokens=0.0000 field=0.1708 observation=0.9881 reliability=0.0496
+CAUSAL_CONTROL_BELIEF block=5 edit=0.1540 preserve=0.9435 edit_precision=0.1262 preserve_precision=0.5651 conflict=0.1341 uncertainty=0.4908
+EDIT_COMMITMENT block=5 trigger=0.0000 transport=0.0978 anchor=0.0421 presence=0.1201 absence=0.1808 precision=0.0043 state_precision=0.0073 effective=0.0019 edit_support=0.0002
+TARGET_IDENTITY_READ block=5 support=0.0588 peak=0.9160 edit_tokens=0.1000
+BELIEF_MEMORY_OBSERVATION block=5 edit_action=0.0437 preserve_action=0.9563 conflict=0.1344
+CAUSAL_MEMORY_WRITE block=5 observation_precision=0.5092 transport_precision=0.2032 observation_gain=0.7798 consolidated_edit=0.0348 consolidated_precision=0.6153 materialized_edit=0.0188
+BAYES_FLOW block=5 edit_action=0.0437 preserve_action=0.9563 sum_error=1.19e-07 no_evidence=0.0000
+TARGET_IDENTITY_WRITE block=5 weight=0.0000 observation_evidence=0.0229 gain=0.0153 accumulated_evidence=1.5316
+HAND_ROLE_ADAPTIVE online_radius=True online_visibility=True online_temporal=True online_threshold=True online_field_reliability=True
+BAYES_RESIDUAL_FLOW beliefs=non_exclusive precision=online_fp32 field_role=precision_only
+CAUSAL_MEMORY_CONSOLIDATION transport=source_query_affinity update=precision_filter state=sufficient_statistics materialization=aligned_kv
+PERSISTENT_EDIT_COMMITMENT trigger=hand_interaction transport=committed_token_forward_splat presence=semantic_match preserve_release=object_core
+SLOW_TARGET_IDENTITY_MEMORY layers=(8, 12, 16, 20) slots=4 write=precision_statistics read=value_only belief_feedback=identity_match
+[[5, 6, 7, 8, 9, 10]] [[5, 6, 7, 8, 9, 10, 11]]
+  0%|          | 0/1 [00:00<?, ?it/s]HAND_ROLE_FLOW block=1 edit_tokens=0.0000 visible=0.0000 temporal=0.0000 adaptive=1 object=0.0000 boundary=0.0000 hand=0.0149 background=0.9851 radius=2.000 attention_reliability=0.725 threshold=0.982 budget=0.081
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:04<01:06,  4.72s/it][A
+ 13%|█▎        | 2/15 [00:05<00:32,  2.48s/it][A
+ 20%|██        | 3/15 [00:06<00:21,  1.76s/it][A
+ 27%|██▋       | 4/15 [00:07<00:15,  1.42s/it][A
+ 33%|███▎      | 5/15 [00:08<00:12,  1.24s/it][A
+ 40%|████      | 6/15 [00:09<00:10,  1.12s/it][A
+ 47%|████▋     | 7/15 [00:10<00:08,  1.05s/it][A
+ 53%|█████▎    | 8/15 [00:11<00:07,  1.07s/it][A
+ 60%|██████    | 9/15 [00:12<00:06,  1.05s/it][A
+ 67%|██████▋   | 10/15 [00:13<00:05,  1.03s/it][A
+ 73%|███████▎  | 11/15 [00:14<00:04,  1.02s/it][A
+ 80%|████████  | 12/15 [00:15<00:03,  1.01s/it][A
+ 87%|████████▋ | 13/15 [00:16<00:02,  1.01s/it][A
+ 93%|█████████▎| 14/15 [00:17<00:01,  1.00s/it][A
+100%|██████████| 15/15 [00:18<00:00,  1.00s/it][A
+                                               [A100%|██████████| 1/1 [00:21<00:00, 21.15s/it]100%|██████████| 1/1 [00:21<00:00, 21.15s/it]
+/usr/local/lib/python3.11/dist-packages/torchvision/io/_video_deprecation_warning.py:5: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+HAND_ROLE_FIELD block=1 mode=adaptive applied=0 edit_tokens=0.0000 field=0.2039 observation=0.8070 reliability=0.1638
+CAUSAL_CONTROL_BELIEF block=1 edit=0.1567 preserve=0.9429 edit_precision=0.1292 preserve_precision=0.7316 conflict=0.1373 uncertainty=0.3479
+EDIT_COMMITMENT block=1 trigger=0.0000 transport=0.1006 anchor=0.0425 presence=0.1099 absence=0.1670 precision=0.0031 state_precision=0.0048 effective=0.0012 edit_support=0.0000
+TARGET_IDENTITY_READ block=1 support=0.0583 peak=0.8192 edit_tokens=0.1000
+BELIEF_MEMORY_OBSERVATION block=1 edit_action=0.0324 preserve_action=0.9676 conflict=0.1376
+CAUSAL_MEMORY_WRITE block=1 observation_precision=0.6521 transport_precision=0.2619 observation_gain=0.7823 consolidated_edit=0.0251 consolidated_precision=0.7491 materialized_edit=0.0174
+BAYES_FLOW block=1 edit_action=0.0324 preserve_action=0.9676 sum_error=1.19e-07 no_evidence=0.0000
+TARGET_IDENTITY_WRITE block=1 weight=0.0000 observation_evidence=0.0000 gain=0.0000 accumulated_evidence=1.5316
