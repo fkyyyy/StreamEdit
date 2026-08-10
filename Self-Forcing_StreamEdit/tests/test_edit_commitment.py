@@ -178,6 +178,45 @@ def test_reference_bootstrap_starts_commitment_without_hand():
     assert controller.reference_support_budget.item() == 1
 
 
+def test_reference_track_is_not_overwritten_by_online_trigger():
+    controller = commitment_module.EditCommitmentController(topk=1)
+    controller.bootstrap_reference(
+        source_features=_features(),
+        edit_precision=torch.tensor(
+            [[1.0, 0.0, 0.0, 0.0]]
+        ),
+    )
+    hand = torch.zeros((1, 1, 4, 4))
+    hand[:, :, -2:, -2:] = 1.0
+
+    triggered = controller(
+        belief=_belief(edit=0.8),
+        debug=_debug(attention=1.0, proximity=0.0),
+        hand_mask=hand,
+        source_features=_features(),
+    )
+
+    assert triggered.transported[0, 0, 0, 0] == 1
+    assert triggered.trigger[0, 0, 1, 1] > 0
+    assert triggered.commitment[0, 0, 0, 0] == 1
+    assert triggered.commitment[0, 0, 1, 1] > 0
+    assert torch.count_nonzero(triggered.state_precision) == 1
+    assert torch.count_nonzero(controller.previous_precision) == 1
+    assert controller.previous_commitment[0, 0] == 1
+    assert controller.previous_commitment[0, 3] == 0
+
+    persisted = controller(
+        belief=_belief(edit=0.0, visibility=0.0),
+        debug=_debug(attention=1.0, proximity=0.0),
+        hand_mask=_hand(present=False),
+        source_features=_features(),
+    )
+
+    assert torch.count_nonzero(persisted.state_precision) == 1
+    assert persisted.commitment[0, 0, 0, 0] == 1
+    assert persisted.effective_commitment[0, 0, 0, 0] == 1
+
+
 def test_empty_reference_bootstrap_does_not_create_edit_support():
     controller = commitment_module.EditCommitmentController(topk=1)
     controller.bootstrap_reference(
