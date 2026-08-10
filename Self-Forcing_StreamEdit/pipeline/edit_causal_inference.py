@@ -2168,7 +2168,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     )
                     if (
                         reference_identity_enabled
-                        and reference_already_bootstrapped
+                        and target_identity_memory is not None
+                        and target_identity_memory.reference_bootstrapped
                         and current_identity_support is not None
                     ):
                         identity_spatial = F.interpolate(
