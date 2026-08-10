@@ -2358,10 +2358,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     progress = 1.0 - t_i
                     anchor_strength = 0.4 * anchor_mask * progress
                     ref_broadcast = ref_latent.expand_as(denoised_pred)
+                    _orig_dtype = denoised_pred.dtype
                     denoised_pred = (
-                        denoised_pred
-                        + anchor_strength * (ref_broadcast - denoised_pred)
-                    )
+                        denoised_pred.float()
+                        + anchor_strength * (ref_broadcast.float() - denoised_pred.float())
+                    ).to(_orig_dtype)
                     if index == 0:
                         print(
                             "TRAJECTORY_ANCHOR "
