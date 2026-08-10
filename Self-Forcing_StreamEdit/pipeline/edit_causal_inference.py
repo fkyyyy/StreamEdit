@@ -2166,6 +2166,47 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         source_reconstruction_velocity=v_gt,
                         belief=current_control_belief,
                     )
+                    if (
+                        reference_identity_enabled
+                        and reference_already_bootstrapped
+                        and current_identity_support is not None
+                    ):
+                        identity_spatial = F.interpolate(
+                            current_identity_support.reshape(
+                                batch_size * current_num_frames,
+                                1,
+                                *current_identity_support.shape[-2:],
+                            ),
+                            size=v_trg.shape[-2:],
+                            mode="bilinear",
+                            align_corners=False,
+                        ).reshape(
+                            batch_size,
+                            current_num_frames,
+                            1,
+                            *v_trg.shape[-2:],
+                        ).clamp(0.0, 1.0)
+                        identity_gate = identity_spatial.pow(0.5)
+                        source_residual = (
+                            v_gt.float() - v_src.float()
+                        )
+                        preserve_action = bayes_flow_debug[
+                            "preserve_action_weight"
+                        ]
+                        suppressed_residual = (
+                            preserve_action * source_residual
+                            * (1.0 - identity_gate)
+                        )
+                        v_t = (
+                            v_trg.float() + suppressed_residual
+                        ).to(v_trg.dtype)
+                        if index == 0:
+                            print(
+                                "IDENTITY_VELOCITY_OVERRIDE "
+                                f"block={current_start_frame // self.num_frame_per_block} "
+                                f"gate_mean={identity_gate.mean().item():.4f} "
+                                f"gate_peak={identity_gate.max().item():.4f}"
+                            )
                     if index == 0:
                         # #region debug-point H2-H4:velocity-routing
                         if current_commitment is not None:
