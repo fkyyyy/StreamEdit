@@ -2187,7 +2187,17 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             1,
                             *v_trg.shape[-2:],
                         ).clamp(0.0, 1.0)
-                        identity_gate = identity_spatial.pow(0.5)
+                        identity_dilated = F.max_pool2d(
+                            identity_spatial.reshape(
+                                batch_size * current_num_frames,
+                                1,
+                                *v_trg.shape[-2:],
+                            ),
+                            kernel_size=5,
+                            stride=1,
+                            padding=2,
+                        ).reshape_as(identity_spatial)
+                        identity_gate = identity_dilated.pow(0.3)
                         source_residual = (
                             v_gt.float() - v_src.float()
                         )
