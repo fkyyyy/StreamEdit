@@ -146,6 +146,11 @@ if __name__ == '__main__':
     # hyper-parameters
     parser.add_argument("--fg_boost_factor", type=float, default=4.0, help='CrossAttn Boosting')
     parser.add_argument("--blend_power", type=float, default=2.0, help='rho')
+    parser.add_argument(
+        "--edit_qk_unblend",
+        action="store_true",
+        help="Use pure target current Q/K on inferred edit-support tokens",
+    )
 
     # model settings
     parser.add_argument("--step", type=int, default=15, help='1~1000')
@@ -581,6 +586,7 @@ if __name__ == '__main__':
 
         fg_boost_factor=args.fg_boost_factor,
         blend_power=args.blend_power,
+        edit_qk_unblend=args.edit_qk_unblend,
 
         rollout_chunk_size=args.rollout_chunk_size,
         rollout_overlap_block_num=args.rollout_overlap_block_num,

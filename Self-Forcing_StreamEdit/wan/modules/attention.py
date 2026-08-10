@@ -27,6 +27,7 @@ __all__ = [
     'flash_attention',
     'attention',
     'fuse_aligned_memory',
+    'blend_current_target_state',
     'apply_target_identity_value_correction',
 ]
 
@@ -214,6 +215,49 @@ def fuse_aligned_memory(
         + weight * (source_value.float() - target_value.float())
     ).to(target_value.dtype)
     return fused_key, fused_value
+
+
+def blend_current_target_state(
+    target,
+    source,
+    blend_rate,
+    edit_support=None,
+):
+    """Blend current states while optionally keeping edit tokens target-pure."""
+    if target.shape != source.shape:
+        raise ValueError(
+            "Current target and source states must share shape"
+        )
+    if not 0.0 <= blend_rate <= 1.0:
+        raise ValueError("blend_rate must lie in [0, 1]")
+    if edit_support is None:
+        return (
+            target * blend_rate
+            + source * (1.0 - blend_rate)
+        )
+
+    rate = torch.as_tensor(
+        blend_rate,
+        device=target.device,
+        dtype=target.dtype,
+    )
+    if (
+        edit_support.ndim != 1
+        or edit_support.shape[0] != target.shape[0]
+    ):
+        raise ValueError(
+            "Edit support must align with the token dimension"
+        )
+    token_rate = torch.where(
+        edit_support.to(device=target.device, dtype=torch.bool),
+        torch.ones((), device=target.device, dtype=target.dtype),
+        rate,
+    )
+    rate = token_rate.reshape(
+        token_rate.shape[0],
+        *([1] * (target.ndim - 1)),
+    )
+    return target * rate + source * (1.0 - rate)
 
 
 def apply_target_identity_value_correction(

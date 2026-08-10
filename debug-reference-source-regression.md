@@ -15,10 +15,12 @@
 | H1 | Commitment updates belief after the Bayes action was already computed | High | Low | Rejected: region-level Bayes action equals the post-commit action |
 | H2 | Velocity routing consumes a stale pre-commit preserve map | High | Low | Rejected: saved Bayes action exactly matches the final control belief |
 | H3 | Reference transport loses effective object support over time | Medium | Low | Confirmed: effective support falls from 0.0239 to 0.0016 and edit support reaches zero |
-| H4 | Source residual dominates the target field after commitment weakens | High | Medium | Pending direct field maps; active-region preserve rises to 0.77-0.87 |
+| H4 | Source residual dominates the target field after commitment weakens | High | Medium | Confirmed: object-region contribution/target rises to 0.60-0.68 as preserve reaches 0.82-0.89 |
 | H5 | Reference state is overwritten by generic hand-trigger state before fixed-budget pruning | High | Low | Confirmed as a secondary bug, but rejected as the visual root cause by post-fix output |
-| H6 | Hidden reference prefill changes temporal initialization without supplying a persistent target force | High | Medium | Pending prompt-only versus prefill-only ablation |
-| H7 | The target velocity itself remains source-like despite reference KV/identity support | High | Medium | Pending target-to-source and target-to-exact-source field maps |
+| H6 | Hidden reference prefill is the common cause of source regression | High | Medium | Rejected: prompt-only has the same identity drift and late blue-cap regression |
+| H7 | The target velocity itself becomes source-like after early blocks | High | Medium | Confirmed: global target/source gap is only 3-9% of target magnitude after block 1; object-region gap is 8-18% in late blocks |
+| H8 | Scalar current Q/K blending collapses the target branch toward source dynamics | High | Medium | Strongly supported: the first denoising step uses only 13% target Q/K and the observed target/source field gap collapses; causal ablation pending |
+| H9 | Residual routing cannot exactly preserve background when the target prompt leaks outside the object | High | Low | Confirmed algebraically and by maps: at preserve=1 the routed field is `v_gt + (v_trg-v_src)`; block-0 background target/source gap is 31.7% of target magnitude |
 
 ## Log Evidence
 Instrumentation added for:
@@ -60,20 +62,47 @@ Post-fix evidence from commit `266c54d`:
   root cause. Stronger block-0 commitment is insufficient to alter generation.
 - The state-separation behavior is reverted rather than accumulated.
 
+Ablation evidence from commit `37557f8`:
+
+- `prompt_only` has no reference or customized bootstrap, but still changes
+  target identity across blocks and regresses to the source blue cap. This
+  rejects hidden reference prefill as the common root cause.
+- Prompt-only edit-token coverage is 5.79%, 10.19%, 9.64%, 11.97%, 8.35%,
+  2.74%, and finally 0%. Object-region preserve action rises to 0.817 and
+  0.891 in the last two blocks.
+- Prompt-only object-region source contribution relative to target velocity
+  rises from 0.336 in block 3 to 0.598 and 0.683 in blocks 5 and 6.
+- After block 1, the global target/source velocity gap is only 3.2%-8.8% of
+  target magnitude; in the inferred object region it is 8.1%-17.8% in the
+  late blocks. The nominal target branch has already become source-like.
+- In block 0 background, preserve action is 0.999 but the target/source gap
+  is still 31.7% of target magnitude. The current residual equation leaves
+  this prompt delta untouched, explaining Coca-Cola text in the pan.
+- Prefill-only changes early field magnitudes but follows the same late
+  support and source-contribution trajectory. It is not a persistent target
+  force.
+- The overlap rollout overwrites prefill-only
+  `block_001_hand_role_debug.npz`; that artifact is the final overlap call,
+  not the original block 1.
+
 ## Verification Conclusion
 
-The decisive failure is now upstream or downstream of commitment: either the
-hidden reference prefill changes causal initialization without producing a
-persistent target field, the model's target velocity is already source-like,
-or source initialization/residual routing overwhelms the target field. The
-next evidence must compare prompt-only and reference-prefill-only executions
-and save velocity magnitudes spatially. No additional memory-strength fix is
-justified before those results.
+The failure is not reference-specific. There are two distinct mechanisms:
+
+1. Scalar source-heavy current Q/K blending and source-latent initialization
+   make the target branch converge toward source dynamics.
+2. The residual router is not an exact source endpoint. Even full preserve
+   leaves `v_trg-v_src`, so globally leaked target semantics remain in the
+   background.
+
+Late hand/object support collapse then raises preserve action inside the
+object and exposes source identity. No additional memory-strength fix is
+justified. The next causal test should remove source Q/K blending only on
+current edit-support tokens while leaving background behavior unchanged.
 
 ## Next Instrumentation
 
-- Save target velocity, source residual, routed source contribution, final
-  routed velocity, target-source gap, and target-exact-source gap maps.
-- Run `hand_role_bayes_flow_identity_kv` with the Coca-Cola prompt and no
-  reference.
-- Run the identical mode with only hidden first-frame prefill enabled.
+- Add an opt-in spatial Q/K ablation: current edit-support tokens use pure
+  target Q/K while background retains the original timestep blend.
+- Keep the existing velocity maps for pre/post comparison.
+- Fix rollout debug indexing before using overlap artifacts quantitatively.

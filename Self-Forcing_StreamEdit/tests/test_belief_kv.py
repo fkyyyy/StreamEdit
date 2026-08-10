@@ -210,3 +210,36 @@ def test_aligned_memory_fusion_rejects_unaligned_tokens():
             source,
             preserve_action=torch.ones((1, 2)),
         )
+
+
+def test_current_qk_blend_keeps_edit_tokens_target_pure():
+    target = torch.tensor([[[1.0]], [[2.0]], [[3.0]]])
+    source = torch.tensor([[[11.0]], [[12.0]], [[13.0]]])
+
+    blended = attention_module.blend_current_target_state(
+        target=target,
+        source=source,
+        blend_rate=0.25,
+        edit_support=torch.tensor([False, True, False]),
+    )
+
+    assert torch.allclose(
+        blended.flatten(),
+        torch.tensor([8.5, 2.0, 10.5]),
+    )
+
+
+def test_current_qk_blend_preserves_scalar_baseline():
+    target = torch.tensor([[[0.0]], [[2.0]]])
+    source = torch.tensor([[[4.0]], [[6.0]]])
+
+    blended = attention_module.blend_current_target_state(
+        target=target,
+        source=source,
+        blend_rate=0.25,
+    )
+
+    assert torch.allclose(
+        blended.flatten(),
+        torch.tensor([3.0, 5.0]),
+    )

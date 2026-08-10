@@ -1,6 +1,7 @@
 from wan.modules.attention import (
     apply_target_identity_value_correction,
     attention,
+    blend_current_target_state,
     fuse_aligned_memory,
 )
 from wan.modules.contact_graph_attention import (
@@ -406,9 +407,19 @@ class CausalWanSelfAttention(nn.Module):
                                 cached_preserve_action.unsqueeze(0),
                             )
                         )
-                        current_target_key = (
-                            trg_current_key[b_idx] * blender_rate
-                            + src_current_key[b_idx] * (1 - blender_rate)
+                        edit_qk_support = (
+                            kv_cache["current_src_fg_mask"][b_idx]
+                            if shared_dict.get(
+                                "edit_qk_unblend",
+                                False,
+                            )
+                            else None
+                        )
+                        current_target_key = blend_current_target_state(
+                            target=trg_current_key[b_idx],
+                            source=src_current_key[b_idx],
+                            blend_rate=blender_rate,
+                            edit_support=edit_qk_support,
                         )
                         target_key_list = [fused_prev_key.squeeze(0)]
                         target_value_list = [
@@ -445,9 +456,11 @@ class CausalWanSelfAttention(nn.Module):
                             target_value_list,
                             dim=0,
                         )
-                        b_query = (
-                            trg_query[b_idx] * blender_rate
-                            + src_query[b_idx] * (1 - blender_rate)
+                        b_query = blend_current_target_state(
+                            target=trg_query[b_idx],
+                            source=src_query[b_idx],
+                            blend_rate=blender_rate,
+                            edit_support=edit_qk_support,
                         )
                         b_target_output = attention(
                             b_query.unsqueeze(0),
@@ -484,7 +497,20 @@ class CausalWanSelfAttention(nn.Module):
                     #✨ masked-blended current target condition
                     b_trg_current_key = trg_current_key[b_idx]                                  # [Lq, Nh, Dk]
                     b_trg_current_value = trg_current_value[b_idx]                              # [Lq, Nh, Dk]
-                    b_trg_current_key = b_trg_current_key * blender_rate + src_current_key[b_idx] * (1 - blender_rate)
+                    edit_qk_support = (
+                        b_src_current_fg_mask
+                        if kv_cache["shared_dict"].get(
+                            "edit_qk_unblend",
+                            False,
+                        )
+                        else None
+                    )
+                    b_trg_current_key = blend_current_target_state(
+                        target=b_trg_current_key,
+                        source=src_current_key[b_idx],
+                        blend_rate=blender_rate,
+                        edit_support=edit_qk_support,
+                    )
                     b_key_list.append(b_trg_current_key)
                     b_value_list.append(b_trg_current_value)
 
@@ -493,7 +519,12 @@ class CausalWanSelfAttention(nn.Module):
                     b_trg_value = torch.cat(b_value_list, dim=0)
 
                     #✨ query blending
-                    b_query = trg_query[b_idx] * blender_rate + src_query[b_idx] * (1 - blender_rate)
+                    b_query = blend_current_target_state(
+                        target=trg_query[b_idx],
+                        source=src_query[b_idx],
+                        blend_rate=blender_rate,
+                        edit_support=edit_qk_support,
+                    )
                     b_target_output = attention(
                         b_query.unsqueeze(0),
                         b_trg_key.unsqueeze(0),
