@@ -2607,21 +2607,19 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     raise RuntimeError(
                         "Missing consolidated memory write plan"
                     )
-                _belief_preserve_action = (
-                    1.0
-                    - current_memory_plan
-                    .materialized_edit_action.reshape(
-                        current_belief_kv_weights
-                        .preserve_action.shape
-                    )
-                    if current_memory_plan is not None
-                    else current_belief_kv_weights
-                    .preserve_action.clone()
-                )
-                _belief_preserve_action[role_edit_tokens] = 0.0
                 self._update_belief_kv_weight_cache(
                     belief_kv_weight_cache,
-                    current_preserve_action=_belief_preserve_action,
+                    current_preserve_action=(
+                        1.0
+                        - current_memory_plan
+                        .materialized_edit_action.reshape(
+                            current_belief_kv_weights
+                            .preserve_action.shape
+                        )
+                        if current_memory_plan is not None
+                        else current_belief_kv_weights
+                        .preserve_action
+                    ),
                     kv_cache_trg=kv_cache_trg,
                 )
             self._kv_cache_to(kv_cache_trg, 'cpu', low_memory)
