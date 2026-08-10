@@ -2319,8 +2319,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 denoised_pred = noisy_pred_input - t_i * v_t
 
                 # Trajectory anchoring: pull object-region latents toward reference
+                # Disable with DISABLE_TRAJECTORY_ANCHOR=1 to test Bayes-only
                 if (
-                    reference_identity_enabled
+                    not os.environ.get("DISABLE_TRAJECTORY_ANCHOR")
+                    and reference_identity_enabled
                     and _reference_kv_cache is not None
                     and "ref_target_latent" in _reference_kv_cache
                     and target_identity_memory is not None
