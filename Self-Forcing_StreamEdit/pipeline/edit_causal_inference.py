@@ -990,9 +990,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
             self._prepend_reference_kv(
                 kv_cache_trg, _reference_kv_cache["trg"]
             )
+            self._prepend_reference_kv(
+                kv_cache_src, _reference_kv_cache["src"]
+            )
             print(
-                "REFERENCE_KV_INJECTED mode=target_only "
-                f"trg_tokens={_reference_kv_cache['trg'][0]['num_tokens']}"
+                "REFERENCE_KV_INJECTED mode=dual "
+                f"tokens={_reference_kv_cache['trg'][0]['num_tokens']}"
             )
         trg_fg_mask_cache = self._initialize_trg_fg_mask_cache(
             batch_size=batch_size,
@@ -1279,6 +1282,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
             ref_num_tokens = kv_cache_trg[0]["local_end_index"].item()
             _reference_kv_cache["trg"] = self._extract_reference_kv(
                 kv_cache_trg, ref_num_tokens
+            )
+            _reference_kv_cache["src"] = self._extract_reference_kv(
+                kv_cache_src, ref_num_tokens
             )
             _reference_kv_cache["ref_target_latent"] = (
                 trg_initial_latent.clone()
@@ -2622,6 +2628,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         .preserve_action
                     ),
                     kv_cache_trg=kv_cache_trg,
+                )
+            # Self-referencing anchor: treat block 0's target KV as a
+            # pure-target reference for subsequent blocks, analogous to
+            # reference KV in chunk 2+.
+            if (
+                belief_memory_enabled
+                and belief_kv_weight_cache is not None
+                and current_start_frame == num_input_frames
+            ):
+                _anchor_end = belief_kv_weight_cache[
+                    "local_end_index"
+                ].item()
+                belief_kv_weight_cache[
+                    "preserve_action"
+                ][:, :_anchor_end] = 0.0
+                print(
+                    f"SELF_REFERENCE_ANCHOR block=0 "
+                    f"tokens={_anchor_end}"
                 )
             self._kv_cache_to(kv_cache_trg, 'cpu', low_memory)
 
