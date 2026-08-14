@@ -1076,6 +1076,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
         tok_trg = find_phrase_token_indices(trans_tokenizer, trg_prompts, trg_trigger_words)
         print(tok_src, tok_trg)
 
+        # Offset for reference KV tokens prepended in chunk 2+
+        ref_kv_offset = (
+            _reference_kv_cache["trg"][0]["num_tokens"]
+            if reference_kv_available else 0
+        )
+
         # Step 2: Cache context feature
         current_start_frame = 0
         if trg_initial_latent is not None:
@@ -1119,7 +1125,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     timestep=context_timestep,
                     kv_cache=kv_cache_src,
                     crossattn_cache=crossattn_cache_src,
-                    current_start=left * self.frame_seq_length,
+                    current_start=left * self.frame_seq_length + ref_kv_offset,
                 )
                 _, src_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_src)
                 reference_source_features = None
@@ -1142,7 +1148,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     timestep=context_timestep,
                     kv_cache=kv_cache_trg,
                     crossattn_cache=crossattn_cache_trg,
-                    current_start=left * self.frame_seq_length,
+                    current_start=left * self.frame_seq_length + ref_kv_offset,
                 )
                 (
                     trg_fg_mask_soft,
@@ -1340,7 +1346,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 timestep=context_timestep,
                 kv_cache=kv_cache_src,
                 crossattn_cache=crossattn_cache_src,
-                current_start=current_start_frame * self.frame_seq_length,
+                current_start=current_start_frame * self.frame_seq_length + ref_kv_offset,
             )
             src_fg_mask_soft, src_fg_mask_bin, _, _ = (
                 self._aggregate_crossattn_mask(crossattn_cache_src)
@@ -1624,7 +1630,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     timestep=timestep,
                     kv_cache=kv_cache_dual,
                     crossattn_cache=crossattn_cache_dual,
-                    current_start=current_start_frame * self.frame_seq_length
+                    current_start=current_start_frame * self.frame_seq_length + ref_kv_offset
                 )
                 # for getting real output
                 t_i = current_timestep / 1000
@@ -2494,7 +2500,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 timestep=context_timestep,
                 kv_cache=kv_cache_trg,
                 crossattn_cache=crossattn_cache_trg,
-                current_start=current_start_frame * self.frame_seq_length,
+                current_start=current_start_frame * self.frame_seq_length + ref_kv_offset,
             )
             # #region debug-point B:target-kv-write
             if current_roles is not None:
@@ -2628,24 +2634,6 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         .preserve_action
                     ),
                     kv_cache_trg=kv_cache_trg,
-                )
-            # Self-referencing anchor: treat block 0's target KV as a
-            # pure-target reference for subsequent blocks, analogous to
-            # reference KV in chunk 2+.
-            if (
-                belief_memory_enabled
-                and belief_kv_weight_cache is not None
-                and current_start_frame == num_input_frames
-            ):
-                _anchor_end = belief_kv_weight_cache[
-                    "local_end_index"
-                ].item()
-                belief_kv_weight_cache[
-                    "preserve_action"
-                ][:, :_anchor_end] = 0.0
-                print(
-                    f"SELF_REFERENCE_ANCHOR block=0 "
-                    f"tokens={_anchor_end}"
                 )
             self._kv_cache_to(kv_cache_trg, 'cpu', low_memory)
 
