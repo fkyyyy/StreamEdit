@@ -2492,6 +2492,87 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         write_weight=identity_write_tokens,
                     )
                 )
+                # #region debug-point H17:identity-prototype-drift
+                _debug_anchor_states = getattr(
+                    target_identity_memory,
+                    "_debug_online_anchor_states",
+                    None,
+                )
+                if _debug_anchor_states is None:
+                    _debug_anchor_states = {
+                        layer: (
+                            state.key.detach().clone(),
+                            state.value.detach().clone(),
+                            state.evidence.detach().clone(),
+                        )
+                        for layer, state
+                        in target_identity_memory.export().items()
+                    }
+                    target_identity_memory._debug_online_anchor_states = (
+                        _debug_anchor_states
+                    )
+                _debug_key_cosines = []
+                _debug_value_cosines = []
+                for layer, state in (
+                    target_identity_memory.export().items()
+                ):
+                    (
+                        _debug_anchor_key,
+                        _debug_anchor_value,
+                        _debug_anchor_evidence,
+                    ) = _debug_anchor_states[layer]
+                    _debug_valid = (
+                        _debug_anchor_evidence.float()
+                        > target_identity_memory.eps
+                    )
+                    _debug_valid_count = (
+                        _debug_valid.sum().clamp_min(1)
+                    )
+                    _debug_key_cosines.append(
+                        (
+                            F.cosine_similarity(
+                                state.key.float(),
+                                _debug_anchor_key.float(),
+                                dim=-1,
+                            ).mean(dim=-1)
+                            * _debug_valid
+                        ).sum()
+                        / _debug_valid_count
+                    )
+                    _debug_value_cosines.append(
+                        (
+                            F.cosine_similarity(
+                                state.value.float(),
+                                _debug_anchor_value.float(),
+                                dim=-1,
+                            ).mean(dim=-1)
+                            * _debug_valid
+                        ).sum()
+                        / _debug_valid_count
+                    )
+                _debug_key_cosine = torch.stack(
+                    _debug_key_cosines
+                ).mean()
+                _debug_value_cosine = torch.stack(
+                    _debug_value_cosines
+                ).mean()
+                hand_role_debug[
+                    "identity_anchor_key_cosine"
+                ] = (
+                    torch.ones_like(
+                        hand_role_debug["object_posterior"]
+                    )
+                    * _debug_key_cosine
+                )
+                hand_role_debug[
+                    "identity_anchor_value_cosine"
+                ] = (
+                    torch.ones_like(
+                        hand_role_debug["object_posterior"]
+                    )
+                    * _debug_value_cosine
+                )
+                # #endregion
                 hand_role_debug["identity_write_weight"] = (
                     identity_write_tokens.reshape_as(
                         hand_role_debug["object_posterior"]

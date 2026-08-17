@@ -23,6 +23,14 @@
 | H9 | Residual routing exactly preserves background when preserve action is one | High | Low | Rejected: it leaves `v_trg-v_src`; block-0 background gap is 31.7% of target magnitude |
 | H10 | Q/K ablation changed source role inference rather than target generation | Medium | Low | Rejected: source attention, hand probability, and object posterior are bit-identical |
 | H11 | Target-side writeback amplifies the Q/K intervention over blocks | High | Low | Confirmed: identity-support map diverges after block 0 and reaches max difference 0.694 |
+| H12 | Latest poor reference output came from a prompt/script mismatch | Medium | Low | Rejected: local and remote scripts have identical SHA and use the Coca-Cola prompt |
+| H13 | Static first-frame trajectory anchoring is inactive because logs show zero strength | High | Low | Rejected: only step 0 is logged; the remaining 14 steps execute and produce up to 0.34 single-step pull |
+| H14 | Self-reference anchoring only marks the inferred object | High | Low | Rejected: it zeros preserve action for all 6240 cached tokens in chunk 1 and 9360 in chunk 2 |
+| H15 | Reference KV persistence has consistent dynamics across rollout chunks | High | Low | Rejected: target/source cosine drops from about 0.99 to 0.7598 at chunk 2 |
+| H16 | Text-only block 0 is generated under the same identity constraint as later blocks | High | Low | Rejected: block-0 identity read support is exactly zero; memory is created only after generation |
+| H17 | Text-only identity memory preserves the first generated identity as an anchor | High | Low | Rejected: later blocks update the prototype with gains 0.429, 0.256, and 0.250 |
+| H18 | Identity support remains aligned with the inferred object over time | High | Low | Rejected: identity-top to object-top overlap falls from 52.4% to 21.4-28.6% |
+| H19 | Identity support sufficiently releases source preservation | High | Low | Rejected: preserve action on identity-top tokens remains 0.64-0.79 and late object preserve reaches 0.89 |
 
 ## Log Evidence
 Instrumentation added for:
@@ -88,22 +96,79 @@ Ablation evidence from commits `37557f8` and `820c573`:
   action are no longer preserved. The pure-target Q/K ablation is rejected
   and reverted.
 
+Latest remote evidence from commit `347195e` on top of `cdb4111`:
+
+- The remote branch is 26 commits ahead of the last controlled baseline
+  `4c14854`. It contains multiple interleaved code and output commits for
+  reference KV persistence, identity velocity override, trajectory anchoring,
+  key reweighting, belief-cache overrides, and self-reference anchoring.
+- `ref_target_latent` is the single aligned first-frame target latent. It is
+  expanded to every generated frame and applied after every denoising step
+  using `0.4 * identity_mask * (1 - timestep)`.
+- Logging occurs only at denoising step 0, where progress is exactly zero.
+  Using the observed block-0 mask mean/peak, the 15-step cumulative pull is
+  approximately 0.34 globally on the dilated support and 0.93 at its peak.
+  Block 5 reaches approximately 0.36 mean and 0.94 peak cumulative pull.
+- Self-reference anchoring sets `preserve_action=0` for every cached token up
+  to `local_end_index`, not just object tokens. The runtime log reports 6240
+  affected tokens in chunk 1 and 9360 in chunk 2.
+- Reference keys are multiplied by 2.0 only when the persisted cache is
+  re-injected in chunk 2. At that boundary, target/source velocity cosine
+  drops from 0.9903 in the preceding block to 0.7598, while target/source gap
+  jumps from 0.3893 to 2.9963.
+- The underlying Bayes route remains source-heavy: preserve action is
+  0.925-0.962, late edit support reaches zero, and object-region preserve is
+  about 0.90-0.95. The new anchors bypass rather than repair this route.
+- `block_001_hand_role_debug.npz` is again overwritten by the overlap chunk,
+  so its apparent block index is not globally aligned.
+
+Text-only identity evidence from `907_reference_causal_ablation/prompt_only`:
+
+- Block 0 has zero identity read support and zero identity edit tokens. Its
+  generated target KV initializes identity memory only after the block is
+  complete, with update gain 1.0 and evidence 0.3361.
+- Blocks 1, 2, and 3 update that prototype with gains 0.4291, 0.2564, and
+  0.2503. By block 3, the original block-0 observation accounts for only
+  about one third of accumulated evidence.
+- Identity support grows from mean 0.0197 in block 1 to about 0.056 later,
+  so frame 0 and frames 10/20 are generated under structurally different
+  conditions.
+- Only 52.4%, 46.6%, and 47.2% of top identity tokens overlap top inferred
+  object tokens in blocks 1-3. The ratio falls to 21.4-28.6% in blocks 4-6.
+- Preserve action on top identity tokens is still 0.639-0.794. Late inferred
+  object preserve action rises to 0.817 and 0.891, exposing source identity.
+
 ## Verification Conclusion
 
-Current Q/K source blending is not simply an unwanted source bias. It is the
-motion and hand-geometry anchor. Removing it increases target semantics, but
-destroys source motion because the inferred edit support overlaps the hand
-and self-attention propagates the intervention nonlocally.
+The latest reference path is not a controlled implementation of one method.
+It combines a static latent trajectory pull, global first-block cache
+reclassification, reference-key norm scaling, cross-chunk KV reinjection,
+ordinary Bayes routing, and generated-target writeback. These mechanisms have
+different support domains and activate differently across rollout chunks.
+The poor result is therefore expected and cannot validate any single idea.
 
-The remaining failure must be solved without changing current Q/K. Appearance
-control should operate on target V or on the semantic velocity residual
-`v_trg-v_src`, while source Q/K continues to anchor motion. Target-side
-writeback must not consolidate an autonomously generated observation as new
-identity evidence.
+The last controlled baseline remains `4c14854`. Reference work should restart
+from that code state while retaining later output commits only as failed
+ablation evidence. Source Q/K must remain the motion anchor; reference should
+control appearance through one isolated mechanism at a time.
+
+For text-only editing, the current slow identity memory cannot guarantee
+first-to-later identity consistency. Block 0 is unconditioned, then becomes a
+low-evidence observation that is continuously averaged with later generated
+identities. The read support also drifts away from the inferred object while
+source preservation remains strong. Fixing only memory strength or only
+routing cannot remove this initialization asymmetry.
 
 ## Next Instrumentation
 
-- Keep the original scalar current Q/K blend.
-- Do not use generated prompt-only identity as authoritative evidence.
-- Design the next causal test on appearance-only V/semantic-delta control,
-  with target writeback disabled for the test so feedback cannot confound it.
+- Preserve the 26 remote commits; do not rewrite branch history.
+- Create a clean code baseline equivalent to `4c14854` while keeping the
+  latest Coca-Cola script and all output artifacts.
+- Reintroduce only reference KV persistence first, without trajectory anchor,
+  key scaling, self-reference anchoring, or source-KV cache reclassification.
+- Fix global debug block indexing before comparing cross-chunk behavior.
+- For text-only identity, causally separate initialization from online
+  adaptation: compare a frozen block-0 prototype against the current moving
+  average while keeping Q/K and Bayes routing unchanged.
+- Save prototype-to-block-0 key/value drift per layer before changing the
+  identity update rule.
