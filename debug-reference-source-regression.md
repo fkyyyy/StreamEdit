@@ -31,6 +31,9 @@
 | H17 | Text-only identity memory preserves the first generated identity as an anchor | High | Low | Rejected: later blocks update the prototype with gains 0.429, 0.256, and 0.250 |
 | H18 | Identity support remains aligned with the inferred object over time | High | Low | Rejected: identity-top to object-top overlap falls from 52.4% to 21.4-28.6% |
 | H19 | Identity support sufficiently releases source preservation | High | Low | Rejected: preserve action on identity-top tokens remains 0.64-0.79 and late object preserve reaches 0.89 |
+| H20 | Text-only prototype drift is primarily retrieval-key drift | High | Low | Rejected: K cosine stays at 0.974 while appearance V cosine falls to 0.843 |
+| H21 | The early ID change only occurs after crossing a block boundary | Medium | Low | Rejected: all three latent positions in block 0 have zero identity read while object-region source contribution/target rises from 0.466 to 0.712 |
+| H22 | Late blue-cap return is only a subjective visual impression | Medium | Low | Rejected: strong-blue target/source pixel ratio rises from 0.166 at pixel frame 0 to 0.925 at frame 44 and 1.031 at frame 60 |
 
 ## Log Evidence
 Instrumentation added for:
@@ -138,6 +141,35 @@ Text-only identity evidence from `907_reference_causal_ablation/prompt_only`:
 - Preserve action on top identity tokens is still 0.639-0.794. Late inferred
   object preserve action rises to 0.817 and 0.891, exposing source identity.
 
+Joint visual and quantitative evidence from commit `4efc443`,
+`outputs/907_text_only_fix`:
+
+- The rendered video contains 81 pixel frames decoded from 21 latent frames.
+  One 3-latent generation block covers approximately 12 rendered frames.
+- Pixel-frame crops show that rim, rib pattern, and aspect ratio already
+  change between pixel frames 0, 8, and 12. Source/target crops at pixel
+  frames 44, 56, and 60 show the target cap converging toward the source
+  cyan-blue cap.
+- All three block-0 latent positions have zero identity read support.
+  Within inferred object support, source contribution relative to target
+  magnitude rises from 0.466 to 0.576 and 0.712 across those positions.
+- Prototype K cosine to the first online state stays high:
+  1.000, 0.990, 0.986, 0.978, 0.975, 0.974, 0.974.
+  Prototype V cosine falls much faster:
+  1.000, 0.938, 0.909, 0.866, 0.849, 0.843, 0.843.
+- Later target observations rewrite the prototype with gains 0.438, 0.261,
+  0.252, 0.141, and 0.064. This is appearance adaptation, not a frozen
+  first-identity anchor.
+- Top identity support overlapping top object/commitment support falls from
+  48.1% in block 1 to 22.4%, 24.8%, and 26.1% in blocks 4-6.
+- Over the same interval, object-region preserve action rises from 0.616 in
+  block 4 to 0.824 and 0.903, while source-contribution/target rises from
+  0.441 to 0.618 and 0.693.
+- A diagnostic strong-blue pixel count in the lower-right interaction region
+  is 16.6% of the aligned source count at pixel frame 0, 92.5% at frame 44,
+  and 103.1% at frame 60. It is not a general evaluation metric, but directly
+  corroborates the visible source-cap return in this failure analysis.
+
 ## Verification Conclusion
 
 The latest reference path is not a controlled implementation of one method.
@@ -159,6 +191,21 @@ identities. The read support also drifts away from the inferred object while
 source preservation remains strong. Fixing only memory strength or only
 routing cannot remove this initialization asymmetry.
 
+The failure is now separated into three causal stages:
+
+1. Intra-block initialization asymmetry: block 0 jointly generates three
+   latent frames before any target identity state exists.
+2. Appearance contamination: the initial state pools an already inconsistent
+   3-frame block, and subsequent generated observations update V much more
+   strongly than K.
+3. Late routing failure: identity retrieval remains numerically active but
+   moves away from the inferred object while source preservation grows.
+
+Freezing the whole block-0 prototype is not yet justified. It would freeze an
+aggregate over three inconsistent latent frames rather than the rendered
+first-frame identity. A valid text-only identity anchor must be initialized
+from one causal target latent before the remaining first block is generated.
+
 ## Next Instrumentation
 
 - Preserve the 26 remote commits; do not rewrite branch history.
@@ -172,3 +219,10 @@ routing cannot remove this initialization asymmetry.
   average while keeping Q/K and Bayes routing unchanged.
 - Save prototype-to-block-0 key/value drift per layer before changing the
   identity update rule.
+- Replace the previous frozen-block-0 proposal with a stricter single-variable
+  experiment: generate one target latent first, initialize appearance V from
+  that latent, then generate the remaining two first-block latents. Keep K
+  adaptation, Q/K source blending, Bayes routing, and later write policy
+  unchanged for the first ablation.
+- Do not add a hard identity mask or increase identity strength until that
+  causal initialization ablation is evaluated.
