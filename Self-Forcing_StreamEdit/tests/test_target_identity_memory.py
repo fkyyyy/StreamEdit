@@ -73,6 +73,45 @@ def _reference_inputs():
     return source, target, attention
 
 
+def test_first_latent_identity_schedule_splits_only_first_block():
+    schedule = identity_module.build_first_latent_identity_schedule(
+        num_blocks=3,
+        num_frame_per_block=3,
+        enabled=True,
+    )
+
+    assert schedule == (1, 2, 3, 3)
+    assert sum(schedule) == 9
+
+
+def test_first_latent_identity_schedule_preserves_legacy_path():
+    assert identity_module.build_first_latent_identity_schedule(
+        num_blocks=3,
+        num_frame_per_block=3,
+        enabled=False,
+    ) == (3, 3, 3)
+    assert identity_module.build_first_latent_identity_schedule(
+        num_blocks=3,
+        num_frame_per_block=1,
+        enabled=True,
+    ) == (1, 1, 1)
+
+
+def test_first_latent_identity_schedule_validates_dimensions():
+    with pytest.raises(ValueError, match="num_blocks"):
+        identity_module.build_first_latent_identity_schedule(
+            num_blocks=-1,
+            num_frame_per_block=3,
+            enabled=True,
+        )
+    with pytest.raises(ValueError, match="num_frame_per_block"):
+        identity_module.build_first_latent_identity_schedule(
+            num_blocks=1,
+            num_frame_per_block=0,
+            enabled=True,
+        )
+
+
 def test_reference_bootstrap_localizes_semantic_latent_change():
     source, target, attention = _reference_inputs()
 

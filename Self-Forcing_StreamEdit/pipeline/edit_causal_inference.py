@@ -31,6 +31,7 @@ from .memory_consolidation import (
 from .target_identity_memory import (
     SlowTargetIdentityMemory,
     TargetIdentityUpdate,
+    build_first_latent_identity_schedule,
     build_reference_identity_bootstrap,
     strengthen_belief_with_target_identity,
 )
@@ -117,6 +118,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         rollout_chunk_size: int = 21,
         rollout_overlap_block_num: int = 1,
         routing_mode: str = "dynamic_sog",
+        identity_first_latent_bootstrap: bool = False,
         oracle_object_mask: Optional[torch.Tensor] = None,
         oracle_hand_mask: Optional[torch.Tensor] = None,
         hand_only_mask: Optional[torch.Tensor] = None,
@@ -199,6 +201,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
                 blend_power=blend_power,
                 routing_mode=routing_mode,
+                identity_first_latent_bootstrap=(
+                    identity_first_latent_bootstrap
+                ),
                 oracle_object_mask=oracle_object_mask,
                 oracle_hand_mask=oracle_hand_mask,
                 hand_only_mask=hand_only_mask,
@@ -384,6 +389,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
                 blend_power=blend_power,
                 routing_mode=routing_mode,
+                identity_first_latent_bootstrap=(
+                    identity_first_latent_bootstrap
+                ),
                 oracle_object_mask=rollout_object_mask,
                 oracle_hand_mask=rollout_hand_mask,
                 hand_only_mask=rollout_hand_only_mask,
@@ -489,6 +497,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         fg_scale=1.0,
         reuse_noise_temporal_mean=True,
         routing_mode: str = "dynamic_sog",
+        identity_first_latent_bootstrap: bool = False,
         oracle_object_mask: Optional[torch.Tensor] = None,
         oracle_hand_mask: Optional[torch.Tensor] = None,
         hand_only_mask: Optional[torch.Tensor] = None,
@@ -605,6 +614,21 @@ class EditCausalInferencePipeline(torch.nn.Module):
         reference_identity_enabled = (
             routing_mode == "hand_role_bayes_flow_customized_kv"
         )
+        if (
+            identity_first_latent_bootstrap
+            and routing_mode != "hand_role_bayes_flow_identity_kv"
+        ):
+            raise ValueError(
+                "First-latent identity bootstrap requires "
+                "routing_mode=hand_role_bayes_flow_identity_kv"
+            )
+        if identity_first_latent_bootstrap and (
+            independent_first_frame or triple_first_frame
+        ):
+            raise ValueError(
+                "First-latent identity bootstrap cannot be combined with "
+                "an explicit first-frame condition"
+            )
         belief_memory_enabled = (
             aligned_belief_kv_enabled
             or memory_consolidation_enabled
@@ -1224,13 +1248,36 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
         # Step 3: Temporal denoising loop
         denoising_step_list = self.denoising_step_list
-        all_num_frames = [self.num_frame_per_block] * num_blocks
+        split_first_identity_block = (
+            identity_first_latent_bootstrap
+            and self.num_frame_per_block > 1
+            and num_input_frames == 0
+            and not target_identity_memory.export()
+        )
+        all_num_frames = list(
+            build_first_latent_identity_schedule(
+                num_blocks=num_blocks,
+                num_frame_per_block=self.num_frame_per_block,
+                enabled=split_first_identity_block,
+            )
+        )
         if independent_first_frame and trg_initial_latent is None:
             all_num_frames = [1] + all_num_frames
+        if split_first_identity_block:
+            print(
+                "TARGET_IDENTITY_FIRST_LATENT_SCHEDULE "
+                f"segments={all_num_frames[:2]} "
+                f"total_frames={sum(all_num_frames)}"
+            )
         for current_num_frames in tqdm(all_num_frames):
             if profile:
                 block_start.record()
 
+            is_identity_bootstrap_segment = (
+                split_first_identity_block
+                and current_start_frame == 0
+                and current_num_frames == 1
+            )
             src_input = src_video[
                 :, current_start_frame - num_input_frames:current_start_frame + current_num_frames - num_input_frames]
             denoised_pred = src_input
@@ -2578,6 +2625,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         hand_role_debug["object_posterior"]
                     )
                 )
+                if is_identity_bootstrap_segment:
+                    hand_role_debug[
+                        "identity_first_latent_bootstrap"
+                    ] = torch.ones_like(
+                        hand_role_debug["object_posterior"]
+                    )
                 print(
                     "TARGET_IDENTITY_WRITE "
                     "block="
@@ -2591,12 +2644,26 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     "accumulated_evidence="
                     f"{current_identity_update.accumulated_evidence.mean().item():.4f}"
                 )
+                if is_identity_bootstrap_segment:
+                    print(
+                        "TARGET_IDENTITY_FIRST_LATENT_BOOTSTRAP "
+                        "frame=0 "
+                        "write_weight="
+                        f"{identity_write_tokens.mean().item():.4f} "
+                        "evidence="
+                        f"{current_identity_update.accumulated_evidence.mean().item():.4f}"
+                    )
                 if save_role_dir is not None:
                     self._save_hand_role_debug(
                         save_role_dir,
                         current_start_frame
                         // self.num_frame_per_block,
                         hand_role_debug,
+                        artifact_suffix=(
+                            "_identity_bootstrap"
+                            if is_identity_bootstrap_segment
+                            else ""
+                        ),
                     )
             #✨ store clean target kv cache, and obtain clean target mask
             _, trg_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_trg)
@@ -2715,11 +2782,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
         save_dir,
         block_index,
         debug,
+        artifact_suffix="",
     ):
         np.savez_compressed(
             os.path.join(
                 save_dir,
-                f"block_{block_index:03d}_hand_role_debug.npz",
+                "block_"
+                f"{block_index:03d}{artifact_suffix}"
+                "_hand_role_debug.npz",
             ),
             **{
                 name: value.detach().float().cpu().numpy()
@@ -2738,7 +2808,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
             ).save(
                 os.path.join(
                     save_dir,
-                    f"block_{block_index:03d}_{name}.png",
+                    "block_"
+                    f"{block_index:03d}{artifact_suffix}_{name}.png",
                 )
             )
 
@@ -3131,8 +3202,25 @@ class EditCausalInferencePipeline(torch.nn.Module):
             if step_idx not in self.noise_temporal_mean.keys():
                 self.noise_temporal_mean[step_idx] = noise
             else:
-                noise = self.noise_temporal_mean[step_idx].flip(1) * alpha_prog / (1 + alpha_prog ** 2) ** 0.5 + \
-                    noise * 1 / (1 + alpha_prog ** 2) ** 0.5
+                previous_noise = self.noise_temporal_mean[step_idx]
+                if previous_noise.shape[1] != noise.shape[1]:
+                    previous_noise = previous_noise.mean(
+                        dim=1,
+                        keepdim=True,
+                    ).expand(
+                        -1,
+                        noise.shape[1],
+                        -1,
+                        -1,
+                        -1,
+                    )
+                noise_normalizer = (1 + alpha_prog ** 2) ** 0.5
+                noise = (
+                    previous_noise.flip(1)
+                    * alpha_prog
+                    / noise_normalizer
+                    + noise / noise_normalizer
+                )
                 self.noise_temporal_mean[step_idx] = noise
         
         return noise

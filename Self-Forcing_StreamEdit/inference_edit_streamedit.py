@@ -179,6 +179,15 @@ if __name__ == '__main__':
         ],
         default="dynamic_sog",
     )
+    parser.add_argument(
+        "--identity_first_latent_bootstrap",
+        action="store_true",
+        default=False,
+        help=(
+            "Generate one target latent before the rest of the first block "
+            "to initialize text-only target identity memory."
+        ),
+    )
     parser.add_argument("--object_mask_video", type=str, default=None)
     parser.add_argument("--hand_mask_video", type=str, default=None)
     parser.add_argument("--mask_white_threshold", type=int, default=245)
@@ -377,6 +386,21 @@ if __name__ == '__main__':
         parser.error(
             "Customized reference mode requires one independent "
             "reference frame; do not use --triple_first_frame"
+        )
+    if (
+        args.identity_first_latent_bootstrap
+        and args.routing_mode != "hand_role_bayes_flow_identity_kv"
+    ):
+        parser.error(
+            "--identity_first_latent_bootstrap requires "
+            "--routing_mode hand_role_bayes_flow_identity_kv"
+        )
+    if args.identity_first_latent_bootstrap and (
+        args.first_frame_edit is not None or args.triple_first_frame
+    ):
+        parser.error(
+            "--identity_first_latent_bootstrap cannot be combined with "
+            "an explicit first-frame condition"
         )
     if not 0.0 <= args.contact_target_weight <= 1.0:
         parser.error("--contact_target_weight must be in [0, 1]")
@@ -585,6 +609,9 @@ if __name__ == '__main__':
         rollout_chunk_size=args.rollout_chunk_size,
         rollout_overlap_block_num=args.rollout_overlap_block_num,
         routing_mode=args.routing_mode,
+        identity_first_latent_bootstrap=(
+            args.identity_first_latent_bootstrap
+        ),
         oracle_object_mask=(
             None
             if object_latent_mask is None

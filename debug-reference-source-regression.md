@@ -206,6 +206,57 @@ aggregate over three inconsistent latent frames rather than the rendered
 first-frame identity. A valid text-only identity anchor must be initialized
 from one causal target latent before the remaining first block is generated.
 
+## Fix Attempt: First-Latent Identity Bootstrap
+
+The first controlled text-only fix adds an explicit
+`--identity_first_latent_bootstrap` ablation. It changes only the first
+generation schedule from:
+
+```text
+[3, 3, 3, ...]
+```
+
+to:
+
+```text
+[1, 2, 3, 3, ...]
+```
+
+The first latent is generated and materialized into target KV and identity
+memory before the other two latents of the original first block are
+generated. Total latent count and output alignment are unchanged. The split
+is enabled only for `hand_role_bayes_flow_identity_kv`, only when there is no
+explicit first-frame input, and only while identity memory is empty. Later
+rollout chunks therefore retain the original 3-frame schedule.
+
+Unchanged controls:
+
+- source/target Q/K blending;
+- Bayes residual routing;
+- K and V online update equations;
+- hand-only role inference;
+- commitment and consolidation update equations;
+- all later 3-frame generation blocks.
+
+The existing noise-reuse cache stored the full temporal tensor and therefore
+could not broadcast from a 2-latent remainder to the next 3-latent block. For
+variable-length bootstrap segments only, cached noise is reduced to its
+temporal mean and expanded to the requested length. The ordinary 3-to-3 path
+is unchanged.
+
+Post-fix evidence to verify:
+
+- `TARGET_IDENTITY_FIRST_LATENT_SCHEDULE segments=[1, 2]` appears exactly
+  once in the full rollout.
+- `block_000_identity_bootstrap_hand_role_debug.npz` exists and has nonzero
+  `identity_write_weight`.
+- The following two-latent segment has nonzero `identity_read_support`.
+- The 81-frame rendered output remains aligned with the source action.
+- Pixel frames 0-12 have more stable rim, rib pattern, and aspect ratio.
+- Late blue-cap behavior is measured separately; this fix targets the
+  initialization failure and is not expected by itself to repair late
+  support/routing collapse.
+
 ## Next Instrumentation
 
 - Preserve the 26 remote commits; do not rewrite branch history.
@@ -219,10 +270,7 @@ from one causal target latent before the remaining first block is generated.
   average while keeping Q/K and Bayes routing unchanged.
 - Save prototype-to-block-0 key/value drift per layer before changing the
   identity update rule.
-- Replace the previous frozen-block-0 proposal with a stricter single-variable
-  experiment: generate one target latent first, initialize appearance V from
-  that latent, then generate the remaining two first-block latents. Keep K
-  adaptation, Q/K source blending, Bayes routing, and later write policy
-  unchanged for the first ablation.
+- Run the first-latent identity bootstrap as a strict single-variable
+  experiment and compare its first 12 rendered frames to commit `4efc443`.
 - Do not add a hard identity mask or increase identity strength until that
   causal initialization ablation is evaluated.

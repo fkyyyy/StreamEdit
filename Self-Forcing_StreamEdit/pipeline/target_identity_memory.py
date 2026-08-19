@@ -8,6 +8,22 @@ import torch.nn.functional as F
 from .control_belief import CausalControlBelief
 
 
+def build_first_latent_identity_schedule(
+    num_blocks: int,
+    num_frame_per_block: int,
+    enabled: bool,
+) -> tuple[int, ...]:
+    """Split only the first block so one latent can seed identity memory."""
+    if num_blocks < 0:
+        raise ValueError("num_blocks must be non-negative")
+    if num_frame_per_block <= 0:
+        raise ValueError("num_frame_per_block must be positive")
+    schedule = [num_frame_per_block] * num_blocks
+    if enabled and schedule and num_frame_per_block > 1:
+        schedule[:1] = [1, num_frame_per_block - 1]
+    return tuple(schedule)
+
+
 @dataclass(frozen=True)
 class TargetIdentityLayerState:
     """Slow, position-free target appearance prototypes for one layer."""
