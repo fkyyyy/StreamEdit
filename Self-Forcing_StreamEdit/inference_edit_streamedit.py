@@ -210,8 +210,8 @@ if __name__ == '__main__':
         action="store_true",
         default=False,
         help=(
-            "Rejected negative ablation. This option now fails fast because "
-            "it changes the native block schedule and noise trajectory."
+            "Seed target identity from the first latent after denoising "
+            "step zero, then apply it causally within the first block."
         ),
     )
     parser.add_argument(
@@ -466,11 +466,6 @@ if __name__ == '__main__':
         parser.error(
             "Customized reference mode requires one independent "
             "reference frame; do not use --triple_first_frame"
-        )
-    if args.identity_first_latent_bootstrap:
-        parser.error(
-            "--identity_first_latent_bootstrap was rejected because it "
-            "breaks native 3-frame denoising; use the native schedule."
         )
     if not -1.0 < args.identity_tokenprop_min_similarity < 1.0:
         parser.error(

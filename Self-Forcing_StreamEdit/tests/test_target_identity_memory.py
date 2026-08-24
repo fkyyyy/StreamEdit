@@ -149,6 +149,131 @@ def test_token_propagation_keeps_stable_support_across_blocks():
     assert second.write_weight[0, 1].item() == 0.0
 
 
+def test_connected_support_removes_detached_regions_and_tracks_forward():
+    support = torch.zeros((1, 2, 6, 7), dtype=torch.float32)
+    support[0, 0, 2, 2:4] = 0.9
+    support[0, 0, 0, 6] = 1.0
+    support[0, 1, 2, 3:5] = 0.8
+    support[0, 1, 5, 0] = 1.0
+    anchor = torch.zeros_like(support, dtype=torch.bool)
+    anchor[0, 0, 2, 2] = True
+    support_filter = identity_module.CausalConnectedSupportFilter(
+        min_weight=0.05,
+        temporal_radius=1,
+        max_anchor_ratio=4.0,
+        min_area_fraction=0.01,
+        max_area_fraction=0.5,
+    )
+
+    result = support_filter(support, anchor)
+
+    assert result.keep_mask[0, 0, 2, 2:4].all()
+    assert not result.keep_mask[0, 0, 0, 6]
+    assert result.keep_mask[0, 1, 2, 3:5].all()
+    assert not result.keep_mask[0, 1, 5, 0]
+    assert torch.count_nonzero(result.weight) == 4
+
+
+def test_connected_support_caps_area_growth():
+    support = torch.ones((1, 1, 10, 10), dtype=torch.float32)
+    anchor = torch.zeros_like(support, dtype=torch.bool)
+    anchor[0, 0, 5, 5] = True
+    support_filter = identity_module.CausalConnectedSupportFilter(
+        max_anchor_ratio=2.0,
+        min_area_fraction=0.01,
+        max_area_fraction=0.20,
+    )
+
+    result = support_filter(support, anchor)
+
+    assert torch.count_nonzero(result.keep_mask) == 2
+    assert result.budget_fraction.item() == pytest.approx(0.02)
+
+
+def test_connected_support_weak_anchor_does_not_shrink_previous_area():
+    support = torch.zeros((1, 2, 6, 8), dtype=torch.float32)
+    support[0, 0, 2, 1:7] = 0.9
+    support[0, 1, 2, 2:8] = 0.9
+    anchor = torch.zeros_like(support, dtype=torch.bool)
+    anchor[0, 0, 2, 1:4] = True
+    anchor[0, 1, 2, 2] = True
+    support_filter = identity_module.CausalConnectedSupportFilter(
+        temporal_radius=1,
+        max_anchor_ratio=2.0,
+        min_area_fraction=0.01,
+        max_area_fraction=0.5,
+    )
+
+    result = support_filter(support, anchor)
+
+    assert torch.count_nonzero(result.keep_mask[0, 0]) == 6
+    assert torch.count_nonzero(result.keep_mask[0, 1]) == 6
+
+
+def test_connected_support_survives_one_empty_observation():
+    support_filter = identity_module.CausalConnectedSupportFilter(
+        temporal_radius=1,
+        min_area_fraction=0.01,
+        max_area_fraction=0.5,
+    )
+    initial = torch.zeros((1, 1, 5, 6), dtype=torch.float32)
+    initial[0, 0, 2, 1:3] = 0.9
+    initial_anchor = torch.zeros_like(initial, dtype=torch.bool)
+    initial_anchor[0, 0, 2, 1] = True
+    support_filter(initial, initial_anchor)
+
+    resumed = torch.zeros((1, 2, 5, 6), dtype=torch.float32)
+    resumed[0, 1, 2, 2:4] = 0.8
+    result = support_filter(
+        resumed,
+        torch.zeros_like(resumed, dtype=torch.bool),
+    )
+
+    assert torch.count_nonzero(result.keep_mask[0, 0]) == 0
+    assert result.keep_mask[0, 1, 2, 2:4].all()
+
+
+def test_causal_first_frame_bootstrap_uses_only_target_first_frame():
+    source_key = torch.tensor(
+        [[[[1.0, 0.0]]] * 6],
+        dtype=torch.float32,
+    )
+    target_key = torch.tensor(
+        [[[[1.0, 0.0]]] * 6],
+        dtype=torch.float32,
+    )
+    source_value = torch.full_like(source_key, -10.0)
+    target_value = torch.full_like(target_key, 100.0)
+    target_value[:, :2] = 5.0
+    cache = _cache(
+        torch.cat([source_key, target_key], dim=0),
+        torch.cat([source_value, target_value], dim=0),
+    )
+    memory = identity_module.SlowTargetIdentityMemory(
+        layers=(0,),
+        num_prototypes=1,
+    )
+
+    update = memory.bootstrap_causal_first_frame(
+        kv_cache=cache,
+        write_weight=torch.ones((1, 6)),
+        num_frames=3,
+        target_batch_start=1,
+    )
+
+    assert torch.equal(
+        update.write_weight,
+        torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0, 0.0]]),
+    )
+    assert torch.allclose(
+        memory.states[0].value,
+        torch.full_like(memory.states[0].value, 5.0),
+    )
+    assert memory.causal_first_frame_bootstrapped
+    memory.discard_causal_first_frame_state()
+    assert not memory.states
+
+
 def test_committed_memory_feedback_updates_current_belief():
     belief = _belief(edit=0.1, preserve=1.0)
     hand = torch.zeros((1, 1, 4, 4), dtype=torch.float32)

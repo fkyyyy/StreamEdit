@@ -7,8 +7,8 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 DATA_PATH="${DATA_PATH:-$REPO_ROOT/source_video.mp4}"
 HAND_MASK="${HAND_MASK:-$REPO_ROOT/hand_mask.mp4}"
 ROUTING_MODE="${ROUTING_MODE:-hand_role_bayes_flow_tokenprop_kv}"
-OUTPUT_NAME="${OUTPUT_NAME:-907-bayes-tokenprop-kv.mp4}"
-OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/907_tokenprop_overlay_hand_mask}"
+OUTPUT_NAME="${OUTPUT_NAME:-907-bayes-tokenprop-bootstrap-kv.mp4}"
+OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/907_tokenprop_bootstrap_connected_hand_mask}"
 STEP="${STEP:-15}"
 CUDA_DEVICE="${CUDA_DEVICE:-0}"
 HAND_MASK_MODE="${HAND_MASK_MODE:-overlay_white}"
@@ -32,6 +32,7 @@ python inference_edit_streamedit.py \
   --save_path "$OUTDIR/$OUTPUT_NAME" \
   --save_role_dir "$OUTDIR/roles" \
   --routing_mode "$ROUTING_MODE" \
+  --identity_first_latent_bootstrap \
   --contact_graph_mode no_graph \
   --hand_query_layers 8 12 16 20 \
   --mask_white_threshold 245 \

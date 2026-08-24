@@ -158,6 +158,295 @@ class TargetIdentityTokenPropagation:
             )
 
 
+@dataclass(frozen=True)
+class ConnectedIdentitySupport:
+    """Spatially coherent causal support retained for identity transport."""
+
+    weight: torch.Tensor
+    candidate_mask: torch.Tensor
+    keep_mask: torch.Tensor
+    anchor_mask: torch.Tensor
+    budget_fraction: torch.Tensor
+
+    def validate(self) -> None:
+        if self.weight.ndim != 4:
+            raise ValueError(
+                "Connected support weight must have shape [B,T,H,W]"
+            )
+        expected_shape = self.weight.shape
+        for name, value in (
+            ("candidate_mask", self.candidate_mask),
+            ("keep_mask", self.keep_mask),
+            ("anchor_mask", self.anchor_mask),
+        ):
+            if value.shape != expected_shape:
+                raise ValueError(
+                    f"Connected support '{name}' must match [B,T,H,W]"
+                )
+        if self.budget_fraction.shape != expected_shape[:2] + (1, 1):
+            raise ValueError(
+                "Connected support budget must have shape [B,T,1,1]"
+            )
+        if not torch.isfinite(self.weight.float()).all():
+            raise ValueError("Connected support weight is not finite")
+        if self.weight.min() < 0 or self.weight.max() > 1:
+            raise ValueError(
+                "Connected support weight must lie in [0, 1]"
+            )
+
+
+class CausalConnectedSupportFilter:
+    """Keep one causal object component and bound support-area growth."""
+
+    def __init__(
+        self,
+        min_weight: float = 0.05,
+        temporal_radius: int = 3,
+        max_anchor_ratio: float = 2.0,
+        min_area_fraction: float = 0.02,
+        max_area_fraction: float = 0.20,
+    ):
+        if not 0.0 < min_weight < 1.0:
+            raise ValueError("min_weight must lie in (0, 1)")
+        if temporal_radius < 0:
+            raise ValueError("temporal_radius must be non-negative")
+        if max_anchor_ratio < 1.0:
+            raise ValueError("max_anchor_ratio must be at least 1")
+        if not 0.0 < min_area_fraction <= max_area_fraction <= 1.0:
+            raise ValueError(
+                "Support area fractions must satisfy 0 < min <= max <= 1"
+            )
+        self.min_weight = float(min_weight)
+        self.temporal_radius = int(temporal_radius)
+        self.max_anchor_ratio = float(max_anchor_ratio)
+        self.min_area_fraction = float(min_area_fraction)
+        self.max_area_fraction = float(max_area_fraction)
+        self.previous_mask: torch.Tensor | None = None
+
+    @staticmethod
+    def _dilate(mask: torch.Tensor, radius: int) -> torch.Tensor:
+        if radius <= 0:
+            return mask.bool()
+        return (
+            F.max_pool2d(
+                mask.float()[None, None],
+                kernel_size=2 * radius + 1,
+                stride=1,
+                padding=radius,
+            )[0, 0]
+            > 0
+        )
+
+    def _select_seed(
+        self,
+        weight: torch.Tensor,
+        candidate: torch.Tensor,
+        anchor: torch.Tensor,
+        previous: torch.Tensor | None,
+    ) -> torch.Tensor:
+        searches = []
+        if previous is not None and previous.any():
+            searches.append(
+                self._dilate(previous, self.temporal_radius)
+            )
+        if anchor.any():
+            searches.append(
+                self._dilate(anchor, self.temporal_radius)
+            )
+        eligible = torch.zeros_like(candidate)
+        for search in searches:
+            eligible = candidate & search
+            if eligible.any():
+                break
+        if not eligible.any() and searches:
+            combined_search = torch.stack(searches).any(dim=0)
+            eligible = candidate & self._dilate(
+                combined_search,
+                self.temporal_radius,
+            )
+        if not eligible.any():
+            if searches or not candidate.any():
+                return torch.zeros_like(candidate)
+            eligible = candidate
+        score = weight.masked_fill(~eligible, -1.0)
+        seed = torch.zeros_like(candidate)
+        seed.flatten()[score.flatten().argmax()] = True
+        return seed
+
+    def _connected_component(
+        self,
+        candidate: torch.Tensor,
+        seed: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        max_hops = candidate.shape[-2] + candidate.shape[-1]
+        unreachable = max_hops + 1
+        distance = torch.full(
+            candidate.shape,
+            unreachable,
+            dtype=torch.long,
+            device=candidate.device,
+        )
+        reached = seed & candidate
+        distance = torch.where(
+            reached,
+            torch.zeros_like(distance),
+            distance,
+        )
+        for hop in range(1, max_hops + 1):
+            expanded = candidate & self._dilate(reached, 1)
+            newly_reached = expanded & ~reached
+            distance = torch.where(
+                newly_reached,
+                torch.full_like(distance, hop),
+                distance,
+            )
+            reached = expanded
+        return reached, distance
+
+    def _area_budget(
+        self,
+        anchor: torch.Tensor,
+        previous: torch.Tensor | None,
+    ) -> int:
+        total = anchor.numel()
+        minimum = max(
+            1,
+            math.ceil(total * self.min_area_fraction),
+        )
+        maximum = max(
+            minimum,
+            math.floor(total * self.max_area_fraction),
+        )
+        anchor_count = int(anchor.sum().item())
+        previous_count = (
+            0 if previous is None else int(previous.sum().item())
+        )
+        if anchor_count > 0:
+            anchor_budget = math.ceil(
+                max(anchor_count, minimum) * self.max_anchor_ratio
+            )
+            budget = max(anchor_budget, previous_count)
+        elif previous_count > 0:
+            budget = max(previous_count, minimum)
+        else:
+            budget = minimum
+        return min(maximum, budget)
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        support_weight: torch.Tensor,
+        anchor_mask: torch.Tensor,
+    ) -> ConnectedIdentitySupport:
+        if support_weight.ndim != 4:
+            raise ValueError(
+                "support_weight must have shape [B,T,H,W]"
+            )
+        if anchor_mask.shape != support_weight.shape:
+            raise ValueError(
+                "anchor_mask and support_weight must share shape"
+            )
+        support = support_weight.detach().float().clamp(0.0, 1.0)
+        anchor = anchor_mask.detach().bool()
+        candidate = support > self.min_weight
+        keep = torch.zeros_like(candidate)
+        budget_fraction = support.new_zeros(
+            support.shape[:2] + (1, 1)
+        )
+        previous = (
+            None
+            if self.previous_mask is None
+            else self.previous_mask.to(device=support.device)
+        )
+        if previous is not None and previous.shape != (
+            support.shape[0],
+            *support.shape[-2:],
+        ):
+            raise ValueError(
+                "Previous connected support is incompatible with input"
+            )
+        next_previous = torch.zeros(
+            (
+                support.shape[0],
+                *support.shape[-2:],
+            ),
+            dtype=torch.bool,
+            device=support.device,
+        )
+
+        for batch_index in range(support.shape[0]):
+            previous_frame = (
+                None
+                if previous is None
+                else previous[batch_index]
+            )
+            for frame_index in range(support.shape[1]):
+                frame_candidate = candidate[
+                    batch_index,
+                    frame_index,
+                ]
+                frame_anchor = anchor[
+                    batch_index,
+                    frame_index,
+                ]
+                seed = self._select_seed(
+                    support[batch_index, frame_index],
+                    frame_candidate,
+                    frame_anchor,
+                    previous_frame,
+                )
+                connected, distance = self._connected_component(
+                    frame_candidate,
+                    seed,
+                )
+                budget = self._area_budget(
+                    frame_anchor,
+                    previous_frame,
+                )
+                connected_count = int(connected.sum().item())
+                if connected_count > budget:
+                    max_hops = (
+                        frame_candidate.shape[-2]
+                        + frame_candidate.shape[-1]
+                    )
+                    rank = (
+                        (max_hops + 1 - distance).float() * 2.0
+                        + support[batch_index, frame_index]
+                    ).masked_fill(~connected, -1.0)
+                    selected = torch.topk(
+                        rank.flatten(),
+                        k=budget,
+                    ).indices
+                    frame_keep = torch.zeros_like(
+                        frame_candidate.flatten()
+                    )
+                    frame_keep[selected] = True
+                    frame_keep = frame_keep.reshape_as(
+                        frame_candidate
+                    )
+                else:
+                    frame_keep = connected
+                keep[batch_index, frame_index] = frame_keep
+                budget_fraction[batch_index, frame_index] = (
+                    float(budget) / frame_candidate.numel()
+                )
+                if frame_keep.any():
+                    previous_frame = frame_keep
+            if previous_frame is not None:
+                next_previous[batch_index] = previous_frame
+
+        self.previous_mask = next_previous.detach().cpu()
+        result = ConnectedIdentitySupport(
+            weight=(support * keep.float()).clamp(0.0, 1.0),
+            candidate_mask=candidate,
+            keep_mask=keep,
+            anchor_mask=anchor,
+            budget_fraction=budget_fraction,
+        )
+        result.validate()
+        return result
+
+
 class CausalObjectTokenPropagator:
     """Gate identity writes by matching current source tokens to prior ones."""
 
@@ -732,6 +1021,7 @@ class SlowTargetIdentityMemory:
         self.eps = eps
         self.states: Dict[int, TargetIdentityLayerState] = {}
         self.reference_bootstrapped = False
+        self.causal_first_frame_bootstrapped = False
 
     @staticmethod
     def _descriptor(key: torch.Tensor) -> torch.Tensor:
@@ -926,6 +1216,7 @@ class SlowTargetIdentityMemory:
         self,
         kv_cache,
         write_weight: torch.Tensor,
+        batch_slice: slice | None = None,
     ) -> TargetIdentityUpdate:
         if write_weight.ndim != 2:
             raise ValueError(
@@ -955,6 +1246,14 @@ class SlowTargetIdentityMemory:
                 :,
                 local_end - num_new_tokens:local_end,
             ]
+            if batch_slice is not None:
+                key = key[batch_slice]
+                value = value[batch_slice]
+            if key.shape[0] != write_weight.shape[0]:
+                raise ValueError(
+                    "Identity KV batch and write weights must align: "
+                    f"{key.shape[0]} != {write_weight.shape[0]}"
+                )
             previous = self.states.get(layer)
             (
                 observed_key,
@@ -1031,6 +1330,67 @@ class SlowTargetIdentityMemory:
         )
         update.validate()
         return update
+
+    @torch.no_grad()
+    def bootstrap_causal_first_frame(
+        self,
+        kv_cache,
+        write_weight: torch.Tensor,
+        num_frames: int,
+        target_batch_start: int,
+    ) -> TargetIdentityUpdate:
+        """Seed identity from frame zero for later steps of the same block."""
+        if self.states:
+            raise RuntimeError(
+                "Causal first-frame bootstrap requires empty identity state"
+            )
+        if self.causal_first_frame_bootstrapped:
+            raise RuntimeError(
+                "Causal first-frame identity was already bootstrapped"
+            )
+        if num_frames <= 1:
+            raise ValueError(
+                "Causal first-frame bootstrap requires multiple frames"
+            )
+        if write_weight.ndim != 2:
+            raise ValueError(
+                "Identity write_weight must have shape [B,L]"
+            )
+        if write_weight.shape[1] % num_frames != 0:
+            raise ValueError(
+                "Identity token count must be divisible by num_frames"
+            )
+        if target_batch_start < 0:
+            raise ValueError(
+                "target_batch_start must be non-negative"
+            )
+
+        first_frame_weight = torch.zeros_like(write_weight)
+        tokens_per_frame = write_weight.shape[1] // num_frames
+        first_frame_weight[:, :tokens_per_frame] = write_weight[
+            :,
+            :tokens_per_frame,
+        ]
+        batch_end = target_batch_start + write_weight.shape[0]
+        update = self.update(
+            kv_cache=kv_cache,
+            write_weight=first_frame_weight,
+            batch_slice=slice(target_batch_start, batch_end),
+        )
+        self.causal_first_frame_bootstrapped = True
+        return update
+
+    def discard_causal_first_frame_state(self) -> None:
+        """Drop the noisy temporary state before the clean block update."""
+        if not self.causal_first_frame_bootstrapped:
+            raise RuntimeError(
+                "Causal first-frame identity was not bootstrapped"
+            )
+        if self.reference_bootstrapped:
+            raise RuntimeError(
+                "Reference identity state must not be discarded"
+            )
+        self.states.clear()
 
     @torch.no_grad()
     def bootstrap_reference(
