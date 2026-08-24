@@ -239,6 +239,15 @@ if __name__ == '__main__':
             "Maximum previous committed tokens used for online token matching."
         ),
     )
+    parser.add_argument(
+        "--committed_memory_feedback_strength",
+        type=float,
+        default=0.75,
+        help=(
+            "Strength for feeding transported committed edit memory back "
+            "into the current control belief."
+        ),
+    )
     parser.add_argument("--object_mask_video", type=str, default=None)
     parser.add_argument("--hand_mask_video", type=str, default=None)
     parser.add_argument("--mask_white_threshold", type=int, default=245)
@@ -473,6 +482,10 @@ if __name__ == '__main__':
         )
     if args.identity_tokenprop_max_candidates <= 0:
         parser.error("--identity_tokenprop_max_candidates must be positive")
+    if not 0.0 <= args.committed_memory_feedback_strength <= 1.0:
+        parser.error(
+            "--committed_memory_feedback_strength must be in [0, 1]"
+        )
     if not 0 <= args.mask_white_threshold <= 255:
         parser.error("--mask_white_threshold must be in [0, 255]")
     if args.hand_mask_overlay_diff_threshold < 0:
@@ -749,6 +762,9 @@ if __name__ == '__main__':
         ),
         identity_tokenprop_max_candidates=(
             args.identity_tokenprop_max_candidates
+        ),
+        committed_memory_feedback_strength=(
+            args.committed_memory_feedback_strength
         ),
         contact_graph_mode=args.contact_graph_mode,
         contact_graph_topk=args.contact_graph_topk,

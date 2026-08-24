@@ -92,6 +92,7 @@ class TargetIdentityTokenPropagation:
 
     write_weight: torch.Tensor
     base_write_weight: torch.Tensor
+    support_weight: torch.Tensor
     match_confidence: torch.Tensor
     best_similarity: torch.Tensor
     matched_previous_weight: torch.Tensor
@@ -105,6 +106,7 @@ class TargetIdentityTokenPropagation:
         expected_shape = self.write_weight.shape
         for name, value in (
             ("base_write_weight", self.base_write_weight),
+            ("support_weight", self.support_weight),
             ("match_confidence", self.match_confidence),
             ("best_similarity", self.best_similarity),
             (
@@ -123,6 +125,7 @@ class TargetIdentityTokenPropagation:
         for name, value in (
             ("write_weight", self.write_weight),
             ("base_write_weight", self.base_write_weight),
+            ("support_weight", self.support_weight),
             ("match_confidence", self.match_confidence),
             ("best_similarity", self.best_similarity),
             (
@@ -138,6 +141,7 @@ class TargetIdentityTokenPropagation:
         for name, value in (
             ("write_weight", self.write_weight),
             ("base_write_weight", self.base_write_weight),
+            ("support_weight", self.support_weight),
             ("match_confidence", self.match_confidence),
             (
                 "matched_previous_weight",
@@ -200,6 +204,7 @@ class CausalObjectTokenPropagator:
         self,
         source_features: torch.Tensor,
         base_write_weight: torch.Tensor,
+        support_weight: torch.Tensor | None = None,
     ) -> TargetIdentityTokenPropagation:
         if source_features.ndim != 3:
             raise ValueError(
@@ -219,6 +224,15 @@ class CausalObjectTokenPropagator:
             dim=-1,
         )
         base_weight = base_write_weight.detach().float().clamp(0.0, 1.0)
+        support = (
+            base_weight
+            if support_weight is None
+            else support_weight.detach().float().clamp(0.0, 1.0)
+        )
+        if support.shape != base_weight.shape:
+            raise ValueError(
+                "Token propagation support_weight must match [B,L]"
+            )
         write_weight = base_weight.clone()
         match_confidence = torch.ones_like(base_weight)
         best_similarity = torch.zeros_like(base_weight)
@@ -302,11 +316,12 @@ class CausalObjectTokenPropagator:
                 matched_previous_weight[batch_index] = matched_weight
 
         self.previous_features = current_features.detach().cpu()
-        self.previous_weight = write_weight.detach().cpu()
+        self.previous_weight = support.detach().cpu()
 
         result = TargetIdentityTokenPropagation(
             write_weight=write_weight,
             base_write_weight=base_weight,
+            support_weight=support,
             match_confidence=match_confidence,
             best_similarity=best_similarity,
             matched_previous_weight=matched_previous_weight,
@@ -1142,3 +1157,116 @@ def strengthen_belief_with_target_identity(
     )
     updated.validate()
     return updated
+
+
+def _expand_token_map_to_belief(
+    token_map: torch.Tensor,
+    belief: CausalControlBelief,
+) -> torch.Tensor:
+    if token_map.ndim != 4:
+        raise ValueError("token_map must have shape [B,T,H,W]")
+    batch, frames, height, width = belief.edit_belief.shape
+    if token_map.shape[:2] != (batch, frames):
+        raise ValueError("token_map and belief must share [B,T]")
+    return F.interpolate(
+        token_map.float().reshape(
+            batch * frames,
+            1,
+            *token_map.shape[-2:],
+        ),
+        size=(height, width),
+        mode="bilinear",
+        align_corners=False,
+    ).reshape(batch, frames, height, width).clamp(0.0, 1.0)
+
+
+def inject_committed_memory_into_belief(
+    belief: CausalControlBelief,
+    committed_token_edit: torch.Tensor,
+    committed_token_precision: torch.Tensor,
+    hand_mask: torch.Tensor,
+    feedback_strength: float,
+    eps: float = 1e-6,
+) -> tuple[CausalControlBelief, Dict[str, torch.Tensor]]:
+    """Materialize transported edit memory into the current action belief."""
+    if feedback_strength <= 0:
+        return belief, {}
+    if committed_token_edit.shape != committed_token_precision.shape:
+        raise ValueError(
+            "Committed edit and precision token maps must share shape"
+        )
+    if hand_mask.shape != belief.edit_belief.shape:
+        raise ValueError("hand_mask and belief must share shape")
+
+    committed_edit_full = _expand_token_map_to_belief(
+        committed_token_edit,
+        belief,
+    )
+    committed_precision_full = _expand_token_map_to_belief(
+        committed_token_precision,
+        belief,
+    )
+    object_space = (1.0 - hand_mask.float().clamp(0.0, 1.0))
+    committed_evidence = (
+        committed_edit_full
+        * committed_precision_full.clamp(0.0, 1.0)
+        * object_space
+    ).clamp(0.0, 1.0)
+    committed_evidence = (
+        committed_evidence * float(feedback_strength)
+    ).clamp(0.0, 1.0)
+
+    old_edit_belief = belief.edit_belief.float()
+    old_edit_precision = belief.edit_precision.float()
+    edit_belief = (
+        1.0
+        - (1.0 - old_edit_belief)
+        * (1.0 - committed_evidence)
+    ).clamp(0.0, 1.0)
+    edit_precision = torch.where(
+        edit_belief > eps,
+        (
+            old_edit_belief * old_edit_precision
+            + committed_evidence * committed_precision_full
+        )
+        / (old_edit_belief + committed_evidence).clamp_min(eps),
+        old_edit_precision,
+    ).clamp(0.0, 1.0)
+
+    preserve_release = committed_evidence.clamp(0.0, 0.90)
+    preserve_belief = (
+        belief.preserve_belief.float()
+        * (1.0 - preserve_release)
+    ).clamp(0.0, 1.0)
+    visibility = torch.maximum(
+        belief.visibility.float(),
+        committed_evidence,
+    )
+    conflict = (edit_belief * preserve_belief).clamp(0.0, 1.0)
+    responsibility = (edit_belief + preserve_belief).clamp_min(eps)
+    updated_uncertainty = (
+        edit_belief * (1.0 - edit_precision)
+        + preserve_belief
+        * (1.0 - belief.preserve_precision.float())
+    ) / responsibility
+    uncertainty = torch.where(
+        committed_evidence > eps,
+        updated_uncertainty,
+        belief.uncertainty.float(),
+    )
+    injected = CausalControlBelief(
+        edit_belief=edit_belief.float(),
+        preserve_belief=preserve_belief.float(),
+        edit_precision=edit_precision.float(),
+        preserve_precision=belief.preserve_precision.float(),
+        visibility=visibility.float(),
+        uncertainty=uncertainty.clamp(0.0, 1.0).float(),
+        conflict=conflict.float(),
+    )
+    injected.validate()
+    return injected, {
+        "committed_memory_edit": committed_edit_full.float(),
+        "committed_memory_precision": committed_precision_full.float(),
+        "committed_memory_evidence": committed_evidence.float(),
+        "committed_memory_preserve_release": preserve_release.float(),
+    }

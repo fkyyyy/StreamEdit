@@ -16,6 +16,7 @@ HAND_MASK_OVERLAY_DIFF_THRESHOLD="${HAND_MASK_OVERLAY_DIFF_THRESHOLD:-24}"
 IDENTITY_TOKENPROP_MIN_SIMILARITY="${IDENTITY_TOKENPROP_MIN_SIMILARITY:-0.55}"
 IDENTITY_TOKENPROP_GATE_STRENGTH="${IDENTITY_TOKENPROP_GATE_STRENGTH:-0.85}"
 IDENTITY_TOKENPROP_MAX_CANDIDATES="${IDENTITY_TOKENPROP_MAX_CANDIDATES:-512}"
+COMMITTED_MEMORY_FEEDBACK_STRENGTH="${COMMITTED_MEMORY_FEEDBACK_STRENGTH:-0.75}"
 SRC_PROMPT="${SRC_PROMPT:-A first-person egocentric kitchen video of a person holding a white plastic seasoning shaker with a blue cap. The same hand, hand pose, camera motion, stovetop, pan, counter, and kitchen background are visible.}"
 TRG_PROMPT="${TRG_PROMPT:-A first-person egocentric kitchen video of the same person holding a metallic ribbed silver aluminum can. The can has a cylindrical body, horizontal ribs, a reflective silver surface, and a visible pull-tab top. The same hand, hand motion, camera motion, stovetop, pan, counter, and kitchen background remain unchanged.}"
 SRC_WORD="${SRC_WORD:-white plastic seasoning shaker}"
@@ -39,6 +40,7 @@ python inference_edit_streamedit.py \
   --identity_tokenprop_min_similarity "$IDENTITY_TOKENPROP_MIN_SIMILARITY" \
   --identity_tokenprop_gate_strength "$IDENTITY_TOKENPROP_GATE_STRENGTH" \
   --identity_tokenprop_max_candidates "$IDENTITY_TOKENPROP_MAX_CANDIDATES" \
+  --committed_memory_feedback_strength "$COMMITTED_MEMORY_FEEDBACK_STRENGTH" \
   --src_prompt "$SRC_PROMPT" \
   --trg_prompt "$TRG_PROMPT" \
   --src_word "$SRC_WORD" \

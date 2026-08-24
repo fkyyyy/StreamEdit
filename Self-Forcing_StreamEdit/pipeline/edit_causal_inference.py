@@ -34,6 +34,7 @@ from .target_identity_memory import (
     TargetIdentityTokenPropagation,
     TargetIdentityUpdate,
     build_reference_identity_bootstrap,
+    inject_committed_memory_into_belief,
     strengthen_belief_with_target_identity,
 )
 from .role_router import (
@@ -144,6 +145,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         identity_tokenprop_min_similarity: float = 0.55,
         identity_tokenprop_gate_strength: float = 0.85,
         identity_tokenprop_max_candidates: int = 512,
+        committed_memory_feedback_strength: float = 0.75,
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -242,6 +244,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 ),
                 identity_tokenprop_max_candidates=(
                     identity_tokenprop_max_candidates
+                ),
+                committed_memory_feedback_strength=(
+                    committed_memory_feedback_strength
                 ),
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
@@ -566,6 +571,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         identity_tokenprop_min_similarity: float = 0.55,
         identity_tokenprop_gate_strength: float = 0.85,
         identity_tokenprop_max_candidates: int = 512,
+        committed_memory_feedback_strength: float = 0.75,
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -673,6 +679,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
         reference_identity_enabled = (
             routing_mode == "hand_role_bayes_flow_customized_kv"
         )
+        if not 0.0 <= committed_memory_feedback_strength <= 1.0:
+            raise ValueError(
+                "committed_memory_feedback_strength must lie in [0, 1]"
+            )
         if identity_first_latent_bootstrap:
             raise ValueError(
                 "First-latent identity bootstrap was rejected because it "
@@ -1378,6 +1388,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             current_identity_propagation: Optional[
                 TargetIdentityTokenPropagation
             ] = None
+            identity_tokenprop_support_tokens = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
                 role_right = role_left + current_num_frames
@@ -1881,6 +1892,94 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 weights=current_belief_kv_weights,
                                 source_features=source_query_features,
                             )
+                        if (
+                            target_identity_tokenprop_enabled
+                            and current_memory_plan is not None
+                        ):
+                            memory_edit_map = (
+                                current_memory_plan
+                                .materialized_edit_action.reshape_as(
+                                    current_belief_kv_weights.edit_map
+                                )
+                            )
+                            memory_precision_map = (
+                                current_memory_plan
+                                .consolidated_precision.reshape_as(
+                                    current_belief_kv_weights.edit_map
+                                )
+                            )
+                            committed_token_edit = memory_edit_map
+                            committed_token_precision = memory_precision_map
+                            if current_commitment is not None:
+                                stable_commitment = (
+                                    current_commitment
+                                    .commitment.float()
+                                )
+                                committed_token_edit = torch.maximum(
+                                    committed_token_edit,
+                                    (
+                                        stable_commitment
+                                        * memory_precision_map
+                                    ).clamp(0.0, 1.0),
+                                )
+                                committed_token_precision = torch.maximum(
+                                    committed_token_precision,
+                                    current_commitment
+                                    .state_precision.float(),
+                                )
+                            identity_tokenprop_support_tokens = (
+                                torch.maximum(
+                                    committed_token_edit,
+                                    current_belief_kv_weights.edit_map,
+                                )
+                                .reshape(batch_size, -1)
+                                .clamp(0.0, 1.0)
+                            )
+                        if (
+                            target_identity_tokenprop_enabled
+                            and current_memory_plan is not None
+                            and committed_memory_feedback_strength > 0
+                        ):
+                            (
+                                current_control_belief,
+                                committed_memory_debug,
+                            ) = inject_committed_memory_into_belief(
+                                belief=current_control_belief,
+                                committed_token_edit=committed_token_edit,
+                                committed_token_precision=(
+                                    committed_token_precision
+                                ),
+                                hand_mask=hand_only_mask[
+                                    :, role_left:role_right
+                                ],
+                                feedback_strength=(
+                                    committed_memory_feedback_strength
+                                ),
+                            )
+                            hand_role_debug.update(committed_memory_debug)
+                            committed_memory_tokens = (
+                                identity_tokenprop_support_tokens > 0.05
+                            )
+                            role_edit_tokens = (
+                                role_edit_tokens | committed_memory_tokens
+                            )
+                            inloop_trg_fg_mask = role_edit_tokens
+                            src_fg_mask_map = self._mask_reshape(
+                                role_edit_tokens,
+                                size=(
+                                    current_num_frames,
+                                    height,
+                                    width,
+                                ),
+                            )
+                            current_belief_kv_weights = (
+                                build_belief_kv_weights(
+                                    current_control_belief,
+                                    expected_token_length=(
+                                        role_edit_tokens.shape[1]
+                                    ),
+                                )
+                            )
                         hand_role_debug.update({
                             "dual_kv_edit_weight": (
                                 current_belief_kv_weights.edit_map
@@ -1912,6 +2011,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                     ),
                                 )
                             )
+                        hand_role_debug.update({
+                            f"control_{name}": value
+                            for name, value
+                            in current_control_belief.as_dict().items()
+                        })
                         self._inject_masks_to_kv_cache(
                             kv_cache_dual,
                             trg_fg_mask_cache,
@@ -2587,6 +2691,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         identity_token_propagator(
                             source_features=source_query_features,
                             base_write_weight=identity_write_tokens,
+                            support_weight=(
+                                identity_tokenprop_support_tokens
+                            ),
                         )
                     )
                     identity_write_tokens = (
@@ -2691,6 +2798,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             current_identity_propagation
                             .base_write_weight.reshape_as(_debug_shape)
                         ),
+                        "identity_tokenprop_support_weight": (
+                            current_identity_propagation
+                            .support_weight.reshape_as(_debug_shape)
+                        ),
                         "identity_tokenprop_match_confidence": (
                             current_identity_propagation
                             .match_confidence.reshape_as(_debug_shape)
@@ -2737,6 +2848,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         f"{current_identity_propagation.has_previous.float().mean().item():.4f} "
                         "base_weight="
                         f"{current_identity_propagation.base_write_weight.mean().item():.4f} "
+                        "support="
+                        f"{current_identity_propagation.support_weight.mean().item():.4f} "
                         "gated_weight="
                         f"{identity_write_tokens.mean().item():.4f} "
                         "match="

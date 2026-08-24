@@ -120,6 +120,77 @@ def test_token_propagation_gates_unmatched_identity_writes():
     assert result.write_weight[0, 2].item() == 0.0
 
 
+def test_token_propagation_keeps_stable_support_across_blocks():
+    propagator = identity_module.CausalObjectTokenPropagator(
+        min_similarity=0.5,
+        gate_strength=1.0,
+    )
+    features = torch.tensor([[
+        [1.0, 0.0],
+        [0.0, 1.0],
+    ]])
+
+    first = propagator(
+        features,
+        base_write_weight=torch.tensor([[0.1, 0.0]]),
+        support_weight=torch.tensor([[1.0, 0.0]]),
+    )
+    second = propagator(
+        features,
+        base_write_weight=torch.ones((1, 2)),
+    )
+
+    assert torch.allclose(
+        first.support_weight,
+        torch.tensor([[1.0, 0.0]]),
+    )
+    assert second.matched_previous_weight[0, 0].item() == 1.0
+    assert second.write_weight[0, 0].item() > 0.99
+    assert second.write_weight[0, 1].item() == 0.0
+
+
+def test_committed_memory_feedback_updates_current_belief():
+    belief = _belief(edit=0.1, preserve=1.0)
+    hand = torch.zeros((1, 1, 4, 4), dtype=torch.float32)
+    committed_edit = torch.ones((1, 1, 2, 2), dtype=torch.float32)
+    committed_precision = torch.ones_like(committed_edit)
+
+    updated, debug = identity_module.inject_committed_memory_into_belief(
+        belief=belief,
+        committed_token_edit=committed_edit,
+        committed_token_precision=committed_precision,
+        hand_mask=hand,
+        feedback_strength=0.5,
+    )
+
+    assert updated.edit_belief.mean() > belief.edit_belief.mean()
+    assert updated.preserve_belief.mean() < belief.preserve_belief.mean()
+    assert torch.allclose(
+        debug["committed_memory_evidence"],
+        torch.full_like(belief.edit_belief, 0.5),
+    )
+
+
+def test_committed_memory_feedback_does_not_release_hand_preserve():
+    belief = _belief(edit=0.1, preserve=1.0)
+    hand = torch.ones((1, 1, 4, 4), dtype=torch.float32)
+    committed_edit = torch.ones((1, 1, 2, 2), dtype=torch.float32)
+    committed_precision = torch.ones_like(committed_edit)
+
+    updated, debug = identity_module.inject_committed_memory_into_belief(
+        belief=belief,
+        committed_token_edit=committed_edit,
+        committed_token_precision=committed_precision,
+        hand_mask=hand,
+        feedback_strength=1.0,
+    )
+
+    assert torch.allclose(updated.edit_belief, belief.edit_belief)
+    assert torch.allclose(updated.preserve_belief, belief.preserve_belief)
+    assert torch.allclose(updated.uncertainty, belief.uncertainty)
+    assert torch.count_nonzero(debug["committed_memory_evidence"]) == 0
+
+
 def test_reference_bootstrap_localizes_semantic_latent_change():
     source, target, attention = _reference_inputs()
 
