@@ -43,8 +43,17 @@ def build_white_mask(
     latent_shape,
     threshold,
     min_latent_coverage=0.0,
+    mode="white",
+    overlay_diff_threshold=24.0,
 ):
-    """Resample a white matte to source time and the Wan latent grid."""
+    """Resample a white matte to source time and the Wan latent grid.
+
+    ``mode="white"`` expects a normal binary/white matte. ``overlay_white``
+    handles videos where the hand is painted white over the source frame by
+    keeping only white pixels that differ from the source frame.
+    """
+    if mode not in {"white", "overlay_white"}:
+        raise ValueError(f"Unsupported mask mode: {mode}")
     mask_video = load_video(mask_video_path)
     if not mask_video:
         raise RuntimeError(f"No frames decoded from mask video: {mask_video_path}")
@@ -52,9 +61,25 @@ def build_white_mask(
         np.linspace(0, len(mask_video) - 1, len(source_frames))
     ).astype(int)
     raw_masks = []
-    for index in frame_indices:
+    resample_bilinear = getattr(Image, "Resampling", Image).BILINEAR
+    for source_index, index in enumerate(frame_indices):
         rgb = np.asarray(mask_video[int(index)].convert("RGB"))
-        raw_masks.append(np.all(rgb >= threshold, axis=-1))
+        white_mask = np.all(rgb >= threshold, axis=-1)
+        if mode == "overlay_white":
+            source_rgb_image = source_frames[source_index].convert("RGB")
+            if source_rgb_image.size != (rgb.shape[1], rgb.shape[0]):
+                source_rgb_image = source_rgb_image.resize(
+                    (rgb.shape[1], rgb.shape[0]),
+                    resample=resample_bilinear,
+                )
+            source_rgb = np.asarray(source_rgb_image)
+            source_difference = np.abs(
+                rgb.astype(np.int16) - source_rgb.astype(np.int16)
+            ).mean(axis=-1)
+            white_mask = white_mask & (
+                source_difference >= overlay_diff_threshold
+            )
+        raw_masks.append(white_mask)
     pixel_mask = torch.from_numpy(np.stack(raw_masks)).unsqueeze(1).float()
     pixel_mask = F.interpolate(
         pixel_mask, size=(480, 832), mode="nearest"
@@ -191,6 +216,25 @@ if __name__ == '__main__':
     parser.add_argument("--object_mask_video", type=str, default=None)
     parser.add_argument("--hand_mask_video", type=str, default=None)
     parser.add_argument("--mask_white_threshold", type=int, default=245)
+    parser.add_argument(
+        "--hand_mask_mode",
+        choices=["white", "overlay_white"],
+        default="white",
+        help=(
+            "How to parse --hand_mask_video. Use 'white' for a binary "
+            "white matte; use 'overlay_white' when the hand is painted "
+            "white over the source video."
+        ),
+    )
+    parser.add_argument(
+        "--hand_mask_overlay_diff_threshold",
+        type=float,
+        default=24.0,
+        help=(
+            "Mean RGB difference from the source frame required by "
+            "--hand_mask_mode overlay_white."
+        ),
+    )
     parser.add_argument(
         "--object_min_latent_coverage", type=float, default=0.001
     )
@@ -402,6 +446,10 @@ if __name__ == '__main__':
             "--identity_first_latent_bootstrap cannot be combined with "
             "an explicit first-frame condition"
         )
+    if not 0 <= args.mask_white_threshold <= 255:
+        parser.error("--mask_white_threshold must be in [0, 255]")
+    if args.hand_mask_overlay_diff_threshold < 0:
+        parser.error("--hand_mask_overlay_diff_threshold must be non-negative")
     if not 0.0 <= args.contact_target_weight <= 1.0:
         parser.error("--contact_target_weight must be in [0, 1]")
     if not 0.0 <= args.hand_posterior_threshold <= 1.0:
@@ -518,10 +566,12 @@ if __name__ == '__main__':
     video_latents = pipeline.vae.encode_to_latent(
         src_video_tensor.to(device=device, dtype=torch.bfloat16)
     ).to(device=device, dtype=torch.bfloat16)
+    object_pixel_mask = None
     object_latent_mask = None
+    hand_pixel_mask = None
     hand_latent_mask = None
     if oracle_role_enabled:
-        _, object_latent_mask = build_white_mask(
+        object_pixel_mask, object_latent_mask = build_white_mask(
             args.object_mask_video,
             src_video,
             tuple(video_latents.shape),
@@ -529,11 +579,13 @@ if __name__ == '__main__':
             min_latent_coverage=args.object_min_latent_coverage,
         )
     if oracle_role_enabled or hand_role_enabled:
-        _, hand_latent_mask = build_white_mask(
+        hand_pixel_mask, hand_latent_mask = build_white_mask(
             args.hand_mask_video,
             src_video,
             tuple(video_latents.shape),
             args.mask_white_threshold,
+            mode=args.hand_mask_mode,
+            overlay_diff_threshold=args.hand_mask_overlay_diff_threshold,
         )
     if oracle_role_enabled:
         role_input_path = Path(args.save_path).with_suffix(
@@ -541,14 +593,22 @@ if __name__ == '__main__':
         )
         np.savez_compressed(
             role_input_path,
+            object_pixel_mask=object_pixel_mask.numpy(),
             object_latent_mask=object_latent_mask.numpy(),
+            hand_pixel_mask=hand_pixel_mask.numpy(),
             hand_latent_mask=hand_latent_mask.numpy(),
             white_threshold=np.array(args.mask_white_threshold),
+            hand_mask_mode=np.array(args.hand_mask_mode),
+            hand_mask_overlay_diff_threshold=np.array(
+                args.hand_mask_overlay_diff_threshold
+            ),
         )
         print(
             "ORACLE_ROLE_INPUT "
             f"object={object_latent_mask.float().mean().item():.4f} "
-            f"hand={hand_latent_mask.float().mean().item():.4f} "
+            f"hand_pixel={hand_pixel_mask.float().mean().item():.4f} "
+            f"hand_latent={hand_latent_mask.float().mean().item():.4f} "
+            f"hand_mode={args.hand_mask_mode} "
             f"artifact={role_input_path}"
         )
     elif hand_role_enabled:
@@ -557,12 +617,19 @@ if __name__ == '__main__':
         )
         np.savez_compressed(
             hand_input_path,
+            hand_pixel_mask=hand_pixel_mask.float().cpu().numpy(),
             hand_latent_mask=hand_latent_mask.float().cpu().numpy(),
             white_threshold=np.array(args.mask_white_threshold),
+            hand_mask_mode=np.array(args.hand_mask_mode),
+            hand_mask_overlay_diff_threshold=np.array(
+                args.hand_mask_overlay_diff_threshold
+            ),
         )
         print(
             "HAND_ROLE_INPUT "
-            f"hand={hand_latent_mask.float().mean().item():.4f} "
+            f"hand_pixel={hand_pixel_mask.float().mean().item():.4f} "
+            f"hand_latent={hand_latent_mask.float().mean().item():.4f} "
+            f"hand_mode={args.hand_mask_mode} "
             f"artifact={hand_input_path}"
         )
 

@@ -6,9 +6,11 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 DATA_PATH="${DATA_PATH:-$REPO_ROOT/source_video.mp4}"
 HAND_MASK="${HAND_MASK:-$REPO_ROOT/hand_mask.mp4}"
-OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/907_identity_first_latent_bootstrap}"
+OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/907_identity_overlay_hand_mask}"
 STEP="${STEP:-15}"
 CUDA_DEVICE="${CUDA_DEVICE:-0}"
+HAND_MASK_MODE="${HAND_MASK_MODE:-overlay_white}"
+HAND_MASK_OVERLAY_DIFF_THRESHOLD="${HAND_MASK_OVERLAY_DIFF_THRESHOLD:-24}"
 
 export CUDA_VISIBLE_DEVICES="$CUDA_DEVICE"
 mkdir -p "$OUTDIR/roles"
@@ -20,10 +22,11 @@ python inference_edit_streamedit.py \
   --save_path "$OUTDIR/907-bayes-identity-kv.mp4" \
   --save_role_dir "$OUTDIR/roles" \
   --routing_mode hand_role_bayes_flow_identity_kv \
-  --identity_first_latent_bootstrap \
   --contact_graph_mode no_graph \
   --hand_query_layers 8 12 16 20 \
   --mask_white_threshold 245 \
+  --hand_mask_mode "$HAND_MASK_MODE" \
+  --hand_mask_overlay_diff_threshold "$HAND_MASK_OVERLAY_DIFF_THRESHOLD" \
   --src_prompt "A person is holding a white plastic seasoning shaker with a blue cap in a kitchen." \
   --trg_prompt "A person is holding a ribbed silver aluminum can with horizontal ribs in a kitchen." \
   --src_word "white plastic seasoning shaker" \
