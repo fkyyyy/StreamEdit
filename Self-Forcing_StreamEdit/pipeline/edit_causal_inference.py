@@ -29,9 +29,10 @@ from .memory_consolidation import (
     MemoryConsolidationPlan,
 )
 from .target_identity_memory import (
+    CausalObjectTokenPropagator,
     SlowTargetIdentityMemory,
+    TargetIdentityTokenPropagation,
     TargetIdentityUpdate,
-    build_first_latent_identity_schedule,
     build_reference_identity_bootstrap,
     strengthen_belief_with_target_identity,
 )
@@ -140,6 +141,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_field_weight: float = 0.65,
         hand_field_candidate_radius: int = 2,
         hand_field_update_mode: str = "diagnostic",
+        identity_tokenprop_min_similarity: float = 0.55,
+        identity_tokenprop_gate_strength: float = 0.85,
+        identity_tokenprop_max_candidates: int = 512,
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -158,6 +162,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         ] = None,
         _target_identity_memory: Optional[
             SlowTargetIdentityMemory
+        ] = None,
+        _identity_token_propagator: Optional[
+            CausalObjectTokenPropagator
         ] = None,
     ) -> torch.Tensor:
         expected_role_shape = (
@@ -227,6 +234,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 hand_field_weight=hand_field_weight,
                 hand_field_candidate_radius=hand_field_candidate_radius,
                 hand_field_update_mode=hand_field_update_mode,
+                identity_tokenprop_min_similarity=(
+                    identity_tokenprop_min_similarity
+                ),
+                identity_tokenprop_gate_strength=(
+                    identity_tokenprop_gate_strength
+                ),
+                identity_tokenprop_max_candidates=(
+                    identity_tokenprop_max_candidates
+                ),
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
                 contact_graph_radius=contact_graph_radius,
@@ -242,6 +258,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     _edit_commitment_controller
                 ),
                 _target_identity_memory=_target_identity_memory,
+                _identity_token_propagator=_identity_token_propagator,
             )
 
         rollout_overlap = rollout_overlap_block_num * self.num_frame_per_block
@@ -256,6 +273,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_tokenprop_kv",
                 "hand_role_bayes_flow_customized_kv",
             }
         ):
@@ -282,6 +300,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         "hand_role_bayes_flow_consolidated_kv",
                         "hand_role_bayes_flow_commitment_kv",
                         "hand_role_bayes_flow_identity_kv",
+                        "hand_role_bayes_flow_tokenprop_kv",
                         "hand_role_bayes_flow_customized_kv",
                     }
                 ),
@@ -293,6 +312,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_tokenprop_kv",
                 "hand_role_bayes_flow_customized_kv",
             }
         ):
@@ -303,6 +323,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             and routing_mode in {
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_tokenprop_kv",
                 "hand_role_bayes_flow_customized_kv",
             }
         ):
@@ -312,11 +333,22 @@ class EditCausalInferencePipeline(torch.nn.Module):
             rollout_target_identity_memory is None
             and routing_mode in {
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_tokenprop_kv",
                 "hand_role_bayes_flow_customized_kv",
             }
         ):
             rollout_target_identity_memory = SlowTargetIdentityMemory(
                 layers=hand_query_layers,
+            )
+        rollout_identity_token_propagator = _identity_token_propagator
+        if (
+            rollout_identity_token_propagator is None
+            and routing_mode == "hand_role_bayes_flow_tokenprop_kv"
+        ):
+            rollout_identity_token_propagator = CausalObjectTokenPropagator(
+                min_similarity=identity_tokenprop_min_similarity,
+                gate_strength=identity_tokenprop_gate_strength,
+                max_candidates=identity_tokenprop_max_candidates,
             )
 
         total_frame_num = src_video.shape[1]
@@ -415,6 +447,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 hand_field_weight=hand_field_weight,
                 hand_field_candidate_radius=hand_field_candidate_radius,
                 hand_field_update_mode=hand_field_update_mode,
+                identity_tokenprop_min_similarity=(
+                    identity_tokenprop_min_similarity
+                ),
+                identity_tokenprop_gate_strength=(
+                    identity_tokenprop_gate_strength
+                ),
+                identity_tokenprop_max_candidates=(
+                    identity_tokenprop_max_candidates
+                ),
                 contact_graph_mode=contact_graph_mode,
                 contact_graph_topk=contact_graph_topk,
                 contact_graph_radius=contact_graph_radius,
@@ -431,6 +472,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 ),
                 _target_identity_memory=(
                     rollout_target_identity_memory
+                ),
+                _identity_token_propagator=(
+                    rollout_identity_token_propagator
                 ),
             )
 
@@ -519,6 +563,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         hand_field_weight: float = 0.65,
         hand_field_candidate_radius: int = 2,
         hand_field_update_mode: str = "diagnostic",
+        identity_tokenprop_min_similarity: float = 0.55,
+        identity_tokenprop_gate_strength: float = 0.85,
+        identity_tokenprop_max_candidates: int = 512,
         contact_graph_mode: str = "no_graph",
         contact_graph_topk: int = 4,
         contact_graph_radius: float = 2.5,
@@ -537,6 +584,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         ] = None,
         _target_identity_memory: Optional[
             SlowTargetIdentityMemory
+        ] = None,
+        _identity_token_propagator: Optional[
+            CausalObjectTokenPropagator
         ] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
@@ -562,6 +612,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
             "hand_role_bayes_flow_identity_kv",
+            "hand_role_bayes_flow_tokenprop_kv",
             "hand_role_bayes_flow_customized_kv",
         }
         adaptive_role_enabled = routing_mode in {
@@ -572,6 +623,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
             "hand_role_bayes_flow_identity_kv",
+            "hand_role_bayes_flow_tokenprop_kv",
             "hand_role_bayes_flow_customized_kv",
         }
         posterior_flow_enabled = (
@@ -584,6 +636,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_tokenprop_kv",
                 "hand_role_bayes_flow_customized_kv",
             }
         )
@@ -595,6 +648,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "hand_role_bayes_flow_consolidated_kv",
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_tokenprop_kv",
                 "hand_role_bayes_flow_customized_kv",
             }
         )
@@ -602,32 +656,28 @@ class EditCausalInferencePipeline(torch.nn.Module):
             routing_mode in {
                 "hand_role_bayes_flow_commitment_kv",
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_tokenprop_kv",
                 "hand_role_bayes_flow_customized_kv",
             }
         )
         target_identity_enabled = (
             routing_mode in {
                 "hand_role_bayes_flow_identity_kv",
+                "hand_role_bayes_flow_tokenprop_kv",
                 "hand_role_bayes_flow_customized_kv",
             }
+        )
+        target_identity_tokenprop_enabled = (
+            routing_mode == "hand_role_bayes_flow_tokenprop_kv"
         )
         reference_identity_enabled = (
             routing_mode == "hand_role_bayes_flow_customized_kv"
         )
-        if (
-            identity_first_latent_bootstrap
-            and routing_mode != "hand_role_bayes_flow_identity_kv"
-        ):
+        if identity_first_latent_bootstrap:
             raise ValueError(
-                "First-latent identity bootstrap requires "
-                "routing_mode=hand_role_bayes_flow_identity_kv"
-            )
-        if identity_first_latent_bootstrap and (
-            independent_first_frame or triple_first_frame
-        ):
-            raise ValueError(
-                "First-latent identity bootstrap cannot be combined with "
-                "an explicit first-frame condition"
+                "First-latent identity bootstrap was rejected because it "
+                "changes the native block schedule, noise trajectory, and "
+                "attention context. Use native 3-frame identity modes."
             )
         belief_memory_enabled = (
             aligned_belief_kv_enabled
@@ -648,6 +698,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
             "hand_role_bayes_flow_identity_kv",
+            "hand_role_bayes_flow_tokenprop_kv",
             "hand_role_bayes_flow_customized_kv",
         }:
             raise ValueError(f"Unsupported routing_mode: {routing_mode}")
@@ -1038,6 +1089,16 @@ class EditCausalInferencePipeline(torch.nn.Module):
             target_identity_memory = SlowTargetIdentityMemory(
                 layers=hand_query_layers,
             )
+        identity_token_propagator = _identity_token_propagator
+        if (
+            target_identity_tokenprop_enabled
+            and identity_token_propagator is None
+        ):
+            identity_token_propagator = CausalObjectTokenPropagator(
+                min_similarity=identity_tokenprop_min_similarity,
+                gate_strength=identity_tokenprop_gate_strength,
+                max_candidates=identity_tokenprop_max_candidates,
+            )
 
         # get trigger token indices
         trans_tokenizer = self.text_encoder.tokenizer.tokenizer
@@ -1248,36 +1309,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
         # Step 3: Temporal denoising loop
         denoising_step_list = self.denoising_step_list
-        split_first_identity_block = (
-            identity_first_latent_bootstrap
-            and self.num_frame_per_block > 1
-            and num_input_frames == 0
-            and not target_identity_memory.export()
-        )
-        all_num_frames = list(
-            build_first_latent_identity_schedule(
-                num_blocks=num_blocks,
-                num_frame_per_block=self.num_frame_per_block,
-                enabled=split_first_identity_block,
-            )
-        )
+        all_num_frames = [self.num_frame_per_block] * num_blocks
         if independent_first_frame and trg_initial_latent is None:
             all_num_frames = [1] + all_num_frames
-        if split_first_identity_block:
-            print(
-                "TARGET_IDENTITY_FIRST_LATENT_SCHEDULE "
-                f"segments={all_num_frames[:2]} "
-                f"total_frames={sum(all_num_frames)}"
-            )
         for current_num_frames in tqdm(all_num_frames):
             if profile:
                 block_start.record()
 
-            is_identity_bootstrap_segment = (
-                split_first_identity_block
-                and current_start_frame == 0
-                and current_num_frames == 1
-            )
             src_input = src_video[
                 :, current_start_frame - num_input_frames:current_start_frame + current_num_frames - num_input_frames]
             denoised_pred = src_input
@@ -1336,6 +1374,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
             identity_observation_tokens = None
             current_identity_update: Optional[
                 TargetIdentityUpdate
+            ] = None
+            current_identity_propagation: Optional[
+                TargetIdentityTokenPropagation
             ] = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
@@ -2533,6 +2574,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     identity_write_tokens
                     * identity_observation_tokens.float()
                 )
+                if target_identity_tokenprop_enabled:
+                    if identity_token_propagator is None:
+                        raise RuntimeError(
+                            "Missing identity token propagator"
+                        )
+                    if source_query_features is None:
+                        raise RuntimeError(
+                            "Missing source features for token propagation"
+                        )
+                    current_identity_propagation = (
+                        identity_token_propagator(
+                            source_features=source_query_features,
+                            base_write_weight=identity_write_tokens,
+                        )
+                    )
+                    identity_write_tokens = (
+                        current_identity_propagation.write_weight
+                    )
                 current_identity_update = (
                     target_identity_memory.update(
                         kv_cache=kv_cache_trg,
@@ -2625,12 +2684,37 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         hand_role_debug["object_posterior"]
                     )
                 )
-                if is_identity_bootstrap_segment:
-                    hand_role_debug[
-                        "identity_first_latent_bootstrap"
-                    ] = torch.ones_like(
-                        hand_role_debug["object_posterior"]
-                    )
+                if current_identity_propagation is not None:
+                    _debug_shape = hand_role_debug["object_posterior"]
+                    hand_role_debug.update({
+                        "identity_tokenprop_base_write": (
+                            current_identity_propagation
+                            .base_write_weight.reshape_as(_debug_shape)
+                        ),
+                        "identity_tokenprop_match_confidence": (
+                            current_identity_propagation
+                            .match_confidence.reshape_as(_debug_shape)
+                        ),
+                        "identity_tokenprop_similarity": (
+                            (
+                                current_identity_propagation
+                                .best_similarity.reshape_as(_debug_shape)
+                                + 1.0
+                            )
+                            * 0.5
+                        ),
+                        "identity_tokenprop_previous_weight": (
+                            current_identity_propagation
+                            .matched_previous_weight.reshape_as(
+                                _debug_shape
+                            )
+                        ),
+                        "identity_tokenprop_has_previous": (
+                            torch.ones_like(_debug_shape)
+                            * current_identity_propagation
+                            .has_previous.float().mean()
+                        ),
+                    })
                 print(
                     "TARGET_IDENTITY_WRITE "
                     "block="
@@ -2644,14 +2728,23 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     "accumulated_evidence="
                     f"{current_identity_update.accumulated_evidence.mean().item():.4f}"
                 )
-                if is_identity_bootstrap_segment:
+                if current_identity_propagation is not None:
                     print(
-                        "TARGET_IDENTITY_FIRST_LATENT_BOOTSTRAP "
-                        "frame=0 "
-                        "write_weight="
+                        "TARGET_IDENTITY_TOKENPROP "
+                        "block="
+                        f"{current_start_frame // self.num_frame_per_block} "
+                        "has_previous="
+                        f"{current_identity_propagation.has_previous.float().mean().item():.4f} "
+                        "base_weight="
+                        f"{current_identity_propagation.base_write_weight.mean().item():.4f} "
+                        "gated_weight="
                         f"{identity_write_tokens.mean().item():.4f} "
-                        "evidence="
-                        f"{current_identity_update.accumulated_evidence.mean().item():.4f}"
+                        "match="
+                        f"{current_identity_propagation.match_confidence.mean().item():.4f} "
+                        "previous="
+                        f"{current_identity_propagation.matched_previous_weight.mean().item():.4f} "
+                        "similarity="
+                        f"{current_identity_propagation.best_similarity.mean().item():.4f}"
                     )
                 if save_role_dir is not None:
                     self._save_hand_role_debug(
@@ -2659,11 +2752,6 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         current_start_frame
                         // self.num_frame_per_block,
                         hand_role_debug,
-                        artifact_suffix=(
-                            "_identity_bootstrap"
-                            if is_identity_bootstrap_segment
-                            else ""
-                        ),
                     )
             #✨ store clean target kv cache, and obtain clean target mask
             _, trg_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_trg)

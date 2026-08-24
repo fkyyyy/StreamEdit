@@ -73,43 +73,51 @@ def _reference_inputs():
     return source, target, attention
 
 
-def test_first_latent_identity_schedule_splits_only_first_block():
-    schedule = identity_module.build_first_latent_identity_schedule(
-        num_blocks=3,
-        num_frame_per_block=3,
-        enabled=True,
+def test_token_propagation_first_block_keeps_base_write():
+    propagator = identity_module.CausalObjectTokenPropagator(
+        gate_strength=1.0,
+    )
+    features = torch.tensor([[
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [1.0, 1.0],
+    ]])
+    base_write = torch.tensor([[1.0, 0.5, 0.0]])
+
+    result = propagator(features, base_write)
+
+    assert torch.allclose(result.write_weight, base_write)
+    assert not result.has_previous.any()
+
+
+def test_token_propagation_gates_unmatched_identity_writes():
+    propagator = identity_module.CausalObjectTokenPropagator(
+        min_similarity=0.5,
+        gate_strength=1.0,
+    )
+    previous_features = torch.tensor([[
+        [1.0, 0.0],
+        [0.0, 1.0],
+    ]])
+    propagator(
+        previous_features,
+        torch.tensor([[1.0, 0.0]]),
+    )
+    current_features = torch.tensor([[
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [-1.0, 0.0],
+    ]])
+
+    result = propagator(
+        current_features,
+        torch.ones((1, 3)),
     )
 
-    assert schedule == (1, 2, 3, 3)
-    assert sum(schedule) == 9
-
-
-def test_first_latent_identity_schedule_preserves_legacy_path():
-    assert identity_module.build_first_latent_identity_schedule(
-        num_blocks=3,
-        num_frame_per_block=3,
-        enabled=False,
-    ) == (3, 3, 3)
-    assert identity_module.build_first_latent_identity_schedule(
-        num_blocks=3,
-        num_frame_per_block=1,
-        enabled=True,
-    ) == (1, 1, 1)
-
-
-def test_first_latent_identity_schedule_validates_dimensions():
-    with pytest.raises(ValueError, match="num_blocks"):
-        identity_module.build_first_latent_identity_schedule(
-            num_blocks=-1,
-            num_frame_per_block=3,
-            enabled=True,
-        )
-    with pytest.raises(ValueError, match="num_frame_per_block"):
-        identity_module.build_first_latent_identity_schedule(
-            num_blocks=1,
-            num_frame_per_block=0,
-            enabled=True,
-        )
+    assert result.has_previous.all()
+    assert result.write_weight[0, 0].item() > 0.99
+    assert result.write_weight[0, 1].item() == 0.0
+    assert result.write_weight[0, 2].item() == 0.0
 
 
 def test_reference_bootstrap_localizes_semantic_latent_change():

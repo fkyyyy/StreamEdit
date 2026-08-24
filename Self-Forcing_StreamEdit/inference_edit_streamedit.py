@@ -200,6 +200,7 @@ if __name__ == '__main__':
             "hand_role_bayes_flow_consolidated_kv",
             "hand_role_bayes_flow_commitment_kv",
             "hand_role_bayes_flow_identity_kv",
+            "hand_role_bayes_flow_tokenprop_kv",
             "hand_role_bayes_flow_customized_kv",
         ],
         default="dynamic_sog",
@@ -209,8 +210,33 @@ if __name__ == '__main__':
         action="store_true",
         default=False,
         help=(
-            "Generate one target latent before the rest of the first block "
-            "to initialize text-only target identity memory."
+            "Rejected negative ablation. This option now fails fast because "
+            "it changes the native block schedule and noise trajectory."
+        ),
+    )
+    parser.add_argument(
+        "--identity_tokenprop_min_similarity",
+        type=float,
+        default=0.55,
+        help=(
+            "Minimum source-query token cosine used by "
+            "hand_role_bayes_flow_tokenprop_kv identity writes."
+        ),
+    )
+    parser.add_argument(
+        "--identity_tokenprop_gate_strength",
+        type=float,
+        default=0.85,
+        help=(
+            "How strongly causal token matching gates identity-memory writes."
+        ),
+    )
+    parser.add_argument(
+        "--identity_tokenprop_max_candidates",
+        type=int,
+        default=512,
+        help=(
+            "Maximum previous committed tokens used for online token matching."
         ),
     )
     parser.add_argument("--object_mask_video", type=str, default=None)
@@ -405,6 +431,7 @@ if __name__ == '__main__':
         "hand_role_bayes_flow_consolidated_kv",
         "hand_role_bayes_flow_commitment_kv",
         "hand_role_bayes_flow_identity_kv",
+        "hand_role_bayes_flow_tokenprop_kv",
         "hand_role_bayes_flow_customized_kv",
     }
     customized_reference_enabled = (
@@ -431,21 +458,21 @@ if __name__ == '__main__':
             "Customized reference mode requires one independent "
             "reference frame; do not use --triple_first_frame"
         )
-    if (
-        args.identity_first_latent_bootstrap
-        and args.routing_mode != "hand_role_bayes_flow_identity_kv"
-    ):
+    if args.identity_first_latent_bootstrap:
         parser.error(
-            "--identity_first_latent_bootstrap requires "
-            "--routing_mode hand_role_bayes_flow_identity_kv"
+            "--identity_first_latent_bootstrap was rejected because it "
+            "breaks native 3-frame denoising; use the native schedule."
         )
-    if args.identity_first_latent_bootstrap and (
-        args.first_frame_edit is not None or args.triple_first_frame
-    ):
+    if not -1.0 < args.identity_tokenprop_min_similarity < 1.0:
         parser.error(
-            "--identity_first_latent_bootstrap cannot be combined with "
-            "an explicit first-frame condition"
+            "--identity_tokenprop_min_similarity must be in (-1, 1)"
         )
+    if not 0.0 <= args.identity_tokenprop_gate_strength <= 1.0:
+        parser.error(
+            "--identity_tokenprop_gate_strength must be in [0, 1]"
+        )
+    if args.identity_tokenprop_max_candidates <= 0:
+        parser.error("--identity_tokenprop_max_candidates must be positive")
     if not 0 <= args.mask_white_threshold <= 255:
         parser.error("--mask_white_threshold must be in [0, 255]")
     if args.hand_mask_overlay_diff_threshold < 0:
@@ -714,6 +741,15 @@ if __name__ == '__main__':
         hand_field_weight=args.hand_field_weight,
         hand_field_candidate_radius=args.hand_field_candidate_radius,
         hand_field_update_mode=args.hand_field_update_mode,
+        identity_tokenprop_min_similarity=(
+            args.identity_tokenprop_min_similarity
+        ),
+        identity_tokenprop_gate_strength=(
+            args.identity_tokenprop_gate_strength
+        ),
+        identity_tokenprop_max_candidates=(
+            args.identity_tokenprop_max_candidates
+        ),
         contact_graph_mode=args.contact_graph_mode,
         contact_graph_topk=args.contact_graph_topk,
         contact_graph_radius=args.contact_graph_radius,

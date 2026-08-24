@@ -8,22 +8,6 @@ import torch.nn.functional as F
 from .control_belief import CausalControlBelief
 
 
-def build_first_latent_identity_schedule(
-    num_blocks: int,
-    num_frame_per_block: int,
-    enabled: bool,
-) -> tuple[int, ...]:
-    """Split only the first block so one latent can seed identity memory."""
-    if num_blocks < 0:
-        raise ValueError("num_blocks must be non-negative")
-    if num_frame_per_block <= 0:
-        raise ValueError("num_frame_per_block must be positive")
-    schedule = [num_frame_per_block] * num_blocks
-    if enabled and schedule and num_frame_per_block > 1:
-        schedule[:1] = [1, num_frame_per_block - 1]
-    return tuple(schedule)
-
-
 @dataclass(frozen=True)
 class TargetIdentityLayerState:
     """Slow, position-free target appearance prototypes for one layer."""
@@ -100,6 +84,236 @@ class TargetIdentityUpdate:
                 raise ValueError(
                     f"Identity update '{name}' must be non-negative"
                 )
+
+
+@dataclass(frozen=True)
+class TargetIdentityTokenPropagation:
+    """Causal token-match gating applied before identity-memory writes."""
+
+    write_weight: torch.Tensor
+    base_write_weight: torch.Tensor
+    match_confidence: torch.Tensor
+    best_similarity: torch.Tensor
+    matched_previous_weight: torch.Tensor
+    has_previous: torch.Tensor
+
+    def validate(self) -> None:
+        if self.write_weight.ndim != 2:
+            raise ValueError(
+                "Token propagation weights must have shape [B,L]"
+            )
+        expected_shape = self.write_weight.shape
+        for name, value in (
+            ("base_write_weight", self.base_write_weight),
+            ("match_confidence", self.match_confidence),
+            ("best_similarity", self.best_similarity),
+            (
+                "matched_previous_weight",
+                self.matched_previous_weight,
+            ),
+        ):
+            if value.shape != expected_shape:
+                raise ValueError(
+                    f"Token propagation '{name}' must match [B,L]"
+                )
+        if self.has_previous.shape != tuple(expected_shape[:1]) + (1,):
+            raise ValueError(
+                "Token propagation has_previous must have shape [B,1]"
+            )
+        for name, value in (
+            ("write_weight", self.write_weight),
+            ("base_write_weight", self.base_write_weight),
+            ("match_confidence", self.match_confidence),
+            ("best_similarity", self.best_similarity),
+            (
+                "matched_previous_weight",
+                self.matched_previous_weight,
+            ),
+            ("has_previous", self.has_previous.float()),
+        ):
+            if not torch.isfinite(value.float()).all():
+                raise ValueError(
+                    f"Token propagation '{name}' is not finite"
+                )
+        for name, value in (
+            ("write_weight", self.write_weight),
+            ("base_write_weight", self.base_write_weight),
+            ("match_confidence", self.match_confidence),
+            (
+                "matched_previous_weight",
+                self.matched_previous_weight,
+            ),
+        ):
+            if value.min() < 0 or value.max() > 1:
+                raise ValueError(
+                    f"Token propagation '{name}' must lie in [0, 1]"
+                )
+        if self.best_similarity.min() < -1 or self.best_similarity.max() > 1:
+            raise ValueError(
+                "Token propagation best_similarity must lie in [-1, 1]"
+            )
+
+
+class CausalObjectTokenPropagator:
+    """Gate identity writes by matching current source tokens to prior ones."""
+
+    def __init__(
+        self,
+        min_similarity: float = 0.55,
+        gate_strength: float = 0.85,
+        max_candidates: int = 512,
+        eps: float = 1e-6,
+    ):
+        if not -1.0 < min_similarity < 1.0:
+            raise ValueError("min_similarity must lie in (-1, 1)")
+        if not 0.0 <= gate_strength <= 1.0:
+            raise ValueError("gate_strength must lie in [0, 1]")
+        if max_candidates <= 0:
+            raise ValueError("max_candidates must be positive")
+        if eps <= 0:
+            raise ValueError("eps must be positive")
+        self.min_similarity = float(min_similarity)
+        self.gate_strength = float(gate_strength)
+        self.max_candidates = int(max_candidates)
+        self.eps = float(eps)
+        self.previous_features: torch.Tensor | None = None
+        self.previous_weight: torch.Tensor | None = None
+
+    def _candidate_indices(
+        self,
+        weight: torch.Tensor,
+    ) -> torch.Tensor:
+        candidates = torch.nonzero(
+            weight > self.eps,
+            as_tuple=False,
+        ).flatten()
+        if candidates.numel() > self.max_candidates:
+            selected = torch.topk(
+                weight[candidates],
+                k=self.max_candidates,
+            ).indices
+            candidates = candidates[selected]
+        return candidates
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        source_features: torch.Tensor,
+        base_write_weight: torch.Tensor,
+    ) -> TargetIdentityTokenPropagation:
+        if source_features.ndim != 3:
+            raise ValueError(
+                "Token propagation source_features must have shape [B,L,D]"
+            )
+        if base_write_weight.ndim != 2:
+            raise ValueError(
+                "Token propagation write weights must have shape [B,L]"
+            )
+        if source_features.shape[:2] != base_write_weight.shape:
+            raise ValueError(
+                "Token propagation features and weights must align"
+            )
+
+        current_features = F.normalize(
+            source_features.detach().float(),
+            dim=-1,
+        )
+        base_weight = base_write_weight.detach().float().clamp(0.0, 1.0)
+        write_weight = base_weight.clone()
+        match_confidence = torch.ones_like(base_weight)
+        best_similarity = torch.zeros_like(base_weight)
+        matched_previous_weight = torch.zeros_like(base_weight)
+        has_previous = torch.zeros(
+            base_weight.shape[0],
+            1,
+            dtype=torch.bool,
+            device=base_weight.device,
+        )
+
+        if (
+            self.previous_features is not None
+            and self.previous_weight is not None
+        ):
+            previous_features = self.previous_features.to(
+                device=current_features.device,
+            )
+            previous_weight = self.previous_weight.to(
+                device=base_weight.device,
+            )
+            if (
+                previous_features.shape[0] != current_features.shape[0]
+                or previous_features.shape[-1] != current_features.shape[-1]
+                or previous_weight.shape[0] != base_weight.shape[0]
+                or previous_features.shape[:2] != previous_weight.shape
+            ):
+                raise ValueError(
+                    "Previous token propagation state is incompatible with "
+                    "the current features"
+                )
+            for batch_index in range(base_weight.shape[0]):
+                candidates = self._candidate_indices(
+                    previous_weight[batch_index],
+                )
+                if candidates.numel() == 0:
+                    continue
+                has_previous[batch_index, 0] = True
+                candidate_features = previous_features[
+                    batch_index,
+                    candidates,
+                ]
+                similarity = torch.matmul(
+                    current_features[batch_index],
+                    candidate_features.T,
+                ).clamp(-1.0, 1.0)
+                best, matched = similarity.max(dim=-1)
+                matched_weight = previous_weight[
+                    batch_index,
+                    candidates[matched],
+                ].clamp(0.0, 1.0)
+                absolute_match = (
+                    (best - self.min_similarity)
+                    / (1.0 - self.min_similarity)
+                ).clamp(0.0, 1.0)
+                low = torch.quantile(best, 0.50)
+                high = torch.quantile(best, 0.95)
+                spread = (high - low).clamp_min(self.eps)
+                relative_match = ((best - low) / spread).clamp(0.0, 1.0)
+                relative_match = torch.where(
+                    (high - low) > self.eps,
+                    relative_match,
+                    absolute_match,
+                )
+                confidence = torch.sqrt(
+                    absolute_match * relative_match
+                ).clamp(0.0, 1.0)
+                propagated_weight = (
+                    confidence * matched_weight
+                ).clamp(0.0, 1.0)
+                multiplier = (
+                    1.0
+                    - self.gate_strength
+                    + self.gate_strength * propagated_weight
+                )
+                write_weight[batch_index] = (
+                    base_weight[batch_index] * multiplier
+                ).clamp(0.0, 1.0)
+                match_confidence[batch_index] = confidence
+                best_similarity[batch_index] = best
+                matched_previous_weight[batch_index] = matched_weight
+
+        self.previous_features = current_features.detach().cpu()
+        self.previous_weight = write_weight.detach().cpu()
+
+        result = TargetIdentityTokenPropagation(
+            write_weight=write_weight,
+            base_write_weight=base_weight,
+            match_confidence=match_confidence,
+            best_similarity=best_similarity,
+            matched_previous_weight=matched_previous_weight,
+            has_previous=has_previous,
+        )
+        result.validate()
+        return result
 
 
 @dataclass(frozen=True)
