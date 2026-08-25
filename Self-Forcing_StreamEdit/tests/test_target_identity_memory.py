@@ -56,13 +56,18 @@ def _belief(edit=0.2, preserve=1.0):
     )
 
 
-def _cache(key, value):
-    return [{
+def _cache(key, value, current_identity_key=None):
+    cache = {
         "k": key.clone(),
         "v": value.clone(),
         "local_end_index": torch.tensor([key.shape[1]]),
         "num_new_tokens": key.shape[1],
-    }]
+    }
+    if current_identity_key is not None:
+        cache["current_identity_key"] = (
+            current_identity_key.clone()
+        )
+    return [cache]
 
 
 def _reference_inputs():
@@ -285,45 +290,93 @@ def test_first_frame_bootstrap_uses_non_hand_object_core_only():
     assert torch.count_nonzero(write[:, 1:]) == 0
 
 
-def test_causal_first_frame_bootstrap_uses_only_target_first_frame():
+def test_causal_first_frame_bootstrap_factorizes_source_key_target_value():
     source_key = torch.tensor(
         [[[[1.0, 0.0]]] * 6],
         dtype=torch.float32,
     )
+    source_key[:, 2:] = torch.tensor([-1.0, 0.0])
     target_key = torch.tensor(
-        [[[[1.0, 0.0]]] * 6],
+        [[[[0.0, 1.0]]] * 6],
         dtype=torch.float32,
     )
-    source_value = torch.full_like(source_key, -10.0)
     target_value = torch.full_like(target_key, 100.0)
     target_value[:, :2] = 5.0
-    cache = _cache(
-        torch.cat([source_key, target_key], dim=0),
-        torch.cat([source_value, target_value], dim=0),
+    source_cache = _cache(
+        source_key,
+        torch.zeros_like(source_key),
+        current_identity_key=source_key,
     )
+    target_cache = _cache(target_key, target_value)
     memory = identity_module.SlowTargetIdentityMemory(
         layers=(0,),
         num_prototypes=1,
     )
 
     update = memory.bootstrap_causal_first_frame(
-        kv_cache=cache,
+        kv_cache=target_cache,
         write_weight=torch.ones((1, 6)),
         num_frames=3,
-        target_batch_start=1,
+        target_batch_start=0,
+        source_kv_cache=source_cache,
     )
+    anchor = memory.export()[0]
 
     assert torch.equal(
         update.write_weight,
         torch.tensor([[1.0, 1.0, 0.0, 0.0, 0.0, 0.0]]),
     )
     assert torch.allclose(
-        memory.states[0].value,
-        torch.full_like(memory.states[0].value, 5.0),
+        anchor.value,
+        torch.full_like(anchor.value, 5.0),
     )
+    assert torch.allclose(
+        torch.nn.functional.normalize(anchor.key.float(), dim=-1),
+        torch.tensor([[[[1.0, 0.0]]]]),
+    )
+    assert anchor.evidence.item() == memory.reference_prior_evidence
     assert memory.causal_first_frame_bootstrapped
-    memory.discard_causal_first_frame_state()
     assert not memory.states
+
+
+def test_causal_first_frame_anchor_ignores_adaptive_updates():
+    source_key = torch.tensor(
+        [[[[1.0, 0.0]]] * 4],
+        dtype=torch.float32,
+    )
+    target_key = torch.tensor(
+        [[[[0.0, 1.0]]] * 4],
+        dtype=torch.float32,
+    )
+    target_value = torch.full_like(target_key, 3.0)
+    source_cache = _cache(
+        source_key,
+        torch.zeros_like(source_key),
+        current_identity_key=source_key,
+    )
+    memory = identity_module.SlowTargetIdentityMemory(
+        layers=(0,),
+        num_prototypes=1,
+    )
+    memory.bootstrap_causal_first_frame(
+        kv_cache=_cache(target_key, target_value),
+        write_weight=torch.ones((1, 4)),
+        num_frames=2,
+        target_batch_start=0,
+        source_kv_cache=source_cache,
+    )
+    anchor_value = memory.export()[0].value.clone()
+
+    memory.update(
+        kv_cache=_cache(target_key, target_value + 50.0),
+        write_weight=torch.ones((1, 4)),
+        source_kv_cache=source_cache,
+    )
+
+    assert torch.equal(memory.export()[0].value, anchor_value)
+    assert torch.count_nonzero(
+        memory.export_adaptive()[0].value
+    ) > 0
 
 
 def test_committed_memory_feedback_updates_current_belief():
@@ -558,11 +611,12 @@ def test_reference_identity_bootstrap_is_authoritative_and_single_use():
         _cache(key, value),
         write_weight=torch.ones((1, 4)),
     )
-    valid_evidence = memory.states[0].evidence > 0
+    anchor = memory.export()[0]
+    valid_evidence = anchor.evidence > 0
 
     assert memory.reference_bootstrapped
     assert torch.all(
-        memory.states[0].evidence[valid_evidence]
+        anchor.evidence[valid_evidence]
         == memory.reference_prior_evidence
     )
     assert torch.all(
@@ -576,7 +630,7 @@ def test_reference_identity_bootstrap_is_authoritative_and_single_use():
         )
 
 
-def test_reference_identity_resists_low_confidence_online_update():
+def test_reference_identity_anchor_is_separate_from_online_update():
     key = torch.randn((1, 4, 1, 2))
     value = torch.randn_like(key)
     memory = identity_module.SlowTargetIdentityMemory(
@@ -587,17 +641,22 @@ def test_reference_identity_resists_low_confidence_online_update():
         _cache(key, value),
         write_weight=torch.ones((1, 4)),
     )
-    reference_value = memory.states[0].value.float().clone()
+    reference_value = memory.export()[0].value.float().clone()
 
     update = memory.update(
         _cache(key, value + 20.0),
         write_weight=torch.full((1, 4), 0.05),
     )
 
-    assert update.update_gain.max() < 0.1
-    assert (
-        memory.states[0].value.float() - reference_value
-    ).abs().max() < 2.0
+    assert update.update_gain.max() == 1.0
+    assert torch.equal(
+        memory.export()[0].value.float(),
+        reference_value,
+    )
+    assert not torch.equal(
+        memory.export_adaptive()[0].value.float(),
+        reference_value,
+    )
 
 
 def test_slow_identity_update_resists_low_precision_overwrite():
@@ -731,6 +790,56 @@ def test_identity_value_correction_is_noop_without_evidence():
 
     assert torch.equal(corrected, target_value)
     assert torch.count_nonzero(support) == 0
+
+
+def test_identity_value_correction_rejects_weak_source_match():
+    correspondence_key = torch.tensor(
+        [[[[0.0, 1.0]], [[0.0, -1.0]]]],
+        dtype=torch.float32,
+    )
+    target_value = torch.zeros_like(correspondence_key)
+    prototype_key = torch.tensor([[[[1.0, 0.0]]]])
+    prototype_value = torch.ones_like(prototype_key) * 7.0
+
+    corrected, support = (
+        attention_module.apply_target_identity_value_correction(
+            correspondence_key,
+            target_value,
+            prototype_key,
+            prototype_value,
+            prototype_evidence=torch.ones((1, 1)),
+        )
+    )
+
+    assert torch.equal(corrected, target_value)
+    assert torch.count_nonzero(support) == 0
+
+
+def test_identity_value_correction_respects_role_support_mask():
+    correspondence_key = torch.tensor(
+        [[[[1.0, 0.0]], [[1.0, 0.0]]]],
+        dtype=torch.float32,
+    )
+    target_value = torch.zeros_like(correspondence_key)
+    prototype_key = correspondence_key[:, :1].clone()
+    prototype_value = torch.ones_like(prototype_key) * 5.0
+    support_mask = torch.tensor([[True, False]])
+
+    corrected, support = (
+        attention_module.apply_target_identity_value_correction(
+            correspondence_key,
+            target_value,
+            prototype_key,
+            prototype_value,
+            prototype_evidence=torch.ones((1, 1)),
+            support_mask=support_mask,
+        )
+    )
+
+    assert support[0, 0] > 0
+    assert support[0, 1] == 0
+    assert torch.count_nonzero(corrected[0, 0]) > 0
+    assert torch.equal(corrected[0, 1], target_value[0, 1])
 
 
 def test_identity_value_correction_normalizes_support_per_frame():

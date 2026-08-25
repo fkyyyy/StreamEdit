@@ -210,8 +210,8 @@ if __name__ == '__main__':
         action="store_true",
         default=False,
         help=(
-            "Seed target identity from the first frame's low-noise object "
-            "core, then apply it causally within the first block."
+            "Freeze target appearance from the first frame's low-noise "
+            "object core and retrieve it across blocks with source keys."
         ),
     )
     parser.add_argument(

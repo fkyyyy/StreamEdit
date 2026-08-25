@@ -1154,7 +1154,7 @@ def build_reference_identity_bootstrap(
 
 
 class SlowTargetIdentityMemory:
-    """Maintain reliable target appearance without spatially locking pose."""
+    """Factor source correspondence from immutable target appearance."""
 
     def __init__(
         self,
@@ -1187,6 +1187,7 @@ class SlowTargetIdentityMemory:
             float(reference_prior_evidence)
         )
         self.eps = eps
+        self.anchor_states: Dict[int, TargetIdentityLayerState] = {}
         self.states: Dict[int, TargetIdentityLayerState] = {}
         self.reference_bootstrapped = False
         self.causal_first_frame_bootstrapped = False
@@ -1379,12 +1380,35 @@ class SlowTargetIdentityMemory:
             observation_evidence,
         )
 
+    @staticmethod
+    def _current_tokens(
+        cache,
+        num_new_tokens: int,
+        tensor_name: str,
+    ) -> torch.Tensor:
+        if tensor_name == "k":
+            captured_key = cache.get("current_identity_key")
+            if captured_key is not None:
+                if captured_key.shape[1] != num_new_tokens:
+                    raise ValueError(
+                        "Captured source identity keys and target KV must "
+                        "contain the same number of current tokens"
+                    )
+                return captured_key
+        local_end = cache["local_end_index"].item()
+        return cache[tensor_name][
+            :,
+            local_end - num_new_tokens:local_end,
+        ]
+
     @torch.no_grad()
-    def update(
+    def _update_store(
         self,
         kv_cache,
         write_weight: torch.Tensor,
+        state_store: Dict[int, TargetIdentityLayerState],
         batch_slice: slice | None = None,
+        source_kv_cache=None,
     ) -> TargetIdentityUpdate:
         if write_weight.ndim != 2:
             raise ValueError(
@@ -1398,31 +1422,43 @@ class SlowTargetIdentityMemory:
         update_gains = []
         accumulated_evidence = []
         for layer in self.layers:
-            cache = kv_cache[layer]
-            num_new_tokens = cache.get("num_new_tokens")
-            local_end = cache["local_end_index"].item()
+            target_cache = kv_cache[layer]
+            source_cache = (
+                target_cache
+                if source_kv_cache is None
+                else source_kv_cache[layer]
+            )
+            num_new_tokens = target_cache.get("num_new_tokens")
             if num_new_tokens != write_weight.shape[1]:
                 raise ValueError(
                     "Identity write weights and target KV must align: "
                     f"{write_weight.shape[1]} != {num_new_tokens}"
                 )
-            key = cache["k"][
-                :,
-                local_end - num_new_tokens:local_end,
-            ]
-            value = cache["v"][
-                :,
-                local_end - num_new_tokens:local_end,
-            ]
+            key = self._current_tokens(
+                source_cache,
+                num_new_tokens,
+                "k",
+            )
+            value = self._current_tokens(
+                target_cache,
+                num_new_tokens,
+                "v",
+            )
             if batch_slice is not None:
-                key = key[batch_slice]
                 value = value[batch_slice]
+                if key.shape[0] != write_weight.shape[0]:
+                    key = key[batch_slice]
             if key.shape[0] != write_weight.shape[0]:
                 raise ValueError(
-                    "Identity KV batch and write weights must align: "
+                    "Source identity keys and write weights must align: "
                     f"{key.shape[0]} != {write_weight.shape[0]}"
                 )
-            previous = self.states.get(layer)
+            if value.shape[0] != write_weight.shape[0]:
+                raise ValueError(
+                    "Target identity values and write weights must align: "
+                    f"{value.shape[0]} != {write_weight.shape[0]}"
+                )
+            previous = state_store.get(layer)
             (
                 observed_key,
                 observed_value,
@@ -1479,7 +1515,7 @@ class SlowTargetIdentityMemory:
                 evidence=total_evidence.detach(),
             )
             state.validate()
-            self.states[layer] = state
+            state_store[layer] = state
             observation_evidence.append(observed_evidence)
             update_gains.append(gain)
             accumulated_evidence.append(total_evidence)
@@ -1500,15 +1536,54 @@ class SlowTargetIdentityMemory:
         return update
 
     @torch.no_grad()
+    def update(
+        self,
+        kv_cache,
+        write_weight: torch.Tensor,
+        batch_slice: slice | None = None,
+        source_kv_cache=None,
+    ) -> TargetIdentityUpdate:
+        """Update the adaptive bank without changing an immutable anchor."""
+        return self._update_store(
+            kv_cache=kv_cache,
+            write_weight=write_weight,
+            state_store=self.states,
+            batch_slice=batch_slice,
+            source_kv_cache=source_kv_cache,
+        )
+
+    def _make_authoritative(
+        self,
+        states: Dict[int, TargetIdentityLayerState],
+    ) -> None:
+        for layer, state in tuple(states.items()):
+            authoritative_evidence = torch.where(
+                state.evidence > self.eps,
+                torch.full_like(
+                    state.evidence,
+                    self.reference_prior_evidence,
+                ),
+                torch.zeros_like(state.evidence),
+            )
+            anchored_state = TargetIdentityLayerState(
+                key=state.key,
+                value=state.value,
+                evidence=authoritative_evidence,
+            )
+            anchored_state.validate()
+            states[layer] = anchored_state
+
+    @torch.no_grad()
     def bootstrap_causal_first_frame(
         self,
         kv_cache,
         write_weight: torch.Tensor,
         num_frames: int,
         target_batch_start: int,
+        source_kv_cache=None,
     ) -> TargetIdentityUpdate:
-        """Seed identity from frame zero for later steps of the same block."""
-        if self.states:
+        """Freeze source-key/target-value identity from frame zero."""
+        if self.states or self.anchor_states:
             raise RuntimeError(
                 "Causal first-frame bootstrap requires empty identity state"
             )
@@ -1540,58 +1615,53 @@ class SlowTargetIdentityMemory:
             :tokens_per_frame,
         ]
         batch_end = target_batch_start + write_weight.shape[0]
-        update = self.update(
+        update = self._update_store(
             kv_cache=kv_cache,
             write_weight=first_frame_weight,
+            state_store=self.anchor_states,
             batch_slice=slice(target_batch_start, batch_end),
+            source_kv_cache=source_kv_cache,
         )
+        self._make_authoritative(self.anchor_states)
         self.causal_first_frame_bootstrapped = True
-        return update
-
-    def discard_causal_first_frame_state(self) -> None:
-        """Drop the noisy temporary state before the clean block update."""
-        if not self.causal_first_frame_bootstrapped:
-            raise RuntimeError(
-                "Causal first-frame identity was not bootstrapped"
-            )
-        if self.reference_bootstrapped:
-            raise RuntimeError(
-                "Reference identity state must not be discarded"
-            )
-        self.states.clear()
+        anchored_update = TargetIdentityUpdate(
+            write_weight=update.write_weight,
+            observation_evidence=update.observation_evidence,
+            update_gain=update.update_gain,
+            accumulated_evidence=torch.stack(
+                [
+                    self.anchor_states[layer].evidence
+                    for layer in self.layers
+                ],
+                dim=0,
+            ),
+        )
+        anchored_update.validate()
+        return anchored_update
 
     @torch.no_grad()
     def bootstrap_reference(
         self,
         kv_cache,
         write_weight: torch.Tensor,
+        source_kv_cache=None,
     ) -> TargetIdentityUpdate:
         if self.reference_bootstrapped:
             raise RuntimeError(
                 "Target identity reference was already bootstrapped"
             )
-        if self.states:
+        if self.states or self.anchor_states:
             raise RuntimeError(
                 "Target identity reference must be bootstrapped before "
                 "online identity updates"
             )
-        update = self.update(kv_cache, write_weight)
-        for layer, state in tuple(self.states.items()):
-            authoritative_evidence = torch.where(
-                state.evidence > self.eps,
-                torch.full_like(
-                    state.evidence,
-                    self.reference_prior_evidence,
-                ),
-                torch.zeros_like(state.evidence),
-            )
-            anchored_state = TargetIdentityLayerState(
-                key=state.key,
-                value=state.value,
-                evidence=authoritative_evidence,
-            )
-            anchored_state.validate()
-            self.states[layer] = anchored_state
+        update = self._update_store(
+            kv_cache=kv_cache,
+            write_weight=write_weight,
+            state_store=self.anchor_states,
+            source_kv_cache=source_kv_cache,
+        )
+        self._make_authoritative(self.anchor_states)
         self.reference_bootstrapped = True
         anchored_update = TargetIdentityUpdate(
             write_weight=update.write_weight,
@@ -1599,7 +1669,7 @@ class SlowTargetIdentityMemory:
             update_gain=update.update_gain,
             accumulated_evidence=torch.stack(
                 [
-                    self.states[layer].evidence
+                    self.anchor_states[layer].evidence
                     for layer in self.layers
                 ],
                 dim=0,
@@ -1609,6 +1679,13 @@ class SlowTargetIdentityMemory:
         return anchored_update
 
     def export(
+        self,
+    ) -> Mapping[int, TargetIdentityLayerState]:
+        if self.anchor_states:
+            return self.anchor_states
+        return self.states
+
+    def export_adaptive(
         self,
     ) -> Mapping[int, TargetIdentityLayerState]:
         return self.states

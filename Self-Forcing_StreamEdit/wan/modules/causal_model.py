@@ -181,6 +181,11 @@ class CausalWanSelfAttention(nn.Module):
                 q.detach().float().mean(dim=2),
                 dim=-1,
             ).to(dtype=v.dtype)
+        if (
+            isinstance(kv_cache, dict)
+            and kv_cache.pop("capture_current_identity_key", False)
+        ):
+            kv_cache["current_identity_key"] = k.detach()
 
         if kv_cache is None:
             # if it is teacher forcing training?
@@ -352,25 +357,39 @@ class CausalWanSelfAttention(nn.Module):
                 layer_index = kv_cache.get("layer_index", -1)
                 identity_state = identity_states.get(layer_index)
                 if identity_state is not None:
-                    _, raw_target_key = k.chunk(2, dim=0)
+                    raw_source_key, _ = k.chunk(2, dim=0)
+                    source_identity_keys = shared_dict.get(
+                        "source_identity_keys",
+                        {},
+                    )
+                    correspondence_key = source_identity_keys.get(
+                        layer_index,
+                        raw_source_key,
+                    ).to(
+                        device=raw_source_key.device,
+                        dtype=raw_source_key.dtype,
+                    )
                     (
                         trg_current_value,
                         identity_support,
                     ) = apply_target_identity_value_correction(
-                        target_key=raw_target_key,
+                        correspondence_key=correspondence_key,
                         target_value=trg_current_value,
                         prototype_key=identity_state.key.to(
-                            device=raw_target_key.device,
-                            dtype=raw_target_key.dtype,
+                            device=correspondence_key.device,
+                            dtype=correspondence_key.dtype,
                         ),
                         prototype_value=identity_state.value.to(
                             device=trg_current_value.device,
                             dtype=trg_current_value.dtype,
                         ),
                         prototype_evidence=identity_state.evidence.to(
-                            device=raw_target_key.device,
+                            device=correspondence_key.device,
                         ),
                         tokens_per_frame=frame_seqlen,
+                        support_mask=kv_cache[
+                            "current_src_fg_mask"
+                        ],
                     )
                     shared_dict.setdefault(
                         "target_identity_support",

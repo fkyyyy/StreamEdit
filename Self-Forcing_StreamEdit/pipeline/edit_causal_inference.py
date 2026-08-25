@@ -1174,6 +1174,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     reference_identity_enabled
                     and not target_identity_memory.reference_bootstrapped
                 ):
+                    self._register_identity_key_capture(
+                        kv_cache_src,
+                        hand_query_layers,
+                    )
                     self._register_query_capture(
                         kv_cache_src,
                         hand_query_layers,
@@ -1238,6 +1242,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             write_weight=(
                                 reference_bootstrap.write_weight
                             ),
+                            source_kv_cache=kv_cache_src,
                         )
                     )
                     (
@@ -1372,6 +1377,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     kv_cache_src,
                     hand_query_layers,
                 )
+            if target_identity_enabled:
+                self._register_identity_key_capture(
+                    kv_cache_src,
+                    hand_query_layers,
+                )
             self.generator(
                 noisy_image_or_video=src_input,
                 conditional_dict=src_conditional_dict,
@@ -1390,6 +1400,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 )
                 if hand_role_enabled
                 else None
+            )
+            source_identity_keys = (
+                self._collect_identity_keys(
+                    kv_cache_src,
+                    hand_query_layers,
+                )
+                if target_identity_enabled
+                else {}
             )
             current_roles = None
             role_edit_tokens = None
@@ -1598,6 +1616,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     if target_identity_enabled
                     else {}
                 ),
+                "source_identity_keys": source_identity_keys,
             })
             effective_src_fg_mask = (
                 role_edit_tokens
@@ -2173,7 +2192,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     if (
                         identity_first_latent_bootstrap
                         and target_identity_enabled
-                        and not target_identity_memory.states
+                        and not target_identity_memory.export()
                         and current_start_frame == 0
                         and current_num_frames > 1
                     ):
@@ -2779,9 +2798,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     current_causal_identity_bootstrap_plan is not None
                     and current_causal_identity_bootstrap is None
                 ):
-                    # Project the first target estimate through a clean
-                    # target-only pass so the temporary prototype is not
-                    # tied to the highest-noise dual-branch features.
+                    # Pair clean source correspondence keys with low-noise
+                    # target values, then keep that identity anchor frozen.
                     self.generator(
                         noisy_image_or_video=denoised_pred.detach(),
                         conditional_dict=trg_conditional_dict,
@@ -2800,6 +2818,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             ),
                             num_frames=current_num_frames,
                             target_batch_start=0,
+                            source_kv_cache=kv_cache_src,
                         )
                     )
                     shared_dict_dual["target_identity_memory"] = (
@@ -2820,7 +2839,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     )
                     print(
                         "CAUSAL_IDENTITY_BOOTSTRAP "
-                        "block=0 source=clean_target_x0_object_core "
+                        "block=0 "
+                        "source=clean_source_key_target_x0_value "
+                        "immutable=1 "
                         "applies_from_step=1 "
                         "weight="
                         f"{current_causal_identity_bootstrap.write_weight.mean().item():.4f} "
@@ -2973,12 +2994,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     identity_write_tokens = (
                         current_identity_propagation.write_weight
                     )
-                if current_causal_identity_bootstrap is not None:
-                    target_identity_memory.discard_causal_first_frame_state()
                 current_identity_update = (
                     target_identity_memory.update(
                         kv_cache=kv_cache_trg,
                         write_weight=identity_write_tokens,
+                        source_kv_cache=kv_cache_src,
                     )
                 )
                 # #region debug-point H17:identity-prototype-drift
@@ -3562,6 +3582,28 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         belief_kv_weight_cache["preserve_action"]
                     ),
                 })
+
+    @staticmethod
+    def _register_identity_key_capture(kv_cache, layers):
+        for layer_index in layers:
+            kv_cache[layer_index][
+                "capture_current_identity_key"
+            ] = True
+
+    @staticmethod
+    def _collect_identity_keys(kv_cache, layers):
+        keys = {}
+        for layer_index in layers:
+            key = kv_cache[layer_index].get(
+                "current_identity_key"
+            )
+            if key is None:
+                raise RuntimeError(
+                    "Missing captured source identity key at layer "
+                    f"{layer_index}"
+                )
+            keys[layer_index] = key
+        return keys
 
     @staticmethod
     def _register_query_capture(kv_cache, layers):

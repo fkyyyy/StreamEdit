@@ -217,34 +217,36 @@ def fuse_aligned_memory(
 
 
 def apply_target_identity_value_correction(
-    target_key,
+    correspondence_key,
     target_value,
     prototype_key,
     prototype_value,
     prototype_evidence,
     tokens_per_frame=None,
+    support_mask=None,
+    min_similarity=0.55,
     eps=1e-6,
 ):
-    """Retrieve slow appearance prototypes while retaining current keys."""
-    if target_key.shape != target_value.shape:
+    """Transport target appearance using source-side correspondence."""
+    if correspondence_key.shape != target_value.shape:
         raise ValueError(
-            "Current target keys and values must share shape"
+            "Correspondence keys and target values must share shape"
         )
     if prototype_key.shape != prototype_value.shape:
         raise ValueError(
             "Identity prototype keys and values must share shape"
         )
-    if target_key.ndim != 4 or prototype_key.ndim != 4:
+    if correspondence_key.ndim != 4 or prototype_key.ndim != 4:
         raise ValueError(
             "Identity correction expects [B,L,H,D] tensors"
         )
-    if target_key.shape[0] != prototype_key.shape[0]:
+    if correspondence_key.shape[0] != prototype_key.shape[0]:
         raise ValueError(
-            "Current target and identity memory must share batch size"
+            "Correspondence query and identity memory must share batch size"
         )
-    if target_key.shape[2:] != prototype_key.shape[2:]:
+    if correspondence_key.shape[2:] != prototype_key.shape[2:]:
         raise ValueError(
-            "Current target and identity memory must share heads"
+            "Correspondence query and identity memory must share heads"
         )
     if prototype_evidence.shape != prototype_key.shape[:2]:
         raise ValueError(
@@ -252,16 +254,26 @@ def apply_target_identity_value_correction(
         )
     if tokens_per_frame is not None and (
         tokens_per_frame <= 0
-        or target_key.shape[1] % tokens_per_frame != 0
+        or correspondence_key.shape[1] % tokens_per_frame != 0
     ):
         raise ValueError(
             "tokens_per_frame must evenly divide the target sequence"
+        )
+    if support_mask is not None and support_mask.shape != (
+        correspondence_key.shape[:2]
+    ):
+        raise ValueError(
+            "Identity support mask must have shape [B,L]"
+        )
+    if not -1.0 < min_similarity < 1.0:
+        raise ValueError(
+            "min_similarity must lie in (-1, 1)"
         )
     if eps <= 0:
         raise ValueError("eps must be positive")
 
     key = torch.nn.functional.normalize(
-        target_key.float(),
+        correspondence_key.float(),
         dim=-1,
     )
     memory_key = torch.nn.functional.normalize(
@@ -340,6 +352,10 @@ def apply_target_identity_value_correction(
         keepdim=True,
     )
     match_spread = high_match - support_threshold
+    absolute_support = (
+        (support_similarity - min_similarity)
+        / (1.0 - min_similarity)
+    ).clamp(0.0, 1.0)
     relative_match = (
         (support_similarity - support_threshold)
         / match_spread.clamp_min(eps)
@@ -347,12 +363,10 @@ def apply_target_identity_value_correction(
     relative_match = torch.where(
         match_spread > eps,
         relative_match,
-        torch.zeros_like(relative_match),
+        absolute_support,
     )
     relative_match = relative_match.reshape_as(best_similarity)
-    absolute_match = (
-        0.5 * (best_similarity + 1.0)
-    ).clamp(0.0, 1.0)
+    absolute_match = absolute_support.reshape_as(best_similarity)
     assigned_confidence = (
         assignment * confidence[:, None, :]
     ).sum(dim=-1)
@@ -365,6 +379,11 @@ def apply_target_identity_value_correction(
         identity_support,
         torch.zeros_like(identity_support),
     )
+    if support_mask is not None:
+        identity_support = (
+            identity_support
+            * support_mask.detach().float().clamp(0.0, 1.0)
+        )
     corrected_value = (
         target_value.float()
         + identity_support[:, :, None, None]
