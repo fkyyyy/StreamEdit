@@ -370,6 +370,7 @@ class CausalWanSelfAttention(nn.Module):
                         prototype_evidence=identity_state.evidence.to(
                             device=raw_target_key.device,
                         ),
+                        tokens_per_frame=frame_seqlen,
                     )
                     shared_dict.setdefault(
                         "target_identity_support",

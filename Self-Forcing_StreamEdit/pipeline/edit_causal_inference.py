@@ -32,9 +32,11 @@ from .target_identity_memory import (
     CausalConnectedSupportFilter,
     CausalObjectTokenPropagator,
     ConnectedIdentitySupport,
+    FirstFrameIdentityBootstrap,
     SlowTargetIdentityMemory,
     TargetIdentityTokenPropagation,
     TargetIdentityUpdate,
+    build_first_frame_object_core_bootstrap,
     build_reference_identity_bootstrap,
     inject_committed_memory_into_belief,
     strengthen_belief_with_target_identity,
@@ -1417,6 +1419,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
             current_causal_identity_bootstrap: Optional[
                 TargetIdentityUpdate
             ] = None
+            current_causal_identity_bootstrap_plan: Optional[
+                FirstFrameIdentityBootstrap
+            ] = None
             identity_tokenprop_support_tokens = None
             if oracle_role_enabled:
                 role_left = current_start_frame - num_input_frames
@@ -1988,12 +1993,47 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 committed_token_edit,
                                 current_belief_kv_weights.edit_map,
                             ).clamp(0.0, 1.0)
+                            object_posterior = hand_role_debug[
+                                "object_posterior"
+                            ].float()
+                            posterior_threshold = hand_role_debug[
+                                "posterior_threshold"
+                            ].float()
+                            posterior_likelihood = (
+                                (object_posterior >= posterior_threshold)
+                                & (object_posterior > 0)
+                            )
+                            identity_flat = (
+                                current_identity_support.flatten(2)
+                            )
+                            identity_threshold = torch.quantile(
+                                identity_flat,
+                                0.90,
+                                dim=-1,
+                                keepdim=True,
+                            )
+                            identity_likelihood = (
+                                identity_flat >= identity_threshold
+                            ) & (identity_flat > 0)
+                            object_likelihood_mask = (
+                                posterior_likelihood
+                                | identity_likelihood.reshape_as(
+                                    object_posterior
+                                )
+                            ) & (
+                                hand_role_debug[
+                                    "hand_probability"
+                                ].float() < 0.5
+                            )
                             current_connected_identity_support = (
                                 identity_support_filter(
                                     support_weight=raw_identity_support,
                                     anchor_mask=(
                                         identity_observation_tokens
                                         .reshape_as(raw_identity_support)
+                                    ),
+                                    object_likelihood_mask=(
+                                        object_likelihood_mask
                                     ),
                                 )
                             )
@@ -2023,6 +2063,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                     current_connected_identity_support
                                     .anchor_mask.float()
                                 ),
+                                "identity_support_object_likelihood": (
+                                    current_connected_identity_support
+                                    .object_likelihood_mask.float()
+                                ),
                                 "identity_support_budget": (
                                     current_connected_identity_support
                                     .budget_fraction.expand_as(
@@ -2049,6 +2093,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 ],
                                 feedback_strength=(
                                     committed_memory_feedback_strength
+                                ),
+                                identity_core_support=torch.maximum(
+                                    current_connected_identity_support
+                                    .weight,
+                                    current_identity_support
+                                    * current_connected_identity_support
+                                    .keep_mask.float(),
                                 ),
                             )
                             hand_role_debug.update(committed_memory_debug)
@@ -2134,7 +2185,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 "Missing independent evidence for causal "
                                 "identity bootstrap"
                             )
-                        bootstrap_write_map = (
+                        bootstrap_base_write_map = (
                             identity_observation_belief.edit_belief
                             * identity_observation_belief.edit_precision
                             * (
@@ -2143,8 +2194,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             )
                             * identity_observation_belief.visibility
                         ).clamp(0.0, 1.0)
-                        bootstrap_write_tokens = F.avg_pool2d(
-                            bootstrap_write_map.reshape(
+                        bootstrap_base_write_tokens = F.avg_pool2d(
+                            bootstrap_base_write_map.reshape(
                                 batch_size * current_num_frames,
                                 1,
                                 height,
@@ -2152,52 +2203,28 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             ),
                             kernel_size=2,
                             stride=2,
-                        ).reshape(batch_size, -1)
-                        bootstrap_write_tokens = (
-                            bootstrap_write_tokens
-                            * identity_observation_tokens.float()
+                        ).reshape_as(
+                            hand_role_debug["object_posterior"]
                         )
-                        current_causal_identity_bootstrap = (
-                            target_identity_memory
-                            .bootstrap_causal_first_frame(
-                                kv_cache=kv_cache_dual,
-                                write_weight=bootstrap_write_tokens,
-                                num_frames=current_num_frames,
-                                target_batch_start=batch_size,
+                        current_causal_identity_bootstrap_plan = (
+                            build_first_frame_object_core_bootstrap(
+                                base_write_weight=(
+                                    bootstrap_base_write_tokens
+                                ),
+                                object_likelihood=hand_role_debug[
+                                    "object_posterior"
+                                ],
+                                object_threshold=hand_role_debug[
+                                    "posterior_threshold"
+                                ],
+                                hand_probability=hand_role_debug[
+                                    "hand_probability"
+                                ],
                             )
                         )
-                        shared_dict_dual["target_identity_memory"] = (
-                            target_identity_memory.export()
-                        )
-                        bootstrap_shape = hand_role_debug[
-                            "object_posterior"
-                        ]
-                        hand_role_debug.update({
-                            "identity_causal_bootstrap_weight": (
-                                current_causal_identity_bootstrap
-                                .write_weight.reshape_as(bootstrap_shape)
-                            ),
-                            "identity_causal_bootstrap_evidence": (
-                                current_causal_identity_bootstrap
-                                .accumulated_evidence.mean(
-                                    dim=(0, 2),
-                                )[:, None, None, None].expand_as(
-                                    bootstrap_shape
-                                )
-                            ),
-                        })
-                        print(
-                            "CAUSAL_IDENTITY_BOOTSTRAP "
-                            "block=0 source=target_first_latent "
-                            "applies_from_step=1 "
-                            "weight="
-                            f"{current_causal_identity_bootstrap.write_weight.mean().item():.4f} "
-                            "first_frame_weight="
-                            f"{current_causal_identity_bootstrap.write_weight.reshape(batch_size, current_num_frames, -1)[:, 0].mean().item():.4f} "
-                            "support="
-                            f"{(current_causal_identity_bootstrap.write_weight > 0).float().mean().item():.4f} "
-                            "evidence="
-                            f"{current_causal_identity_bootstrap.accumulated_evidence.mean().item():.4f}"
+                        hand_role_debug.update(
+                            current_causal_identity_bootstrap_plan
+                            .as_debug_maps()
                         )
                     # #region debug-point H1-H3:commitment-to-belief
                     if current_commitment is not None:
@@ -2420,6 +2447,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             f"{current_connected_identity_support.keep_mask.float().mean().item():.4f} "
                             "anchor="
                             f"{current_connected_identity_support.anchor_mask.float().mean().item():.4f} "
+                            "likelihood="
+                            f"{current_connected_identity_support.object_likelihood_mask.float().mean().item():.4f} "
                             "budget="
                             f"{current_connected_identity_support.budget_fraction.mean().item():.4f}"
                         )
@@ -2746,6 +2775,62 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     bg_mask = 1 - fg_mask
                     v_t = v_trg + bg_mask * (v_gt - v_src)
                 denoised_pred = noisy_pred_input - t_i * v_t
+                if (
+                    current_causal_identity_bootstrap_plan is not None
+                    and current_causal_identity_bootstrap is None
+                ):
+                    # Project the first target estimate through a clean
+                    # target-only pass so the temporary prototype is not
+                    # tied to the highest-noise dual-branch features.
+                    self.generator(
+                        noisy_image_or_video=denoised_pred.detach(),
+                        conditional_dict=trg_conditional_dict,
+                        timestep=context_timestep,
+                        kv_cache=kv_cache_trg,
+                        crossattn_cache=crossattn_cache_trg,
+                        current_start=0,
+                    )
+                    current_causal_identity_bootstrap = (
+                        target_identity_memory
+                        .bootstrap_causal_first_frame(
+                            kv_cache=kv_cache_trg,
+                            write_weight=(
+                                current_causal_identity_bootstrap_plan
+                                .write_weight
+                            ),
+                            num_frames=current_num_frames,
+                            target_batch_start=0,
+                        )
+                    )
+                    shared_dict_dual["target_identity_memory"] = (
+                        target_identity_memory.export()
+                    )
+                    bootstrap_shape = hand_role_debug[
+                        "object_posterior"
+                    ]
+                    hand_role_debug[
+                        "identity_causal_bootstrap_evidence"
+                    ] = (
+                        current_causal_identity_bootstrap
+                        .accumulated_evidence.mean(
+                            dim=(0, 2),
+                        )[:, None, None, None].expand_as(
+                            bootstrap_shape
+                        )
+                    )
+                    print(
+                        "CAUSAL_IDENTITY_BOOTSTRAP "
+                        "block=0 source=clean_target_x0_object_core "
+                        "applies_from_step=1 "
+                        "weight="
+                        f"{current_causal_identity_bootstrap.write_weight.mean().item():.4f} "
+                        "first_frame_weight="
+                        f"{current_causal_identity_bootstrap.write_weight.reshape(batch_size, current_num_frames, -1)[:, 0].mean().item():.4f} "
+                        "support="
+                        f"{(current_causal_identity_bootstrap.write_weight > 0).float().mean().item():.4f} "
+                        "evidence="
+                        f"{current_causal_identity_bootstrap.accumulated_evidence.mean().item():.4f}"
+                    )
 
                 #✨ target mask grounding
                 if index == len(denoising_step_list) // 2:

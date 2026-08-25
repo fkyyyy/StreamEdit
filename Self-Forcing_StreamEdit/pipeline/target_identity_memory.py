@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 import math
 from typing import Dict, Iterable, Mapping
@@ -87,6 +89,73 @@ class TargetIdentityUpdate:
 
 
 @dataclass(frozen=True)
+class FirstFrameIdentityBootstrap:
+    """High-confidence object core used for causal first-frame identity."""
+
+    write_weight: torch.Tensor
+    base_write_weight: torch.Tensor
+    object_likelihood: torch.Tensor
+    core_mask: torch.Tensor
+
+    def validate(self) -> None:
+        if self.base_write_weight.ndim != 4:
+            raise ValueError(
+                "Bootstrap maps must have shape [B,T,H,W]"
+            )
+        expected_shape = self.base_write_weight.shape
+        for name, value in (
+            ("object_likelihood", self.object_likelihood),
+            ("core_mask", self.core_mask),
+        ):
+            if value.shape != expected_shape:
+                raise ValueError(
+                    f"Bootstrap '{name}' must match [B,T,H,W]"
+                )
+        if self.write_weight.shape != (
+            expected_shape[0],
+            math.prod(expected_shape[1:]),
+        ):
+            raise ValueError(
+                "Bootstrap write weights must flatten [T,H,W]"
+            )
+        for name, value in (
+            ("write_weight", self.write_weight),
+            ("base_write_weight", self.base_write_weight),
+            ("object_likelihood", self.object_likelihood),
+            ("core_mask", self.core_mask.float()),
+        ):
+            if not torch.isfinite(value.float()).all():
+                raise ValueError(
+                    f"Bootstrap '{name}' is not finite"
+                )
+        for name, value in (
+            ("write_weight", self.write_weight),
+            ("base_write_weight", self.base_write_weight),
+            ("object_likelihood", self.object_likelihood),
+        ):
+            if value.min() < 0 or value.max() > 1:
+                raise ValueError(
+                    f"Bootstrap '{name}' must lie in [0, 1]"
+                )
+
+    def as_debug_maps(self) -> Dict[str, torch.Tensor]:
+        return {
+            "identity_causal_bootstrap_base": (
+                self.base_write_weight.float()
+            ),
+            "identity_causal_bootstrap_object_likelihood": (
+                self.object_likelihood.float()
+            ),
+            "identity_causal_bootstrap_core": self.core_mask.float(),
+            "identity_causal_bootstrap_weight": (
+                self.write_weight.reshape_as(
+                    self.base_write_weight
+                ).float()
+            ),
+        }
+
+
+@dataclass(frozen=True)
 class TargetIdentityTokenPropagation:
     """Causal token-match gating applied before identity-memory writes."""
 
@@ -166,6 +235,7 @@ class ConnectedIdentitySupport:
     candidate_mask: torch.Tensor
     keep_mask: torch.Tensor
     anchor_mask: torch.Tensor
+    object_likelihood_mask: torch.Tensor
     budget_fraction: torch.Tensor
 
     def validate(self) -> None:
@@ -178,6 +248,10 @@ class ConnectedIdentitySupport:
             ("candidate_mask", self.candidate_mask),
             ("keep_mask", self.keep_mask),
             ("anchor_mask", self.anchor_mask),
+            (
+                "object_likelihood_mask",
+                self.object_likelihood_mask,
+            ),
         ):
             if value.shape != expected_shape:
                 raise ValueError(
@@ -337,6 +411,7 @@ class CausalConnectedSupportFilter:
         self,
         support_weight: torch.Tensor,
         anchor_mask: torch.Tensor,
+        object_likelihood_mask: torch.Tensor | None = None,
     ) -> ConnectedIdentitySupport:
         if support_weight.ndim != 4:
             raise ValueError(
@@ -346,9 +421,21 @@ class CausalConnectedSupportFilter:
             raise ValueError(
                 "anchor_mask and support_weight must share shape"
             )
+        if (
+            object_likelihood_mask is not None
+            and object_likelihood_mask.shape != support_weight.shape
+        ):
+            raise ValueError(
+                "object_likelihood_mask and support_weight must share shape"
+            )
         support = support_weight.detach().float().clamp(0.0, 1.0)
-        anchor = anchor_mask.detach().bool()
-        candidate = support > self.min_weight
+        likelihood = (
+            torch.ones_like(support, dtype=torch.bool)
+            if object_likelihood_mask is None
+            else object_likelihood_mask.detach().bool()
+        )
+        anchor = anchor_mask.detach().bool() & likelihood
+        candidate = (support > self.min_weight) & likelihood
         keep = torch.zeros_like(candidate)
         budget_fraction = support.new_zeros(
             support.shape[:2] + (1, 1)
@@ -441,10 +528,91 @@ class CausalConnectedSupportFilter:
             candidate_mask=candidate,
             keep_mask=keep,
             anchor_mask=anchor,
+            object_likelihood_mask=likelihood,
             budget_fraction=budget_fraction,
         )
         result.validate()
         return result
+
+
+def build_first_frame_object_core_bootstrap(
+    base_write_weight: torch.Tensor,
+    object_likelihood: torch.Tensor,
+    object_threshold: torch.Tensor,
+    hand_probability: torch.Tensor,
+    hand_exclusion_threshold: float = 0.5,
+    eps: float = 1e-6,
+) -> FirstFrameIdentityBootstrap:
+    """Restrict a causal bootstrap to the first frame's object interior."""
+    if base_write_weight.ndim != 4:
+        raise ValueError(
+            "base_write_weight must have shape [B,T,H,W]"
+        )
+    expected_shape = base_write_weight.shape
+    for name, value in (
+        ("object_likelihood", object_likelihood),
+        ("hand_probability", hand_probability),
+    ):
+        if value.shape != expected_shape:
+            raise ValueError(
+                f"{name} must match base_write_weight"
+            )
+    if object_threshold.shape not in {
+        expected_shape,
+        expected_shape[:2] + (1, 1),
+    }:
+        raise ValueError(
+            "object_threshold must have shape [B,T,H,W] or [B,T,1,1]"
+        )
+    if not 0.0 <= hand_exclusion_threshold <= 1.0:
+        raise ValueError(
+            "hand_exclusion_threshold must lie in [0, 1]"
+        )
+    if eps <= 0:
+        raise ValueError("eps must be positive")
+
+    base = base_write_weight.detach().float().clamp(0.0, 1.0)
+    likelihood = object_likelihood.detach().float().clamp(0.0, 1.0)
+    threshold = object_threshold.detach().float().clamp(0.0, 1.0)
+    hand = hand_probability.detach().float().clamp(0.0, 1.0)
+    core = (
+        (likelihood >= threshold)
+        & (likelihood > eps)
+        & (hand < hand_exclusion_threshold)
+    )
+    hand_contact = F.max_pool2d(
+        hand.reshape(
+            math.prod(expected_shape[:2]),
+            1,
+            *expected_shape[-2:],
+        ),
+        kernel_size=3,
+        stride=1,
+        padding=1,
+    ).reshape_as(hand)
+    component_mask = _largest_weighted_component_mask(
+        likelihood * core.float(),
+        eps=eps,
+        hand_contact_score=hand_contact,
+    )
+    core = core & component_mask
+    first_frame_core = torch.zeros_like(core)
+    first_frame_core[:, 0] = core[:, 0]
+    write_map = (
+        base
+        * likelihood
+        * (1.0 - hand)
+        * first_frame_core.float()
+    ).clamp(0.0, 1.0)
+
+    result = FirstFrameIdentityBootstrap(
+        write_weight=write_map.flatten(1),
+        base_write_weight=base,
+        object_likelihood=likelihood,
+        core_mask=first_frame_core,
+    )
+    result.validate()
+    return result
 
 
 class CausalObjectTokenPropagator:
@@ -1546,6 +1714,7 @@ def inject_committed_memory_into_belief(
     committed_token_precision: torch.Tensor,
     hand_mask: torch.Tensor,
     feedback_strength: float,
+    identity_core_support: torch.Tensor | None = None,
     eps: float = 1e-6,
 ) -> tuple[CausalControlBelief, Dict[str, torch.Tensor]]:
     """Materialize transported edit memory into the current action belief."""
@@ -1557,6 +1726,13 @@ def inject_committed_memory_into_belief(
         )
     if hand_mask.shape != belief.edit_belief.shape:
         raise ValueError("hand_mask and belief must share shape")
+    if (
+        identity_core_support is not None
+        and identity_core_support.shape != committed_token_edit.shape
+    ):
+        raise ValueError(
+            "identity_core_support and committed edit must share shape"
+        )
 
     committed_edit_full = _expand_token_map_to_belief(
         committed_token_edit,
@@ -1575,25 +1751,47 @@ def inject_committed_memory_into_belief(
     committed_evidence = (
         committed_evidence * float(feedback_strength)
     ).clamp(0.0, 1.0)
+    identity_core_full = (
+        torch.zeros_like(committed_edit_full)
+        if identity_core_support is None
+        else _expand_token_map_to_belief(
+            identity_core_support,
+            belief,
+        )
+    )
+    identity_core_full = (
+        identity_core_full * object_space
+    ).clamp(0.0, 1.0)
+    identity_core_evidence = (
+        identity_core_full * float(feedback_strength)
+    ).clamp(0.0, 1.0)
+    feedback_evidence = torch.maximum(
+        committed_evidence,
+        identity_core_evidence,
+    )
+    feedback_precision = torch.maximum(
+        committed_precision_full,
+        identity_core_full,
+    )
 
     old_edit_belief = belief.edit_belief.float()
     old_edit_precision = belief.edit_precision.float()
     edit_belief = (
         1.0
         - (1.0 - old_edit_belief)
-        * (1.0 - committed_evidence)
+        * (1.0 - feedback_evidence)
     ).clamp(0.0, 1.0)
     edit_precision = torch.where(
         edit_belief > eps,
         (
             old_edit_belief * old_edit_precision
-            + committed_evidence * committed_precision_full
+            + feedback_evidence * feedback_precision
         )
-        / (old_edit_belief + committed_evidence).clamp_min(eps),
+        / (old_edit_belief + feedback_evidence).clamp_min(eps),
         old_edit_precision,
     ).clamp(0.0, 1.0)
 
-    preserve_release = committed_evidence.clamp(0.0, 0.90)
+    preserve_release = feedback_evidence.clamp(0.0, 0.90)
     preserve_belief = (
         belief.preserve_belief.float()
         * (1.0 - preserve_release)
@@ -1610,7 +1808,7 @@ def inject_committed_memory_into_belief(
         * (1.0 - belief.preserve_precision.float())
     ) / responsibility
     uncertainty = torch.where(
-        committed_evidence > eps,
+        feedback_evidence > eps,
         updated_uncertainty,
         belief.uncertainty.float(),
     )
@@ -1628,5 +1826,7 @@ def inject_committed_memory_into_belief(
         "committed_memory_edit": committed_edit_full.float(),
         "committed_memory_precision": committed_precision_full.float(),
         "committed_memory_evidence": committed_evidence.float(),
+        "committed_memory_identity_core": identity_core_full.float(),
+        "committed_memory_feedback_evidence": feedback_evidence.float(),
         "committed_memory_preserve_release": preserve_release.float(),
     }

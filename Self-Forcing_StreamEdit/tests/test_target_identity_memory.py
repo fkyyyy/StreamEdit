@@ -233,6 +233,58 @@ def test_connected_support_survives_one_empty_observation():
     assert result.keep_mask[0, 1, 2, 2:4].all()
 
 
+def test_connected_support_stays_inside_object_likelihood():
+    support = torch.ones((1, 1, 5, 6), dtype=torch.float32)
+    anchor = torch.zeros_like(support, dtype=torch.bool)
+    anchor[0, 0, 2, 1] = True
+    object_likelihood = torch.zeros_like(support, dtype=torch.bool)
+    object_likelihood[0, 0, 2, 1:3] = True
+    support_filter = identity_module.CausalConnectedSupportFilter(
+        min_area_fraction=0.01,
+        max_area_fraction=0.5,
+        max_anchor_ratio=4.0,
+    )
+
+    result = support_filter(
+        support,
+        anchor,
+        object_likelihood_mask=object_likelihood,
+    )
+
+    assert torch.equal(
+        result.object_likelihood_mask,
+        object_likelihood,
+    )
+    assert result.keep_mask[0, 0, 2, 1:3].all()
+    assert not (result.keep_mask & ~object_likelihood).any()
+
+
+def test_first_frame_bootstrap_uses_non_hand_object_core_only():
+    base = torch.ones((1, 3, 5, 6), dtype=torch.float32)
+    likelihood = torch.zeros_like(base)
+    likelihood[0, 0, 2, 1:3] = torch.tensor([0.9, 0.8])
+    likelihood[0, 0, 0, 3:6] = 1.0
+    likelihood[0, 1, 0, 0] = 1.0
+    threshold = torch.full((1, 3, 1, 1), 0.5)
+    hand = torch.zeros_like(base)
+    hand[0, 0, 2, 0] = 1.0
+
+    bootstrap = (
+        identity_module.build_first_frame_object_core_bootstrap(
+            base_write_weight=base,
+            object_likelihood=likelihood,
+            object_threshold=threshold,
+            hand_probability=hand,
+        )
+    )
+    write = bootstrap.write_weight.reshape_as(base)
+
+    assert bootstrap.core_mask[0, 0, 2, 1:3].all()
+    assert not bootstrap.core_mask[0, 0, 0, 3:6].any()
+    assert write[0, 0, 2, 1] == pytest.approx(0.9)
+    assert torch.count_nonzero(write[:, 1:]) == 0
+
+
 def test_causal_first_frame_bootstrap_uses_only_target_first_frame():
     source_key = torch.tensor(
         [[[[1.0, 0.0]]] * 6],
@@ -314,6 +366,37 @@ def test_committed_memory_feedback_does_not_release_hand_preserve():
     assert torch.allclose(updated.preserve_belief, belief.preserve_belief)
     assert torch.allclose(updated.uncertainty, belief.uncertainty)
     assert torch.count_nonzero(debug["committed_memory_evidence"]) == 0
+
+
+def test_identity_core_actively_releases_preserve_belief():
+    belief = _belief(edit=0.1, preserve=1.0)
+    hand = torch.zeros((1, 1, 4, 4), dtype=torch.float32)
+    committed_edit = torch.full(
+        (1, 1, 2, 2),
+        0.1,
+        dtype=torch.float32,
+    )
+    committed_precision = torch.full_like(committed_edit, 0.1)
+    identity_core = torch.zeros_like(committed_edit)
+    identity_core[0, 0, 0, 0] = 1.0
+
+    updated, debug = identity_module.inject_committed_memory_into_belief(
+        belief=belief,
+        committed_token_edit=committed_edit,
+        committed_token_precision=committed_precision,
+        hand_mask=hand,
+        feedback_strength=0.75,
+        identity_core_support=identity_core,
+    )
+
+    assert debug["committed_memory_preserve_release"][0, 0, 0, 0] == (
+        pytest.approx(0.75)
+    )
+    assert updated.preserve_belief[0, 0, 0, 0] == pytest.approx(0.25)
+    assert updated.preserve_belief[0, 0, -1, -1] == pytest.approx(0.9925)
+    assert updated.edit_belief[0, 0, 0, 0] > belief.edit_belief[
+        0, 0, 0, 0
+    ]
 
 
 def test_reference_bootstrap_localizes_semantic_latent_change():
@@ -648,6 +731,45 @@ def test_identity_value_correction_is_noop_without_evidence():
 
     assert torch.equal(corrected, target_value)
     assert torch.count_nonzero(support) == 0
+
+
+def test_identity_value_correction_normalizes_support_per_frame():
+    cosine = torch.tensor([
+        1.00, 0.99, 0.98, 0.97, 0.96,
+        0.95, 0.94, 0.93, 0.92, 0.91,
+        0.80, 0.70, 0.60, 0.50, 0.40,
+        0.30, 0.20, 0.10, 0.00, -0.10,
+    ])
+    sine = torch.sqrt((1.0 - cosine.square()).clamp_min(0.0))
+    target_key = torch.stack((cosine, sine), dim=-1)[
+        None, :, None, :
+    ]
+    target_value = torch.zeros_like(target_key)
+    prototype_key = torch.tensor([[[[1.0, 0.0]]]])
+    prototype_value = torch.ones_like(prototype_key)
+
+    _, global_support = (
+        attention_module.apply_target_identity_value_correction(
+            target_key,
+            target_value,
+            prototype_key,
+            prototype_value,
+            prototype_evidence=torch.ones((1, 1)),
+        )
+    )
+    _, frame_support = (
+        attention_module.apply_target_identity_value_correction(
+            target_key,
+            target_value,
+            prototype_key,
+            prototype_value,
+            prototype_evidence=torch.ones((1, 1)),
+            tokens_per_frame=10,
+        )
+    )
+
+    assert torch.count_nonzero(global_support[:, 10:]) == 0
+    assert frame_support[:, 10:].max() > 0
 
 
 def test_identity_feedback_preserves_hand_core():

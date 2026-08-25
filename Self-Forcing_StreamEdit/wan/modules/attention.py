@@ -222,6 +222,7 @@ def apply_target_identity_value_correction(
     prototype_key,
     prototype_value,
     prototype_evidence,
+    tokens_per_frame=None,
     eps=1e-6,
 ):
     """Retrieve slow appearance prototypes while retaining current keys."""
@@ -248,6 +249,13 @@ def apply_target_identity_value_correction(
     if prototype_evidence.shape != prototype_key.shape[:2]:
         raise ValueError(
             "Identity evidence must have shape [B,P]"
+        )
+    if tokens_per_frame is not None and (
+        tokens_per_frame <= 0
+        or target_key.shape[1] % tokens_per_frame != 0
+    ):
+        raise ValueError(
+            "tokens_per_frame must evenly divide the target sequence"
         )
     if eps <= 0:
         raise ValueError("eps must be positive")
@@ -310,21 +318,30 @@ def apply_target_identity_value_correction(
         ~valid[:, None, :],
         -1.0,
     ).max(dim=-1).values
+    support_similarity = (
+        best_similarity
+        if tokens_per_frame is None
+        else best_similarity.reshape(
+            best_similarity.shape[0],
+            -1,
+            tokens_per_frame,
+        )
+    )
     support_threshold = torch.quantile(
-        best_similarity,
+        support_similarity,
         0.90,
         dim=-1,
         keepdim=True,
     )
     high_match = torch.quantile(
-        best_similarity,
+        support_similarity,
         0.99,
         dim=-1,
         keepdim=True,
     )
     match_spread = high_match - support_threshold
     relative_match = (
-        (best_similarity - support_threshold)
+        (support_similarity - support_threshold)
         / match_spread.clamp_min(eps)
     ).clamp(0.0, 1.0)
     relative_match = torch.where(
@@ -332,6 +349,7 @@ def apply_target_identity_value_correction(
         relative_match,
         torch.zeros_like(relative_match),
     )
+    relative_match = relative_match.reshape_as(best_similarity)
     absolute_match = (
         0.5 * (best_similarity + 1.0)
     ).clamp(0.0, 1.0)
