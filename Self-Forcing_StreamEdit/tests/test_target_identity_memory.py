@@ -379,6 +379,140 @@ def test_causal_first_frame_anchor_ignores_adaptive_updates():
     ) > 0
 
 
+def test_object_wise_reset_commits_final_clean_object_only():
+    provisional_source_key = torch.tensor(
+        [[[[1.0, 0.0]]] * 4],
+        dtype=torch.float32,
+    )
+    provisional_target_key = torch.tensor(
+        [[[[0.0, 1.0]]] * 4],
+        dtype=torch.float32,
+    )
+    memory = identity_module.SlowTargetIdentityMemory(
+        layers=(0,),
+        num_prototypes=1,
+    )
+    memory.bootstrap_causal_first_frame(
+        kv_cache=_cache(
+            provisional_target_key,
+            torch.full_like(provisional_target_key, 3.0),
+        ),
+        write_weight=torch.ones((1, 4)),
+        num_frames=2,
+        target_batch_start=0,
+        source_kv_cache=_cache(
+            provisional_source_key,
+            torch.zeros_like(provisional_source_key),
+            current_identity_key=provisional_source_key,
+        ),
+    )
+
+    final_source_key = torch.tensor(
+        [[
+            [[0.0, 1.0]],
+            [[0.0, 1.0]],
+            [[-1.0, 0.0]],
+            [[-1.0, 0.0]],
+        ]],
+        dtype=torch.float32,
+    )
+    final_target_value = torch.full_like(
+        final_source_key,
+        100.0,
+    )
+    final_target_value[:, :2] = 9.0
+    update = memory.reset_causal_edit_anchor(
+        kv_cache=_cache(
+            torch.zeros_like(final_source_key),
+            final_target_value,
+        ),
+        write_weight=torch.ones((1, 4)),
+        num_frames=2,
+        source_kv_cache=_cache(
+            final_source_key,
+            torch.zeros_like(final_source_key),
+            current_identity_key=final_source_key,
+        ),
+    )
+    anchor = memory.export()[0]
+
+    assert torch.equal(
+        update.write_weight,
+        torch.tensor([[1.0, 1.0, 0.0, 0.0]]),
+    )
+    assert torch.allclose(
+        anchor.value,
+        torch.full_like(anchor.value, 9.0),
+    )
+    assert torch.allclose(
+        torch.nn.functional.normalize(anchor.key.float(), dim=-1),
+        torch.tensor([[[[0.0, 1.0]]]]),
+    )
+    assert anchor.evidence.item() == memory.reference_prior_evidence
+    assert memory.causal_edit_anchor_reset
+
+    committed_value = anchor.value.clone()
+    memory.update(
+        kv_cache=_cache(
+            torch.zeros_like(final_source_key),
+            final_target_value + 50.0,
+        ),
+        write_weight=torch.ones((1, 4)),
+        source_kv_cache=_cache(
+            final_source_key,
+            torch.zeros_like(final_source_key),
+            current_identity_key=final_source_key,
+        ),
+    )
+    assert torch.equal(memory.export()[0].value, committed_value)
+
+
+def test_object_wise_reset_requires_support_and_runs_once():
+    key = torch.tensor(
+        [[[[1.0, 0.0]]] * 4],
+        dtype=torch.float32,
+    )
+    memory = identity_module.SlowTargetIdentityMemory(
+        layers=(0,),
+        num_prototypes=1,
+    )
+    source_cache = _cache(
+        key,
+        torch.zeros_like(key),
+        current_identity_key=key,
+    )
+    target_cache = _cache(key, torch.ones_like(key))
+    memory.bootstrap_causal_first_frame(
+        kv_cache=target_cache,
+        write_weight=torch.ones((1, 4)),
+        num_frames=2,
+        target_batch_start=0,
+        source_kv_cache=source_cache,
+    )
+
+    with pytest.raises(RuntimeError, match="no verified object"):
+        memory.reset_causal_edit_anchor(
+            kv_cache=target_cache,
+            write_weight=torch.zeros((1, 4)),
+            num_frames=2,
+            source_kv_cache=source_cache,
+        )
+
+    memory.reset_causal_edit_anchor(
+        kv_cache=target_cache,
+        write_weight=torch.ones((1, 4)),
+        num_frames=2,
+        source_kv_cache=source_cache,
+    )
+    with pytest.raises(RuntimeError, match="already reset"):
+        memory.reset_causal_edit_anchor(
+            kv_cache=target_cache,
+            write_weight=torch.ones((1, 4)),
+            num_frames=2,
+            source_kv_cache=source_cache,
+        )
+
+
 def test_committed_memory_feedback_updates_current_belief():
     belief = _belief(edit=0.1, preserve=1.0)
     hand = torch.zeros((1, 1, 4, 4), dtype=torch.float32)

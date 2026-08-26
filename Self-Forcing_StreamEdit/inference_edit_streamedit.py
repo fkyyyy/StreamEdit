@@ -215,6 +215,16 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        "--object_wise_anchor_reset",
+        action="store_true",
+        default=False,
+        help=(
+            "After the first edited block, replace the provisional "
+            "identity anchor with final clean target values only on the "
+            "verified object core; background remains source-anchored."
+        ),
+    )
+    parser.add_argument(
         "--identity_tokenprop_min_similarity",
         type=float,
         default=0.55,
@@ -714,6 +724,7 @@ if __name__ == '__main__':
         identity_first_latent_bootstrap=(
             args.identity_first_latent_bootstrap
         ),
+        object_wise_anchor_reset=args.object_wise_anchor_reset,
         oracle_object_mask=(
             None
             if object_latent_mask is None

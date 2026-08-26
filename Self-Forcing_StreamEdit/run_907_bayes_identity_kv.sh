@@ -7,8 +7,8 @@ REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 DATA_PATH="${DATA_PATH:-$REPO_ROOT/source_video.mp4}"
 HAND_MASK="${HAND_MASK:-$REPO_ROOT/hand_mask.mp4}"
 ROUTING_MODE="${ROUTING_MODE:-hand_role_bayes_flow_tokenprop_kv}"
-OUTPUT_NAME="${OUTPUT_NAME:-907-bayes-source-key-immutable-target-value.mp4}"
-OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/907_source_key_immutable_identity}"
+OUTPUT_NAME="${OUTPUT_NAME:-907-bayes-object-wise-anchor-reset.mp4}"
+OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/907_object_wise_anchor_reset}"
 STEP="${STEP:-15}"
 CUDA_DEVICE="${CUDA_DEVICE:-0}"
 HAND_MASK_MODE="${HAND_MASK_MODE:-overlay_white}"
@@ -33,6 +33,7 @@ python inference_edit_streamedit.py \
   --save_role_dir "$OUTDIR/roles" \
   --routing_mode "$ROUTING_MODE" \
   --identity_first_latent_bootstrap \
+  --object_wise_anchor_reset \
   --contact_graph_mode no_graph \
   --hand_query_layers 8 12 16 20 \
   --mask_white_threshold 245 \

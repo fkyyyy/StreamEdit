@@ -1191,6 +1191,7 @@ class SlowTargetIdentityMemory:
         self.states: Dict[int, TargetIdentityLayerState] = {}
         self.reference_bootstrapped = False
         self.causal_first_frame_bootstrapped = False
+        self.causal_edit_anchor_reset = False
 
     @staticmethod
     def _descriptor(key: torch.Tensor) -> torch.Tensor:
@@ -1624,6 +1625,87 @@ class SlowTargetIdentityMemory:
         )
         self._make_authoritative(self.anchor_states)
         self.causal_first_frame_bootstrapped = True
+        anchored_update = TargetIdentityUpdate(
+            write_weight=update.write_weight,
+            observation_evidence=update.observation_evidence,
+            update_gain=update.update_gain,
+            accumulated_evidence=torch.stack(
+                [
+                    self.anchor_states[layer].evidence
+                    for layer in self.layers
+                ],
+                dim=0,
+            ),
+        )
+        anchored_update.validate()
+        return anchored_update
+
+    @torch.no_grad()
+    def reset_causal_edit_anchor(
+        self,
+        kv_cache,
+        write_weight: torch.Tensor,
+        num_frames: int,
+        source_kv_cache,
+    ) -> TargetIdentityUpdate:
+        """Commit the final clean first-frame object as the active anchor."""
+        if not self.causal_first_frame_bootstrapped:
+            raise RuntimeError(
+                "Object-wise reset requires a causal provisional anchor"
+            )
+        if self.reference_bootstrapped:
+            raise RuntimeError(
+                "Reference identity must not be replaced by causal reset"
+            )
+        if self.causal_edit_anchor_reset:
+            raise RuntimeError(
+                "Object-wise edit anchor was already reset"
+            )
+        if num_frames <= 1:
+            raise ValueError(
+                "Object-wise reset requires a multi-frame edit block"
+            )
+        if write_weight.ndim != 2:
+            raise ValueError(
+                "Identity write_weight must have shape [B,L]"
+            )
+        if write_weight.shape[1] % num_frames != 0:
+            raise ValueError(
+                "Identity token count must be divisible by num_frames"
+            )
+
+        tokens_per_frame = write_weight.shape[1] // num_frames
+        object_write_weight = torch.zeros_like(write_weight)
+        object_write_weight[:, :tokens_per_frame] = write_weight[
+            :,
+            :tokens_per_frame,
+        ]
+        has_object = (
+            object_write_weight > self.eps
+        ).any(dim=-1)
+        if not has_object.all():
+            missing = torch.nonzero(
+                ~has_object,
+                as_tuple=False,
+            ).flatten().tolist()
+            raise RuntimeError(
+                "Object-wise reset has no verified object support for "
+                f"batch indices {missing}"
+            )
+
+        committed_states: Dict[
+            int,
+            TargetIdentityLayerState,
+        ] = {}
+        update = self._update_store(
+            kv_cache=kv_cache,
+            write_weight=object_write_weight,
+            state_store=committed_states,
+            source_kv_cache=source_kv_cache,
+        )
+        self._make_authoritative(committed_states)
+        self.anchor_states = committed_states
+        self.causal_edit_anchor_reset = True
         anchored_update = TargetIdentityUpdate(
             write_weight=update.write_weight,
             observation_evidence=update.observation_evidence,

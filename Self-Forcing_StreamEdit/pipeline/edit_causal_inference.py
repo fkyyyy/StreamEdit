@@ -125,6 +125,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         rollout_overlap_block_num: int = 1,
         routing_mode: str = "dynamic_sog",
         identity_first_latent_bootstrap: bool = False,
+        object_wise_anchor_reset: bool = False,
         oracle_object_mask: Optional[torch.Tensor] = None,
         oracle_hand_mask: Optional[torch.Tensor] = None,
         hand_only_mask: Optional[torch.Tensor] = None,
@@ -220,6 +221,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 identity_first_latent_bootstrap=(
                     identity_first_latent_bootstrap
                 ),
+                object_wise_anchor_reset=object_wise_anchor_reset,
                 oracle_object_mask=oracle_object_mask,
                 oracle_hand_mask=oracle_hand_mask,
                 hand_only_mask=hand_only_mask,
@@ -445,6 +447,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 identity_first_latent_bootstrap=(
                     identity_first_latent_bootstrap
                 ),
+                object_wise_anchor_reset=object_wise_anchor_reset,
                 oracle_object_mask=rollout_object_mask,
                 oracle_hand_mask=rollout_hand_mask,
                 hand_only_mask=rollout_hand_only_mask,
@@ -569,6 +572,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         reuse_noise_temporal_mean=True,
         routing_mode: str = "dynamic_sog",
         identity_first_latent_bootstrap: bool = False,
+        object_wise_anchor_reset: bool = False,
         oracle_object_mask: Optional[torch.Tensor] = None,
         oracle_hand_mask: Optional[torch.Tensor] = None,
         hand_only_mask: Optional[torch.Tensor] = None,
@@ -704,6 +708,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
         reference_identity_enabled = (
             routing_mode == "hand_role_bayes_flow_customized_kv"
         )
+        if (
+            object_wise_anchor_reset
+            and not identity_first_latent_bootstrap
+        ):
+            raise ValueError(
+                "Object-wise anchor reset requires "
+                "identity_first_latent_bootstrap"
+            )
+        if object_wise_anchor_reset and not target_identity_enabled:
+            raise ValueError(
+                "Object-wise anchor reset requires a target identity "
+                "routing mode"
+            )
+        if object_wise_anchor_reset and reference_identity_enabled:
+            raise ValueError(
+                "Object-wise causal reset must not replace a reference "
+                "identity anchor"
+            )
         if not 0.0 <= committed_memory_feedback_strength <= 1.0:
             raise ValueError(
                 "committed_memory_feedback_strength must lie in [0, 1]"
@@ -2993,6 +3015,139 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     )
                     identity_write_tokens = (
                         current_identity_propagation.write_weight
+                    )
+                if (
+                    object_wise_anchor_reset
+                    and current_causal_identity_bootstrap is not None
+                    and not target_identity_memory.causal_edit_anchor_reset
+                ):
+                    if current_causal_identity_bootstrap_plan is None:
+                        raise RuntimeError(
+                            "Missing object core for anchor reset"
+                        )
+                    object_anchor_reset_weight = (
+                        current_causal_identity_bootstrap_plan
+                        .write_weight
+                        * identity_write_tokens
+                    )
+                    reset_has_support = (
+                        object_anchor_reset_weight
+                        > target_identity_memory.eps
+                    ).any(dim=-1)
+                    reset_committed = bool(
+                        reset_has_support.all().item()
+                    )
+                    reset_key_cosine = torch.tensor(
+                        1.0,
+                        device=identity_write_tokens.device,
+                    )
+                    reset_value_cosine = torch.tensor(
+                        1.0,
+                        device=identity_write_tokens.device,
+                    )
+                    reset_evidence = torch.tensor(
+                        0.0,
+                        device=identity_write_tokens.device,
+                    )
+                    if reset_committed:
+                        provisional_states = {
+                            layer: state
+                            for layer, state in
+                            target_identity_memory.export().items()
+                        }
+                        object_anchor_reset_update = (
+                            target_identity_memory
+                            .reset_causal_edit_anchor(
+                                kv_cache=kv_cache_trg,
+                                write_weight=(
+                                    object_anchor_reset_weight
+                                ),
+                                num_frames=current_num_frames,
+                                source_kv_cache=kv_cache_src,
+                            )
+                        )
+                        reset_evidence = (
+                            object_anchor_reset_update
+                            .accumulated_evidence.mean()
+                        )
+                        reset_key_scores = []
+                        reset_value_scores = []
+                        for layer, committed_state in (
+                            target_identity_memory.export().items()
+                        ):
+                            provisional_state = (
+                                provisional_states[layer]
+                            )
+                            valid = (
+                                provisional_state.evidence
+                                > target_identity_memory.eps
+                            ) & (
+                                committed_state.evidence
+                                > target_identity_memory.eps
+                            )
+                            valid_count = valid.sum().clamp_min(1)
+                            reset_key_scores.append(
+                                (
+                                    F.cosine_similarity(
+                                        provisional_state.key.float(),
+                                        committed_state.key.float(),
+                                        dim=-1,
+                                    ).mean(dim=-1)
+                                    * valid
+                                ).sum() / valid_count
+                            )
+                            reset_value_scores.append(
+                                (
+                                    F.cosine_similarity(
+                                        provisional_state.value.float(),
+                                        committed_state.value.float(),
+                                        dim=-1,
+                                    ).mean(dim=-1)
+                                    * valid
+                                ).sum() / valid_count
+                            )
+                        reset_key_cosine = torch.stack(
+                            reset_key_scores
+                        ).mean()
+                        reset_value_cosine = torch.stack(
+                            reset_value_scores
+                        ).mean()
+                    reset_shape = hand_role_debug[
+                        "object_posterior"
+                    ]
+                    hand_role_debug.update({
+                        "identity_object_anchor_reset_weight": (
+                            object_anchor_reset_weight.reshape_as(
+                                reset_shape
+                            )
+                        ),
+                        "identity_object_anchor_reset_committed": (
+                            torch.ones_like(reset_shape)
+                            * float(reset_committed)
+                        ),
+                        "identity_object_anchor_reset_key_cosine": (
+                            torch.ones_like(reset_shape)
+                            * reset_key_cosine
+                        ),
+                        "identity_object_anchor_reset_value_cosine": (
+                            torch.ones_like(reset_shape)
+                            * reset_value_cosine
+                        ),
+                    })
+                    print(
+                        "OBJECT_EDIT_ANCHOR_RESET "
+                        "block=0 "
+                        "object_only=1 background_source=1 "
+                        f"committed={int(reset_committed)} "
+                        "weight="
+                        f"{object_anchor_reset_weight.mean().item():.4f} "
+                        "support="
+                        f"{(object_anchor_reset_weight > 0).float().mean().item():.4f} "
+                        "key_cosine_to_provisional="
+                        f"{reset_key_cosine.item():.4f} "
+                        "value_cosine_to_provisional="
+                        f"{reset_value_cosine.item():.4f} "
+                        f"evidence={reset_evidence.item():.4f}"
                     )
                 current_identity_update = (
                     target_identity_memory.update(
