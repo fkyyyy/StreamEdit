@@ -17,6 +17,8 @@ class TargetIdentityLayerState:
     key: torch.Tensor
     value: torch.Tensor
     evidence: torch.Tensor
+    appearance_key: torch.Tensor | None = None
+    value_is_residual: bool = False
 
     def validate(self) -> None:
         if self.key.ndim != 4:
@@ -27,6 +29,14 @@ class TargetIdentityLayerState:
             raise ValueError(
                 "Identity keys and values must share shape"
             )
+        if (
+            self.appearance_key is not None
+            and self.appearance_key.shape != self.key.shape
+        ):
+            raise ValueError(
+                "Identity correspondence and appearance keys must "
+                "share shape"
+            )
         if self.evidence.shape != self.key.shape[:2]:
             raise ValueError(
                 "Identity evidence must have shape [B,P]"
@@ -35,7 +45,10 @@ class TargetIdentityLayerState:
             ("key", self.key),
             ("value", self.value),
             ("evidence", self.evidence),
+            ("appearance_key", self.appearance_key),
         ):
+            if value is None:
+                continue
             if not torch.isfinite(value.float()).all():
                 raise ValueError(
                     f"Target identity state '{name}' is not finite"
@@ -43,6 +56,10 @@ class TargetIdentityLayerState:
         if self.evidence.min() < 0:
             raise ValueError(
                 "Target identity evidence must be non-negative"
+            )
+        if not isinstance(self.value_is_residual, bool):
+            raise ValueError(
+                "value_is_residual must be a bool"
             )
 
 
@@ -224,6 +241,1204 @@ class TargetIdentityTokenPropagation:
         if self.best_similarity.min() < -1 or self.best_similarity.max() > 1:
             raise ValueError(
                 "Token propagation best_similarity must lie in [-1, 1]"
+            )
+
+
+@dataclass(frozen=True)
+class CausalIdentityOwnership:
+    """Source-coordinate ownership available before denoising."""
+
+    read_weight: torch.Tensor
+    transported_weight: torch.Tensor
+    observation_weight: torch.Tensor
+    match_similarity: torch.Tensor
+    match_confidence: torch.Tensor
+    semantic_support: torch.Tensor
+
+    def validate(self) -> None:
+        expected_shape = self.read_weight.shape
+        if len(expected_shape) != 2:
+            raise ValueError(
+                "Identity ownership maps must have shape [B,L]"
+            )
+        for name, value in (
+            ("transported_weight", self.transported_weight),
+            ("observation_weight", self.observation_weight),
+            ("match_similarity", self.match_similarity),
+            ("match_confidence", self.match_confidence),
+            ("semantic_support", self.semantic_support),
+        ):
+            if value.shape != expected_shape:
+                raise ValueError(
+                    f"Identity ownership '{name}' must match [B,L]"
+                )
+        for name, value in (
+            ("read_weight", self.read_weight),
+            ("transported_weight", self.transported_weight),
+            ("observation_weight", self.observation_weight),
+            ("match_similarity", self.match_similarity),
+            ("match_confidence", self.match_confidence),
+            ("semantic_support", self.semantic_support),
+        ):
+            if not torch.isfinite(value.float()).all():
+                raise ValueError(
+                    f"Identity ownership '{name}' is not finite"
+                )
+        for name, value in (
+            ("read_weight", self.read_weight),
+            ("transported_weight", self.transported_weight),
+            ("observation_weight", self.observation_weight),
+            ("match_confidence", self.match_confidence),
+            ("semantic_support", self.semantic_support),
+        ):
+            if value.min() < 0 or value.max() > 1:
+                raise ValueError(
+                    f"Identity ownership '{name}' must lie in [0, 1]"
+                )
+        if (
+            self.match_similarity.min() < -1
+            or self.match_similarity.max() > 1
+        ):
+            raise ValueError(
+                "Identity ownership match_similarity must lie in [-1, 1]"
+            )
+
+    def as_debug_maps(
+        self,
+        shape: tuple[int, int, int, int],
+    ) -> Dict[str, torch.Tensor]:
+        def reshape(value: torch.Tensor) -> torch.Tensor:
+            return value.reshape(shape).float()
+
+        return {
+            "identity_owner_read": reshape(self.read_weight),
+            "identity_owner_transport": reshape(
+                self.transported_weight
+            ),
+            "identity_owner_observation": reshape(
+                self.observation_weight
+            ),
+            "identity_owner_similarity": reshape(
+                self.match_similarity
+            ),
+            "identity_owner_confidence": reshape(
+                self.match_confidence
+            ),
+            "identity_owner_semantic": reshape(
+                self.semantic_support
+            ),
+        }
+
+
+def build_oracle_source_owner_weight(
+    source_owner_mask: torch.Tensor,
+    hand_mask: torch.Tensor,
+    *,
+    spatial_shape: tuple[int, int],
+    hand_already_excluded: bool = False,
+) -> torch.Tensor:
+    """Project a source-video object mask onto identity tokens.
+
+    This path is intentionally deterministic: the supplied clean-source
+    mask is the complete owner for each frame.  It neither expands the mask
+    with semantic attention nor carries ownership into an unlabelled frame.
+    Removing the hand before pooling preserves visible-object ownership while
+    preventing identity appearance from being written onto fingers.  Pixel-
+    aligned callers can perform that subtraction before causal temporal
+    pooling and set ``hand_already_excluded`` to avoid subtracting the union
+    of a moving hand trajectory a second time.
+    """
+    if source_owner_mask.ndim != 4:
+        raise ValueError(
+            "source_owner_mask must have shape [B,T,H,W]"
+        )
+    if hand_mask.shape != source_owner_mask.shape:
+        raise ValueError(
+            "source owner and hand masks must share [B,T,H,W]"
+        )
+    spatial_height, spatial_width = spatial_shape
+    if spatial_height <= 0 or spatial_width <= 0:
+        raise ValueError("spatial_shape must be positive")
+
+    batch, frames, height, width = source_owner_mask.shape
+    visible_owner = source_owner_mask.detach().bool()
+    if not hand_already_excluded:
+        visible_owner = visible_owner & ~hand_mask.detach().bool()
+    visible_owner = visible_owner.float()
+    owner_weight = F.adaptive_avg_pool2d(
+        visible_owner.reshape(batch * frames, 1, height, width),
+        output_size=(spatial_height, spatial_width),
+    ).reshape(batch, frames, spatial_height, spatial_width)
+    return owner_weight.clamp(0.0, 1.0)
+
+
+class CausalIdentityOwnerTracker:
+    """Track edited-object ownership on clean source coordinates.
+
+    Unlike the legacy token propagator, transported ownership is an
+    independent prediction rather than a multiplier on the current detector.
+    A temporarily empty observation can therefore retain a well-matched
+    object, while source semantic support makes the state decay when the
+    source object really leaves the frame.
+    """
+
+    def __init__(
+        self,
+        max_candidates: int = 512,
+        max_area_fraction: float = 0.18,
+        local_radius: int = 10,
+        max_area_growth: float = 1.15,
+        min_similarity: float = 0.55,
+        recover_visibility_from_source_match: bool = False,
+        eps: float = 1e-6,
+    ):
+        if max_candidates <= 0:
+            raise ValueError("max_candidates must be positive")
+        if not 0.0 < max_area_fraction <= 1.0:
+            raise ValueError(
+                "max_area_fraction must lie in (0, 1]"
+            )
+        if local_radius < 0:
+            raise ValueError("local_radius must be non-negative")
+        if max_area_growth < 1.0:
+            raise ValueError("max_area_growth must be at least one")
+        if not -1.0 < min_similarity < 1.0:
+            raise ValueError("min_similarity must lie in (-1, 1)")
+        if eps <= 0:
+            raise ValueError("eps must be positive")
+        self.max_candidates = int(max_candidates)
+        self.max_area_fraction = float(max_area_fraction)
+        self.local_radius = int(local_radius)
+        self.max_area_growth = float(max_area_growth)
+        self.min_similarity = float(min_similarity)
+        self.recover_visibility_from_source_match = bool(
+            recover_visibility_from_source_match
+        )
+        self.eps = float(eps)
+        self.previous_features: torch.Tensor | None = None
+        self.previous_weight: torch.Tensor | None = None
+
+    @torch.no_grad()
+    def commit_verified(
+        self,
+        source_features: torch.Tensor,
+        verified_weight: torch.Tensor,
+        *,
+        tokens_per_frame: int,
+    ) -> None:
+        """Commit a source-coordinate owner for the next causal block.
+
+        Ownership is deliberately stored independently of target-change
+        evidence.  Callers may use target-change evidence to validate an
+        appearance-memory write, but it must never redefine where the
+        source object is located.
+        """
+        if source_features.ndim != 3:
+            raise ValueError(
+                "source_features must have shape [B,L,D]"
+            )
+        if verified_weight.shape != source_features.shape[:2]:
+            raise ValueError(
+                "verified_weight must align with source features"
+            )
+        if (
+            tokens_per_frame <= 0
+            or source_features.shape[1] % tokens_per_frame != 0
+        ):
+            raise ValueError(
+                "tokens_per_frame must evenly divide source tokens"
+            )
+        batch = source_features.shape[0]
+        frames = source_features.shape[1] // tokens_per_frame
+        features = F.normalize(
+            source_features.detach().float(), dim=-1
+        ).reshape(batch, frames, tokens_per_frame, -1)
+        weight = verified_weight.detach().float().clamp(
+            0.0, 1.0
+        ).reshape(batch, frames, tokens_per_frame)
+        previous_features = (
+            None
+            if self.previous_features is None
+            else self.previous_features.to(features.device)
+        )
+        previous_weight = (
+            None
+            if self.previous_weight is None
+            else self.previous_weight.to(features.device)
+        )
+        committed_features = (
+            features[:, -1].clone()
+            if previous_features is None
+            else previous_features.clone()
+        )
+        committed_weight = (
+            weight.new_zeros(batch, tokens_per_frame)
+            if previous_weight is None
+            else previous_weight.clone()
+        )
+        for batch_index in range(batch):
+            supported_frames = torch.nonzero(
+                (weight[batch_index] > self.eps).any(dim=-1),
+                as_tuple=False,
+            ).flatten()
+            if supported_frames.numel() == 0:
+                continue
+            frame_index = int(supported_frames[-1].item())
+            committed_features[batch_index] = features[
+                batch_index, frame_index
+            ]
+            committed_weight[batch_index] = self._bound_area(
+                weight[batch_index:batch_index + 1, frame_index],
+                weight[batch_index:batch_index + 1, frame_index],
+                None,
+            )[0]
+        self.previous_features = committed_features.detach().cpu()
+        self.previous_weight = committed_weight.detach().cpu()
+
+    def _semantic_support(
+        self,
+        source_semantic: torch.Tensor,
+    ) -> torch.Tensor:
+        flat = source_semantic.detach().float()
+        center = torch.quantile(flat, 0.50, dim=-1, keepdim=True)
+        high = torch.quantile(flat, 0.95, dim=-1, keepdim=True)
+        return (
+            (flat - center) / (high - center).clamp_min(self.eps)
+        ).clamp(0.0, 1.0)
+
+    def _transport(
+        self,
+        current_features: torch.Tensor,
+        reference_features: torch.Tensor,
+        reference_weight: torch.Tensor,
+        spatial_shape: tuple[int, int] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        batch, token_count, _ = current_features.shape
+        transported = reference_weight.new_zeros(batch, token_count)
+        best_similarity = reference_weight.new_zeros(batch, token_count)
+        confidence = reference_weight.new_zeros(batch, token_count)
+        for batch_index in range(batch):
+            candidates = torch.nonzero(
+                reference_weight[batch_index] > self.eps,
+                as_tuple=False,
+            ).flatten()
+            if candidates.numel() == 0:
+                continue
+            if candidates.numel() > self.max_candidates:
+                selected = torch.topk(
+                    reference_weight[batch_index, candidates],
+                    k=self.max_candidates,
+                ).indices
+                candidates = candidates[selected]
+            similarity = torch.matmul(
+                current_features[batch_index],
+                reference_features[batch_index, candidates].T,
+            ).clamp(-1.0, 1.0)
+            if spatial_shape is not None:
+                spatial_height, spatial_width = spatial_shape
+                if spatial_height * spatial_width != token_count:
+                    raise ValueError(
+                        "spatial_shape must match tokens_per_frame"
+                    )
+                current_index = torch.arange(
+                    token_count, device=current_features.device
+                )
+                current_row = current_index // spatial_width
+                current_col = current_index % spatial_width
+                reference_row = candidates // spatial_width
+                reference_col = candidates % spatial_width
+                local = (
+                    (
+                        current_row[:, None] - reference_row[None]
+                    ).abs() <= self.local_radius
+                ) & (
+                    (
+                        current_col[:, None] - reference_col[None]
+                    ).abs() <= self.local_radius
+                )
+                similarity = similarity.masked_fill(
+                    ~local, torch.finfo(similarity.dtype).min
+                )
+                has_local = local.any(dim=-1)
+            else:
+                has_local = torch.ones(
+                    token_count,
+                    dtype=torch.bool,
+                    device=current_features.device,
+                )
+            best, matched = similarity.max(dim=-1)
+            best = torch.where(
+                has_local, best, torch.full_like(best, -1.0)
+            )
+            matched_weight = reference_weight[
+                batch_index, candidates[matched]
+            ]
+            valid_best = best[has_local]
+            if valid_best.numel() == 0:
+                continue
+            median = torch.quantile(valid_best, 0.50)
+            high = torch.quantile(valid_best, 0.95)
+            spread = high - median
+            relative = (
+                (best - median) / spread.clamp_min(self.eps)
+            ).clamp(0.0, 1.0)
+            relative = torch.where(
+                spread > self.eps,
+                relative,
+                torch.ones_like(relative),
+            )
+            absolute = (
+                (best - self.min_similarity)
+                / (1.0 - self.min_similarity)
+            ).clamp(0.0, 1.0)
+            # A forward match is trusted only when the selected reference
+            # also regards it as a near-best reverse match.  This soft cycle
+            # check avoids the severe support collapse of exact mutual-NN
+            # matching while rejecting repeated background textures.
+            reverse_best = similarity.max(dim=0).values
+            reverse_gap = (reverse_best[matched] - best).clamp_min(0.0)
+            cycle_confidence = torch.exp(-reverse_gap / 0.05)
+            current_confidence = (
+                torch.sqrt(relative * absolute) * cycle_confidence
+            )
+            current_confidence = current_confidence * has_local.float()
+            current_transport = (
+                matched_weight * current_confidence
+            ).clamp(0.0, 1.0)
+            active = current_transport > self.eps
+            if active.any():
+                scale = torch.quantile(
+                    current_transport[active], 0.90
+                ).clamp_min(self.eps)
+                current_transport = (
+                    current_transport / scale
+                ).clamp(0.0, 1.0)
+            transported[batch_index] = current_transport
+            best_similarity[batch_index] = best
+            confidence[batch_index] = current_confidence
+        return transported, best_similarity, confidence
+
+    def _bound_area(
+        self,
+        weight: torch.Tensor,
+        observation: torch.Tensor,
+        previous_weight: torch.Tensor | None,
+    ) -> torch.Tensor:
+        bounded = torch.zeros_like(weight)
+        token_count = weight.shape[-1]
+        maximum = max(1, int(token_count * self.max_area_fraction))
+        for batch_index in range(weight.shape[0]):
+            observation_count = int(
+                (observation[batch_index] > self.eps).sum().item()
+            )
+            previous_count = (
+                0
+                if previous_weight is None
+                else int(
+                    (
+                        previous_weight[batch_index] > self.eps
+                    ).sum().item()
+                )
+            )
+            budget = min(
+                maximum,
+                (
+                    max(1, observation_count)
+                    if previous_count == 0
+                    else max(
+                        1,
+                        min(
+                            observation_count,
+                            math.ceil(
+                                previous_count * self.max_area_growth
+                            ),
+                        ),
+                        previous_count,
+                    )
+                ),
+            )
+            active = weight[batch_index] > self.eps
+            active_count = int(active.sum().item())
+            if active_count == 0:
+                continue
+            if active_count <= budget:
+                bounded[batch_index] = weight[batch_index]
+                continue
+            selected = torch.topk(
+                weight[batch_index], k=budget
+            ).indices
+            bounded[batch_index, selected] = weight[
+                batch_index, selected
+            ]
+        return bounded
+
+    @torch.no_grad()
+    def __call__(
+        self,
+        source_features: torch.Tensor,
+        observation_weight: torch.Tensor,
+        source_semantic: torch.Tensor,
+        hand_mask: torch.Tensor,
+        *,
+        presence_support: torch.Tensor | None = None,
+        tokens_per_frame: int,
+        frame_visible: torch.Tensor | None = None,
+        spatial_shape: tuple[int, int] | None = None,
+    ) -> CausalIdentityOwnership:
+        if source_features.ndim != 3:
+            raise ValueError(
+                "source_features must have shape [B,L,D]"
+            )
+        expected = source_features.shape[:2]
+        for name, value in (
+            ("observation_weight", observation_weight),
+            ("source_semantic", source_semantic),
+            ("hand_mask", hand_mask),
+        ):
+            if value.shape != expected:
+                raise ValueError(
+                    f"{name} must have shape {tuple(expected)}"
+                )
+        if presence_support is not None and (
+            presence_support.shape != expected
+        ):
+            raise ValueError(
+                "presence_support must align with source features"
+            )
+        if (
+            tokens_per_frame <= 0
+            or expected[1] % tokens_per_frame != 0
+        ):
+            raise ValueError(
+                "tokens_per_frame must evenly divide source tokens"
+            )
+
+        features = F.normalize(
+            source_features.detach().float(), dim=-1
+        )
+        frames = expected[1] // tokens_per_frame
+        features = features.reshape(
+            expected[0], frames, tokens_per_frame, -1
+        )
+        observation = observation_weight.detach().float().clamp(
+            0.0, 1.0
+        ).reshape(expected[0], frames, tokens_per_frame)
+        semantic = self._semantic_support(
+            source_semantic.reshape(
+                expected[0], frames, tokens_per_frame
+            )
+        )
+        hand = hand_mask.detach().bool().reshape(
+            expected[0], frames, tokens_per_frame
+        )
+        recovery_support = (
+            None
+            if presence_support is None
+            else presence_support.detach().float().clamp(
+                0.0, 1.0
+            ).reshape(expected[0], frames, tokens_per_frame)
+        )
+        if frame_visible is None:
+            visibility = torch.ones(
+                expected[0],
+                frames,
+                dtype=torch.bool,
+                device=features.device,
+            )
+        else:
+            if frame_visible.numel() != expected[0] * frames:
+                raise ValueError(
+                    "frame_visible must contain one value per source "
+                    "frame"
+                )
+            visibility = frame_visible.detach().bool().reshape(
+                expected[0], frames
+            )
+
+        reference_features = (
+            None
+            if self.previous_features is None
+            else self.previous_features.to(features.device)
+        )
+        reference_weight = (
+            None
+            if self.previous_weight is None
+            else self.previous_weight.to(features.device)
+        )
+        reads = []
+        transports = []
+        observations = []
+        similarities = []
+        confidences = []
+        semantics = []
+        for frame_index in range(frames):
+            current_features = features[:, frame_index]
+            current_semantic = semantic[:, frame_index]
+            requested_visible = visibility[:, frame_index, None]
+            current_observation = (
+                observation[:, frame_index]
+                * (0.25 + 0.75 * current_semantic)
+                * requested_visible.float()
+            )
+            current_observation = current_observation.masked_fill(
+                hand[:, frame_index], 0.0
+            )
+            if reference_features is None or reference_weight is None:
+                transported = torch.zeros_like(current_observation)
+                similarity = torch.zeros_like(current_observation)
+                confidence = torch.zeros_like(current_observation)
+            else:
+                transported, similarity, confidence = self._transport(
+                    current_features,
+                    reference_features,
+                    reference_weight,
+                    spatial_shape=spatial_shape,
+                )
+                current_presence_support = (
+                    current_semantic
+                    if recovery_support is None
+                    else torch.maximum(
+                        current_semantic,
+                        recovery_support[:, frame_index],
+                    )
+                )
+                source_presence = (
+                    (confidence > 0.05)
+                    & (current_presence_support > 0.05)
+                    & ~hand[:, frame_index]
+                ).sum(dim=-1, keepdim=True) >= torch.clamp(
+                    (reference_weight > self.eps).sum(
+                        dim=-1, keepdim=True
+                    ) // 4,
+                    min=1,
+                )
+                # The hand-role visibility estimate is useful for bootstrap,
+                # but after an owner exists it must not erase a strong clean-
+                # source correspondence (the failure seen in block 5 of 913).
+                current_visible = (
+                    requested_visible | source_presence
+                    if self.recover_visibility_from_source_match
+                    else requested_visible
+                )
+                transported = (
+                    transported
+                    * (0.25 + 0.75 * current_presence_support)
+                    * current_visible.float()
+                ).masked_fill(hand[:, frame_index], 0.0)
+            if reference_features is None or reference_weight is None:
+                current_visible = requested_visible
+            # Once a verified owner exists, the broad semantic detector is
+            # observation-only evidence: it must not independently open the
+            # identity read gate.  Reads are carried strictly by source-
+            # feature transport from the last verified/predicted owner.
+            if reference_features is None or reference_weight is None:
+                read = current_observation
+                has_reference = torch.zeros_like(
+                    requested_visible, dtype=torch.bool
+                )
+            else:
+                has_reference = (
+                    reference_weight > self.eps
+                ).any(dim=-1, keepdim=True)
+                # Bootstrap independently per batch.  A zero observation in
+                # the first frame must not permanently prevent a later
+                # reliable frame from igniting the source-space track.
+                read = torch.where(
+                    has_reference, transported, current_observation
+                )
+                current_visible = current_visible | (
+                    ~has_reference
+                    & requested_visible
+                    & (current_observation > self.eps).any(
+                        dim=-1, keepdim=True
+                    )
+                )
+            read = read.clamp(0.0, 1.0)
+            read = self._bound_area(
+                read, current_observation, reference_weight
+            )
+            reads.append(read)
+            transports.append(transported)
+            observations.append(current_observation)
+            similarities.append(similarity)
+            confidences.append(confidence)
+            semantics.append(current_semantic)
+            if reference_features is None or reference_weight is None:
+                reference_features = current_features
+                reference_weight = read
+            else:
+                # An absent/fully occluded frame must not receive identity,
+                # but it also must not erase the last visible ownership.
+                # This lets a later visible frame re-associate with the
+                # immutable appearance memory without creating a ghost in
+                # the missing interval.
+                reference_features = torch.where(
+                    current_visible[:, :, None],
+                    current_features,
+                    reference_features,
+                )
+                reference_weight = torch.where(
+                    current_visible,
+                    read,
+                    reference_weight,
+                )
+        # Advance the persistent source track once per clean-source block.
+        # A later target-change signal may validate appearance writes, but
+        # cannot overwrite this spatial state.
+        committed_features = (
+            features[:, -1].clone()
+            if self.previous_features is None
+            else self.previous_features.to(features.device).clone()
+        )
+        committed_weight = (
+            reads[-1].new_zeros(expected[0], tokens_per_frame)
+            if self.previous_weight is None
+            else self.previous_weight.to(features.device).clone()
+        )
+        for batch_index in range(expected[0]):
+            supported_frames = [
+                frame_index
+                for frame_index, frame_read in enumerate(reads)
+                if (frame_read[batch_index] > self.eps).any()
+            ]
+            if not supported_frames:
+                continue
+            frame_index = supported_frames[-1]
+            committed_features[batch_index] = features[
+                batch_index, frame_index
+            ]
+            committed_weight[batch_index] = reads[frame_index][batch_index]
+        self.previous_features = committed_features.detach().cpu()
+        self.previous_weight = committed_weight.detach().cpu()
+
+        def flatten(values: list[torch.Tensor]) -> torch.Tensor:
+            return torch.stack(values, dim=1).reshape(expected)
+
+        result = CausalIdentityOwnership(
+            read_weight=flatten(reads),
+            transported_weight=flatten(transports),
+            observation_weight=flatten(observations),
+            match_similarity=flatten(similarities),
+            match_confidence=flatten(confidences),
+            semantic_support=flatten(semantics),
+        )
+        result.validate()
+        return result
+
+
+@dataclass(frozen=True)
+class SourceCoordinateResidualCarryResult:
+    """Object-only latent residual transported in source coordinates."""
+
+    residual: torch.Tensor
+    support: torch.Tensor
+    target_residual: torch.Tensor | None = None
+
+
+@dataclass(frozen=True)
+class SourceOwnerResidualConstraintResult:
+    """Diagnostics for one late-denoising appearance constraint."""
+
+    latent: torch.Tensor
+    weight: torch.Tensor
+    correction: torch.Tensor
+    target_gap_before: torch.Tensor
+    target_gap_after: torch.Tensor
+
+
+@dataclass(frozen=True)
+class SourceOwnerGeometryEnvelopeResult:
+    """Diagnostics for one source-geometry preservation step."""
+
+    latent: torch.Tensor
+    weight: torch.Tensor
+    correction: torch.Tensor
+    source_gap_before: torch.Tensor
+    source_gap_after: torch.Tensor
+
+
+def apply_source_owner_geometry_envelope(
+    *,
+    current_latent: torch.Tensor,
+    source_latent: torch.Tensor,
+    source_owner_mask: torch.Tensor,
+    strength: float,
+    denoising_progress: float,
+    schedule_power: float = 2.0,
+    margin: int = 1,
+    protect_mask: torch.Tensor | None = None,
+) -> SourceOwnerGeometryEnvelopeResult:
+    """Keep an appearance-only edit inside the clean-source silhouette.
+
+    The source owner defines where target appearance is allowed to change.
+    Outside a small boundary margin, the denoised sample is moved toward the
+    current clean-source latent.  This is a non-accumulating proximal update,
+    not a target-owned latent handoff: geometry and background come from the
+    current source frame, while target appearance remains unconstrained inside
+    the owner.  Protected pixels (for example the hand) are always considered
+    source-owned geometry even where they overlap the object mask.
+    """
+    if current_latent.shape != source_latent.shape:
+        raise ValueError(
+            "current_latent and source_latent must share shape"
+        )
+    if current_latent.ndim != 5:
+        raise ValueError(
+            "geometry-envelope latents must have shape [B,T,C,H,W]"
+        )
+    batch, frames, _, height, width = current_latent.shape
+    expected_mask_shape = (batch, frames, height, width)
+    if source_owner_mask.shape != expected_mask_shape:
+        raise ValueError(
+            "source_owner_mask must have shape "
+            f"{expected_mask_shape}"
+        )
+    if protect_mask is not None and protect_mask.shape != expected_mask_shape:
+        raise ValueError(
+            "protect_mask must have shape "
+            f"{expected_mask_shape}"
+        )
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError(
+            "geometry-envelope strength must lie in [0, 1]"
+        )
+    if not 0.0 <= denoising_progress <= 1.0:
+        raise ValueError(
+            "denoising_progress must lie in [0, 1]"
+        )
+    if schedule_power <= 0:
+        raise ValueError(
+            "geometry-envelope schedule_power must be positive"
+        )
+    if margin < 0:
+        raise ValueError(
+            "geometry-envelope margin must be non-negative"
+        )
+
+    owner = source_owner_mask.detach().bool()
+    if margin > 0:
+        owner = F.max_pool2d(
+            owner.float().reshape(batch * frames, 1, height, width),
+            kernel_size=2 * margin + 1,
+            stride=1,
+            padding=margin,
+        ).reshape(batch, frames, height, width) > 0.0
+    preserve = ~owner
+    if protect_mask is not None:
+        preserve = preserve | protect_mask.detach().bool()
+
+    scheduled_strength = float(strength) * (
+        float(denoising_progress) ** float(schedule_power)
+    )
+    weight = preserve.float() * scheduled_strength
+    current = current_latent.float()
+    source = source_latent.float()
+    correction = weight.unsqueeze(2) * (source - current)
+    constrained = (current + correction).to(current_latent.dtype)
+    source_gap_before = (source - current).square().mean(dim=2).sqrt()
+    source_gap_after = (
+        source - constrained.float()
+    ).square().mean(dim=2).sqrt()
+    return SourceOwnerGeometryEnvelopeResult(
+        latent=constrained,
+        weight=weight,
+        correction=correction.to(current_latent.dtype),
+        source_gap_before=source_gap_before,
+        source_gap_after=source_gap_after,
+    )
+
+
+def apply_source_owner_residual_constraint(
+    *,
+    current_latent: torch.Tensor,
+    source_latent: torch.Tensor,
+    carried_residual: torch.Tensor,
+    support: torch.Tensor,
+    spatial_shape: tuple[int, int],
+    strength: float,
+    denoising_progress: float,
+    schedule_power: float = 2.0,
+    protect_mask: torch.Tensor | None = None,
+    eps: float = 1e-6,
+) -> SourceOwnerResidualConstraintResult:
+    """Apply a non-accumulating source-coordinate appearance proximal.
+
+    The fixed point is ``source_latent + carried_residual``. Reapplying the
+    operation therefore cannot add the residual repeatedly. The late-step
+    schedule avoids imposing a clean-latent appearance target while the
+    sample is still dominated by high noise. Spatial support comes only from
+    the current clean-source owner/correspondence and is zero on absent frames.
+    """
+    if current_latent.shape != source_latent.shape:
+        raise ValueError(
+            "current_latent and source_latent must share shape"
+        )
+    if carried_residual.shape != current_latent.shape:
+        raise ValueError(
+            "carried_residual must match the current latent"
+        )
+    if current_latent.ndim != 5:
+        raise ValueError(
+            "constraint latents must have shape [B,T,C,H,W]"
+        )
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("constraint strength must lie in [0, 1]")
+    if not 0.0 <= denoising_progress <= 1.0:
+        raise ValueError(
+            "denoising_progress must lie in [0, 1]"
+        )
+    if schedule_power <= 0:
+        raise ValueError("schedule_power must be positive")
+    if eps <= 0:
+        raise ValueError("eps must be positive")
+
+    batch, frames, _, height, width = current_latent.shape
+    spatial_height, spatial_width = spatial_shape
+    if support.shape != (
+        batch, frames * spatial_height * spatial_width
+    ):
+        raise ValueError(
+            "support must contain one source-owner token per frame"
+        )
+    token_support = support.detach().float().clamp(0.0, 1.0)
+    token_support = token_support.reshape(
+        batch * frames, 1, spatial_height, spatial_width
+    )
+    latent_support = F.interpolate(
+        token_support,
+        size=(height, width),
+        # The support grid is a discrete source-owner partition produced by
+        # patchification.  Bilinear upsampling would leak non-zero constraint
+        # weights across the object boundary and pull background latents
+        # toward the target appearance.  Nearest-neighbour expansion keeps
+        # the soft confidence of each owner token without spatial diffusion.
+        mode="nearest",
+    ).reshape(batch, frames, 1, height, width)
+    if protect_mask is not None:
+        expected_protect_shape = (batch, frames, height, width)
+        if protect_mask.shape != expected_protect_shape:
+            raise ValueError(
+                "protect_mask must have shape "
+                f"{expected_protect_shape}"
+            )
+        latent_support = latent_support.masked_fill(
+            protect_mask.detach().bool().unsqueeze(2),
+            0.0,
+        )
+    scheduled_strength = float(strength) * (
+        float(denoising_progress) ** float(schedule_power)
+    )
+    weight = (latent_support * scheduled_strength).clamp(0.0, 1.0)
+
+    target = source_latent.float() + carried_residual.float()
+    current = current_latent.float()
+    correction = weight * (target - current)
+    constrained = (current + correction).to(current_latent.dtype)
+    gap_before = (target - current).square().mean(dim=2).sqrt()
+    gap_after = (target - constrained.float()).square().mean(dim=2).sqrt()
+    return SourceOwnerResidualConstraintResult(
+        latent=constrained,
+        weight=weight.squeeze(2),
+        correction=correction.to(current_latent.dtype),
+        target_gap_before=gap_before,
+        target_gap_after=gap_after,
+    )
+
+
+class SourceCoordinateResidualCarry:
+    """Carry short-term target appearance without carrying geometry.
+
+    The state stores target-minus-source latent patches only on the latest
+    source-owned object.  A new block retrieves those patches with local,
+    soft bidirectionally-consistent source-feature correspondence.  Hand and
+    background tokens never enter the state.
+    """
+
+    def __init__(
+        self,
+        local_radius: int = 10,
+        min_similarity: float = 0.45,
+        max_candidates: int = 512,
+        patch_size: int = 2,
+        eps: float = 1e-6,
+    ):
+        self.local_radius = int(local_radius)
+        self.min_similarity = float(min_similarity)
+        self.max_candidates = int(max_candidates)
+        self.patch_size = int(patch_size)
+        self.eps = float(eps)
+        self.previous_features: torch.Tensor | None = None
+        self.previous_weight: torch.Tensor | None = None
+        self.previous_residual: torch.Tensor | None = None
+        self.previous_spatial_shape: tuple[int, int] | None = None
+
+    def _patchify(
+        self, value: torch.Tensor, spatial_shape: tuple[int, int]
+    ) -> torch.Tensor:
+        batch, frames, channels, height, width = value.shape
+        spatial_height, spatial_width = spatial_shape
+        if (height, width) != (
+            spatial_height * self.patch_size,
+            spatial_width * self.patch_size,
+        ):
+            raise ValueError(
+                "Latent resolution must equal owner resolution times "
+                "the residual patch size"
+            )
+        patches = value.unfold(
+            -2, self.patch_size, self.patch_size
+        ).unfold(-2, self.patch_size, self.patch_size)
+        return patches.permute(0, 1, 3, 4, 2, 5, 6).reshape(
+            batch, frames, spatial_height * spatial_width, -1
+        )
+
+    def _unpatchify(
+        self, patches: torch.Tensor, spatial_shape: tuple[int, int],
+        channels: int,
+    ) -> torch.Tensor:
+        batch, frames = patches.shape[:2]
+        spatial_height, spatial_width = spatial_shape
+        return patches.reshape(
+            batch, frames, spatial_height, spatial_width, channels,
+            self.patch_size, self.patch_size,
+        ).permute(0, 1, 4, 2, 5, 3, 6).reshape(
+            batch, frames, channels,
+            spatial_height * self.patch_size,
+            spatial_width * self.patch_size,
+        )
+
+    @torch.no_grad()
+    def prepare(
+        self,
+        *,
+        source_features: torch.Tensor,
+        owner_weight: torch.Tensor,
+        source_latent: torch.Tensor,
+        tokens_per_frame: int,
+        spatial_shape: tuple[int, int],
+    ) -> SourceCoordinateResidualCarryResult:
+        batch, token_count, _ = source_features.shape
+        frames = token_count // tokens_per_frame
+        zero_support = owner_weight.new_zeros(batch, token_count).float()
+        if self.previous_features is None:
+            return SourceCoordinateResidualCarryResult(
+                residual=torch.zeros_like(source_latent),
+                support=zero_support,
+                target_residual=torch.zeros_like(source_latent),
+            )
+        if self.previous_spatial_shape != spatial_shape:
+            raise ValueError(
+                "Residual carry owner resolution changed across blocks"
+            )
+        features = F.normalize(
+            source_features.detach().float(), dim=-1
+        ).reshape(batch, frames, tokens_per_frame, -1)
+        owner = owner_weight.detach().float().clamp(0.0, 1.0).reshape(
+            batch, frames, tokens_per_frame
+        )
+        reference_features = self.previous_features.to(features.device)
+        reference_weight = self.previous_weight.to(features.device)
+        reference_residual = self.previous_residual.to(features.device)
+        carried = reference_residual.new_zeros(
+            batch, frames, tokens_per_frame, reference_residual.shape[-1]
+        )
+        transported_residual = reference_residual.new_zeros(
+            batch, frames, tokens_per_frame, reference_residual.shape[-1]
+        )
+        support = owner.new_zeros(batch, frames, tokens_per_frame)
+        spatial_width = spatial_shape[1]
+        for batch_index in range(batch):
+            candidates = torch.nonzero(
+                reference_weight[batch_index] > self.eps,
+                as_tuple=False,
+            ).flatten()
+            if candidates.numel() == 0:
+                continue
+            if candidates.numel() > self.max_candidates:
+                keep = torch.topk(
+                    reference_weight[batch_index, candidates],
+                    self.max_candidates,
+                ).indices
+                candidates = candidates[keep]
+            reference_row = candidates // spatial_width
+            reference_col = candidates % spatial_width
+            for frame_index in range(frames):
+                queries = torch.nonzero(
+                    owner[batch_index, frame_index] > self.eps,
+                    as_tuple=False,
+                ).flatten()
+                if queries.numel() == 0:
+                    continue
+                query_row = queries // spatial_width
+                query_col = queries % spatial_width
+                local = (
+                    (query_row[:, None] - reference_row[None]).abs()
+                    <= self.local_radius
+                ) & (
+                    (query_col[:, None] - reference_col[None]).abs()
+                    <= self.local_radius
+                )
+                similarity = torch.matmul(
+                    features[batch_index, frame_index, queries],
+                    reference_features[batch_index, candidates].T,
+                ).clamp(-1.0, 1.0)
+                similarity = similarity.masked_fill(
+                    ~local, torch.finfo(similarity.dtype).min
+                )
+                has_local = local.any(dim=-1)
+                best, matched = similarity.max(dim=-1)
+                reverse_best = similarity.max(dim=0).values
+                cycle = torch.exp(
+                    -(reverse_best[matched] - best).clamp_min(0.0) / 0.05
+                )
+                absolute = (
+                    (best - self.min_similarity)
+                    / (1.0 - self.min_similarity)
+                ).clamp(0.0, 1.0)
+                current_support = (
+                    owner[batch_index, frame_index, queries]
+                    * reference_weight[batch_index, candidates[matched]]
+                    * torch.sqrt(absolute * cycle)
+                    * has_local.float()
+                ).clamp(0.0, 1.0)
+                support[batch_index, frame_index, queries] = current_support
+                transported_residual[
+                    batch_index, frame_index, queries
+                ] = reference_residual[
+                    batch_index, candidates[matched]
+                ]
+                carried[batch_index, frame_index, queries] = (
+                    transported_residual[
+                        batch_index, frame_index, queries
+                    ]
+                    * current_support[:, None]
+                )
+            supported_frames = torch.nonzero(
+                (support[batch_index] > self.eps).any(dim=-1),
+                as_tuple=False,
+            ).flatten()
+            if supported_frames.numel() > 0:
+                frame_index = int(supported_frames[-1].item())
+                # Advance only source correspondence and the already frozen
+                # residual.  No generated target latent is written here, so
+                # appearance errors cannot recursively accumulate.
+                self.previous_features[batch_index] = (
+                    features[batch_index, frame_index].detach().cpu()
+                )
+                self.previous_weight[batch_index] = (
+                    owner[batch_index, frame_index]
+                    * (support[batch_index, frame_index] > self.eps).float()
+                ).detach().cpu()
+                self.previous_residual[batch_index] = (
+                    transported_residual[
+                        batch_index, frame_index
+                    ].detach().cpu()
+                )
+        residual = self._unpatchify(
+            carried, spatial_shape, source_latent.shape[2]
+        ).to(source_latent.dtype)
+        target_residual = self._unpatchify(
+            transported_residual,
+            spatial_shape,
+            source_latent.shape[2],
+        ).to(source_latent.dtype)
+        return SourceCoordinateResidualCarryResult(
+            residual=residual,
+            support=support.reshape(batch, token_count),
+            target_residual=target_residual,
+        )
+
+    @torch.no_grad()
+    def commit(
+        self,
+        *,
+        source_features: torch.Tensor,
+        owner_weight: torch.Tensor,
+        source_latent: torch.Tensor,
+        target_latent: torch.Tensor,
+        tokens_per_frame: int,
+        spatial_shape: tuple[int, int],
+    ) -> None:
+        batch, token_count, _ = source_features.shape
+        frames = token_count // tokens_per_frame
+        features = F.normalize(
+            source_features.detach().float(), dim=-1
+        ).reshape(batch, frames, tokens_per_frame, -1)
+        owner = owner_weight.detach().float().clamp(0.0, 1.0).reshape(
+            batch, frames, tokens_per_frame
+        )
+        residual = self._patchify(
+            (target_latent - source_latent).detach().float(),
+            spatial_shape,
+        )
+        if self.previous_features is None:
+            self.previous_features = features[:, -1].detach().cpu()
+            self.previous_weight = owner.new_zeros(
+                batch, tokens_per_frame
+            ).cpu()
+            self.previous_residual = residual[:, -1].detach().cpu()
+            self.previous_spatial_shape = spatial_shape
+        for batch_index in range(batch):
+            visible_frames = torch.nonzero(
+                (owner[batch_index] > self.eps).any(dim=-1),
+                as_tuple=False,
+            ).flatten()
+            if visible_frames.numel() == 0:
+                continue
+            frame_index = int(visible_frames[-1].item())
+            self.previous_features[batch_index] = (
+                features[batch_index, frame_index].detach().cpu()
+            )
+            self.previous_weight[batch_index] = (
+                owner[batch_index, frame_index].detach().cpu()
+            )
+            self.previous_residual[batch_index] = (
+                residual[batch_index, frame_index].detach().cpu()
+            )
+
+    def has_state(self) -> bool:
+        return (
+            self.previous_features is not None
+            and self.previous_weight is not None
+            and self.previous_residual is not None
+        )
+
+
+@dataclass(frozen=True)
+class TargetIdentityLifecycle:
+    """Visibility-gated identity state for one causal block."""
+
+    read_mask: torch.Tensor
+    state_code: torch.Tensor
+    visible: torch.Tensor
+    missing_blocks: torch.Tensor
+
+    VISIBLE = 0
+    OCCLUDED = 1
+    ABSENT = 2
+
+    def validate(self) -> None:
+        if self.read_mask.ndim != 2:
+            raise ValueError(
+                "Lifecycle read mask must have shape [B,L]"
+            )
+        batch = self.read_mask.shape[0]
+        for name, value in (
+            ("state_code", self.state_code),
+            ("visible", self.visible),
+            ("missing_blocks", self.missing_blocks),
+        ):
+            if value.shape != (batch,):
+                raise ValueError(
+                    f"Lifecycle {name} must have shape [B]"
+                )
+        if self.state_code.min() < self.VISIBLE:
+            raise ValueError("Lifecycle state code is invalid")
+        if self.state_code.max() > self.ABSENT:
+            raise ValueError("Lifecycle state code is invalid")
+        if self.missing_blocks.min() < 0:
+            raise ValueError(
+                "Lifecycle missing block count must be non-negative"
             )
 
 
@@ -1161,6 +2376,7 @@ class SlowTargetIdentityMemory:
         layers: Iterable[int] = (8, 12, 16, 20),
         num_prototypes: int = 4,
         reference_prior_evidence: float = 8.0,
+        store_value_residual: bool = False,
         eps: float = 1e-6,
     ):
         self.layers = tuple(layers)
@@ -1186,12 +2402,296 @@ class SlowTargetIdentityMemory:
         self.reference_prior_evidence = (
             float(reference_prior_evidence)
         )
+        self.store_value_residual = bool(store_value_residual)
         self.eps = eps
         self.anchor_states: Dict[int, TargetIdentityLayerState] = {}
         self.states: Dict[int, TargetIdentityLayerState] = {}
         self.reference_bootstrapped = False
         self.causal_first_frame_bootstrapped = False
         self.causal_edit_anchor_reset = False
+        self.target_owned_token_history: torch.Tensor | None = None
+        self.target_owned_anchor_mask: torch.Tensor | None = None
+        self.target_owned_anchor_features: torch.Tensor | None = None
+        self.identity_missing_blocks: torch.Tensor | None = None
+
+    def promote_adaptive_to_replay_anchor(self) -> None:
+        """Freeze the clean multi-frame proposal bank for a replay pass."""
+        if not self.states:
+            raise RuntimeError(
+                "First-chunk replay produced no target identity state"
+            )
+        missing_layers = [
+            layer for layer in self.layers if layer not in self.states
+        ]
+        if missing_layers:
+            raise RuntimeError(
+                "First-chunk replay is missing target identity state at "
+                f"layers {missing_layers}"
+            )
+        promoted = {}
+        for layer in self.layers:
+            state = self.states[layer]
+            state.validate()
+            if state.appearance_key is None:
+                raise RuntimeError(
+                    "Replay identity is missing target appearance keys at "
+                    f"layer {layer}"
+                )
+            batch_has_support = (
+                state.evidence > self.eps
+            ).any(dim=-1)
+            if not batch_has_support.all():
+                missing_batches = torch.nonzero(
+                    ~batch_has_support,
+                    as_tuple=False,
+                ).flatten().tolist()
+                raise RuntimeError(
+                    "First-chunk replay produced no verified target "
+                    f"identity support at layer {layer} for batch indices "
+                    f"{missing_batches}; inspect proposal HAND_ROLE_FLOW "
+                    "edit_tokens and TARGET_IDENTITY_WRITE weight"
+                )
+            promoted[layer] = TargetIdentityLayerState(
+                key=state.key.detach().clone(),
+                value=state.value.detach().clone(),
+                evidence=state.evidence.detach().clone(),
+                appearance_key=state.appearance_key.detach().clone(),
+                value_is_residual=state.value_is_residual,
+            )
+        self._make_authoritative(promoted)
+        self.anchor_states = promoted
+        self.states = {}
+        self.causal_first_frame_bootstrapped = True
+        self.causal_edit_anchor_reset = True
+        self.identity_missing_blocks = None
+
+    @torch.no_grad()
+    def update_visibility_lifecycle(
+        self,
+        object_core: torch.Tensor,
+        frame_visible: torch.Tensor,
+        *,
+        tokens_per_frame: int,
+        max_occluded_blocks: int = 1,
+    ) -> TargetIdentityLifecycle:
+        """Gate identity reads without deleting the frozen appearance."""
+        if object_core.ndim != 2:
+            raise ValueError(
+                "Lifecycle object core must have shape [B,L]"
+            )
+        if tokens_per_frame <= 0:
+            raise ValueError(
+                "Lifecycle tokens_per_frame must be positive"
+            )
+        if object_core.shape[1] % tokens_per_frame != 0:
+            raise ValueError(
+                "Lifecycle object core must contain whole frames"
+            )
+        frame_count = object_core.shape[1] // tokens_per_frame
+        visible = frame_visible.detach().bool().reshape(
+            object_core.shape[0],
+            -1,
+        )
+        if visible.shape[1] == 1:
+            visible = visible.expand(-1, frame_count)
+        if visible.shape != (object_core.shape[0], frame_count):
+            raise ValueError(
+                "Lifecycle visibility must align with object frames"
+            )
+        core = object_core.detach().bool().reshape(
+            object_core.shape[0],
+            frame_count,
+            tokens_per_frame,
+        )
+        frame_has_object = core.any(dim=-1) & visible
+        read_mask = (
+            core & frame_has_object[:, :, None]
+        ).reshape_as(object_core)
+        block_visible = frame_has_object.any(dim=-1)
+
+        previous_missing = self.identity_missing_blocks
+        if previous_missing is None:
+            previous_missing = torch.zeros(
+                object_core.shape[0],
+                dtype=torch.long,
+                device=object_core.device,
+            )
+        else:
+            previous_missing = previous_missing.to(
+                device=object_core.device,
+            )
+            if previous_missing.shape != (object_core.shape[0],):
+                raise ValueError(
+                    "Lifecycle batch size changed across blocks"
+                )
+        missing = torch.where(
+            block_visible,
+            torch.zeros_like(previous_missing),
+            previous_missing + 1,
+        )
+        state_code = torch.where(
+            block_visible,
+            torch.full_like(missing, TargetIdentityLifecycle.VISIBLE),
+            torch.where(
+                missing <= max_occluded_blocks,
+                torch.full_like(
+                    missing, TargetIdentityLifecycle.OCCLUDED
+                ),
+                torch.full_like(
+                    missing, TargetIdentityLifecycle.ABSENT
+                ),
+            ),
+        )
+        self.identity_missing_blocks = missing.detach().cpu()
+        result = TargetIdentityLifecycle(
+            read_mask=read_mask,
+            state_code=state_code,
+            visible=block_visible,
+            missing_blocks=missing,
+        )
+        result.validate()
+        return result
+
+    @torch.no_grad()
+    def record_target_owned_tokens(
+        self,
+        target_owned_mask: torch.Tensor,
+    ) -> None:
+        """Append generated object ownership for rollout handoff."""
+        if target_owned_mask.ndim != 2:
+            raise ValueError(
+                "Target-owned tokens must have shape [B,L]"
+            )
+        owned = target_owned_mask.detach().bool()
+        if self.target_owned_token_history is None:
+            self.target_owned_token_history = owned.clone()
+            return
+        if self.target_owned_token_history.shape[0] != owned.shape[0]:
+            raise ValueError(
+                "Target-owned token history batch size changed"
+            )
+        history = self.target_owned_token_history.to(
+            device=owned.device,
+        )
+        self.target_owned_token_history = torch.cat(
+            (history, owned),
+            dim=1,
+        )
+
+    def recent_target_owned_tokens(
+        self,
+        token_count: int,
+        *,
+        batch_size: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Return ownership aligned to target overlap context."""
+        if token_count < 0:
+            raise ValueError(
+                "Target-owned token count must be non-negative"
+            )
+        if token_count == 0:
+            return torch.zeros(
+                batch_size,
+                0,
+                dtype=torch.bool,
+                device=device,
+            )
+        history = self.target_owned_token_history
+        if history is None or history.shape[1] < token_count:
+            raise RuntimeError(
+                "Missing target-owned history for rollout overlap"
+            )
+        if history.shape[0] != batch_size:
+            raise ValueError(
+                "Target-owned history and overlap batch size differ"
+            )
+        return history[:, -token_count:].to(
+            device=device,
+            dtype=torch.bool,
+        )
+
+    @torch.no_grad()
+    def commit_target_owned_anchor(
+        self,
+        anchor_mask: torch.Tensor,
+        anchor_features: torch.Tensor,
+    ) -> None:
+        """Commit the ignition object core used for source matching."""
+        if anchor_mask.ndim != 2:
+            raise ValueError(
+                "Target-owned anchor mask must have shape [B,L]"
+            )
+        if anchor_features.ndim != 3:
+            raise ValueError(
+                "Target-owned anchor features must have shape [B,L,D]"
+            )
+        if anchor_features.shape[:2] != anchor_mask.shape:
+            raise ValueError(
+                "Target-owned anchor mask and features must align"
+            )
+        mask = anchor_mask.detach().bool()
+        if not mask.any(dim=-1).all():
+            raise RuntimeError(
+                "Target-owned anchor has no verified object support"
+            )
+        self.target_owned_anchor_mask = mask
+        self.target_owned_anchor_features = F.normalize(
+            anchor_features.detach().float(),
+            dim=-1,
+        )
+
+    @torch.no_grad()
+    def match_target_owned_tokens(
+        self,
+        source_features: torch.Tensor,
+        candidate_mask: torch.Tensor,
+        *,
+        min_similarity: float = 0.55,
+    ) -> torch.Tensor:
+        """Match current source tokens to the committed ignition core."""
+        if source_features.ndim != 3:
+            raise ValueError(
+                "Source features must have shape [B,L,D]"
+            )
+        if candidate_mask.shape != source_features.shape[:2]:
+            raise ValueError(
+                "Ownership candidates must align with source features"
+            )
+        if not -1.0 < min_similarity < 1.0:
+            raise ValueError(
+                "Ownership similarity must lie in (-1, 1)"
+            )
+        anchor_mask = self.target_owned_anchor_mask
+        anchor_features = self.target_owned_anchor_features
+        if anchor_mask is None or anchor_features is None:
+            raise RuntimeError(
+                "Target-owned anchor has not been committed"
+            )
+        if (
+            source_features.shape[0] != anchor_features.shape[0]
+            or source_features.shape[-1] != anchor_features.shape[-1]
+        ):
+            raise ValueError(
+                "Ownership features and anchor descriptor must align"
+            )
+        source = F.normalize(source_features.detach().float(), dim=-1)
+        anchor = anchor_features.to(source.device)
+        valid = anchor_mask.to(source.device)
+        similarity = torch.einsum(
+            "bld,bpd->blp",
+            source,
+            anchor,
+        )
+        similarity = similarity.masked_fill(
+            ~valid[:, None, :],
+            -1.0,
+        )
+        best_similarity = similarity.max(dim=-1).values
+        return (
+            candidate_mask.detach().bool()
+            & (best_similarity >= min_similarity)
+        )
 
     @staticmethod
     def _descriptor(key: torch.Tensor) -> torch.Tensor:
@@ -1312,6 +2812,7 @@ class SlowTargetIdentityMemory:
         value: torch.Tensor,
         weight: torch.Tensor,
         state: TargetIdentityLayerState | None,
+        appearance_key: torch.Tensor | None = None,
     ):
         descriptor = self._descriptor(key)
         if state is None:
@@ -1358,6 +2859,15 @@ class SlowTargetIdentityMemory:
             responsibility,
             value.float(),
         ) / normalizer[:, :, None, None]
+        observation_appearance_key = (
+            observation_key
+            if appearance_key is None
+            else torch.einsum(
+                "blp,blhd->bphd",
+                responsibility,
+                appearance_key.float(),
+            ) / normalizer[:, :, None, None]
+        )
 
         support = (weight > self.eps).float()
         assignment_support = (
@@ -1375,10 +2885,15 @@ class SlowTargetIdentityMemory:
             observation_key,
             dim=-1,
         ) * math.sqrt(key.shape[-1])
+        observation_appearance_key = F.normalize(
+            observation_appearance_key,
+            dim=-1,
+        ) * math.sqrt(key.shape[-1])
         return (
             observation_key,
             observation_value,
             observation_evidence,
+            observation_appearance_key,
         )
 
     @staticmethod
@@ -1386,8 +2901,10 @@ class SlowTargetIdentityMemory:
         cache,
         num_new_tokens: int,
         tensor_name: str,
+        *,
+        allow_captured_key: bool = True,
     ) -> torch.Tensor:
-        if tensor_name == "k":
+        if tensor_name == "k" and allow_captured_key:
             captured_key = cache.get("current_identity_key")
             if captured_key is not None:
                 if captured_key.shape[1] != num_new_tokens:
@@ -1440,13 +2957,32 @@ class SlowTargetIdentityMemory:
                 num_new_tokens,
                 "k",
             )
+            appearance_key = self._current_tokens(
+                target_cache,
+                num_new_tokens,
+                "k",
+            )
             value = self._current_tokens(
                 target_cache,
                 num_new_tokens,
                 "v",
             )
+            if self.store_value_residual:
+                target_value_dtype = value.dtype
+                source_value = self._current_tokens(
+                    source_cache,
+                    num_new_tokens,
+                    "v",
+                    allow_captured_key=False,
+                )
+                if source_value.shape[0] != value.shape[0]:
+                    source_value = source_value[batch_slice]
+                value = (
+                    value.float() - source_value.float()
+                ).to(target_value_dtype)
             if batch_slice is not None:
                 value = value[batch_slice]
+                appearance_key = appearance_key[batch_slice]
                 if key.shape[0] != write_weight.shape[0]:
                     key = key[batch_slice]
             if key.shape[0] != write_weight.shape[0]:
@@ -1464,20 +3000,30 @@ class SlowTargetIdentityMemory:
                 observed_key,
                 observed_value,
                 observed_evidence,
+                observed_appearance_key,
             ) = self._observe(
                 key,
                 value,
                 write_weight,
                 previous,
+                appearance_key=appearance_key,
             )
             if previous is None:
                 old_evidence = torch.zeros_like(observed_evidence)
                 old_key = torch.zeros_like(observed_key)
                 old_value = torch.zeros_like(observed_value)
+                old_appearance_key = torch.zeros_like(
+                    observed_appearance_key
+                )
             else:
                 old_evidence = previous.evidence.float()
                 old_key = previous.key.float()
                 old_value = previous.value.float()
+                old_appearance_key = (
+                    previous.key.float()
+                    if previous.appearance_key is None
+                    else previous.appearance_key.float()
+                )
             total_evidence = old_evidence + observed_evidence
             gain = torch.where(
                 total_evidence > self.eps,
@@ -1499,6 +3045,15 @@ class SlowTargetIdentityMemory:
                 + gain[:, :, None, None]
                 * (observed_value - old_value)
             )
+            new_appearance_key = (
+                old_appearance_key
+                + gain[:, :, None, None]
+                * (observed_appearance_key - old_appearance_key)
+            )
+            new_appearance_key = F.normalize(
+                new_appearance_key,
+                dim=-1,
+            ) * math.sqrt(key.shape[-1])
             valid = total_evidence > self.eps
             new_key = torch.where(
                 valid[:, :, None, None],
@@ -1510,10 +3065,19 @@ class SlowTargetIdentityMemory:
                 new_value,
                 torch.zeros_like(new_value),
             )
+            new_appearance_key = torch.where(
+                valid[:, :, None, None],
+                new_appearance_key,
+                torch.zeros_like(new_appearance_key),
+            )
             state = TargetIdentityLayerState(
                 key=new_key.to(key.dtype).detach(),
                 value=new_value.to(value.dtype).detach(),
                 evidence=total_evidence.detach(),
+                appearance_key=(
+                    new_appearance_key.to(appearance_key.dtype).detach()
+                ),
+                value_is_residual=self.store_value_residual,
             )
             state.validate()
             state_store[layer] = state
@@ -1570,6 +3134,8 @@ class SlowTargetIdentityMemory:
                 key=state.key,
                 value=state.value,
                 evidence=authoritative_evidence,
+                appearance_key=state.appearance_key,
+                value_is_residual=state.value_is_residual,
             )
             anchored_state.validate()
             states[layer] = anchored_state

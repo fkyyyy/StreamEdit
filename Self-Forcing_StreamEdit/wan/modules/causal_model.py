@@ -1,7 +1,24 @@
 from wan.modules.attention import (
     apply_target_identity_value_correction,
+    arbitrate_verified_factorized_attention,
+    arbitrate_projected_attention_output,
     attention,
+    blend_target_owned_tensor,
+    blend_factorized_with_native_fallback,
+    blend_source_addressed_residual,
+    closed_loop_counterfactual_memory_attention,
+    build_factorized_history_read_mask,
+    build_target_owned_source_background_mask,
     fuse_aligned_memory,
+    fuse_factorized_aligned_memory,
+    project_source_addressed_target_value,
+    resolve_target_identity_correction_strength,
+    immutable_canonical_anchor_attention_delta,
+    source_addressed_anchor_attention_delta,
+    source_addressed_native_history_attention,
+    scatter_source_addressed_anchor_delta,
+    scatter_target_owned_output,
+    suppress_source_preserve_on_target_owned_history,
 )
 from wan.modules.contact_graph_attention import (
     apply_contact_graph_residual,
@@ -61,6 +78,66 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
 
         # append to collection
         output.append(x_i)
+    return torch.stack(output).type_as(x)
+
+
+def causal_rope_apply_indexed(
+    x, token_indices, grid_sizes, freqs, start_frame=0
+):
+    """Apply the native 3-D RoPE to a compact set of visual tokens.
+
+    ``token_indices`` refer to positions in the original dense ``F*H*W``
+    block.  Keeping them lets 937 retain only role-approved native K/V while
+    preserving exactly the spatial and within-block temporal coordinates at
+    which those keys were produced.
+    """
+    if x.ndim != 4 or token_indices.shape != x.shape[:2]:
+        raise ValueError(
+            "Indexed RoPE expects x=[B,L,H,D] and indices=[B,L]"
+        )
+    if x.shape[1] == 0:
+        return x
+    num_heads, complex_dim = x.size(2), x.size(3) // 2
+    split_freqs = freqs.split(
+        [
+            complex_dim - 2 * (complex_dim // 3),
+            complex_dim // 3,
+            complex_dim // 3,
+        ],
+        dim=1,
+    )
+    output = []
+    for batch_index, (_, height, width) in enumerate(
+        grid_sizes.tolist()
+    ):
+        index = token_indices[batch_index].long()
+        valid = index >= 0
+        safe_index = index.clamp_min(0)
+        spatial_size = height * width
+        temporal_index = safe_index // spatial_size + int(start_frame)
+        spatial_index = safe_index % spatial_size
+        row_index = spatial_index // width
+        col_index = spatial_index % width
+        if temporal_index.max().item() >= split_freqs[0].shape[0]:
+            raise ValueError("Indexed temporal RoPE exceeds frequency table")
+        multiplier = torch.cat(
+            [
+                split_freqs[0][temporal_index],
+                split_freqs[1][row_index],
+                split_freqs[2][col_index],
+            ],
+            dim=-1,
+        ).unsqueeze(1)
+        value = torch.view_as_complex(
+            x[batch_index].to(torch.float64).reshape(
+                x.shape[1], num_heads, -1, 2
+            )
+        )
+        value = torch.view_as_real(value * multiplier).flatten(2)
+        value = torch.where(
+            valid[:, None, None], value, torch.zeros_like(value)
+        )
+        output.append(value)
     return torch.stack(output).type_as(x)
 
 
@@ -303,6 +380,9 @@ class CausalWanSelfAttention(nn.Module):
 
                 # apply rope for all cached k (except sink tokens)
                 select_key = kv_cache["k"][:, attn_seq_slice]
+                # Sink-free native caches keep pre-RoPE keys.  Preserve a
+                # view for role-conditioned fixed-relative native history.
+                unrotated_attn_key = select_key
                 roped_key, last_chunk_start_frame = causal_rope_apply_multi_chunk(
                     select_key[:, sink_tokens: ], grid_sizes, freqs, q, start_frame=0
                 )
@@ -317,6 +397,7 @@ class CausalWanSelfAttention(nn.Module):
                 # select value for attn
                 attn_value = kv_cache["v"][:, attn_seq_slice]
             else:
+                unrotated_attn_key = None
                 current_start_frame = current_start // frame_seqlen
                 roped_query = causal_rope_apply(
                     q, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
@@ -336,6 +417,7 @@ class CausalWanSelfAttention(nn.Module):
             else:
                 # init
                 src_query, trg_query = roped_query.chunk(2, dim=0)
+                raw_src_query, raw_trg_query = q.chunk(2, dim=0)
                 src_key, trg_key = attn_key.chunk(2, dim=0)
                 src_value, trg_value = attn_value.chunk(2, dim=0)
                 blender_rate = 1 - kv_cache['shared_dict']['current_timestep_next'] ** kv_cache['shared_dict']['blend_power']
@@ -350,14 +432,120 @@ class CausalWanSelfAttention(nn.Module):
                 trg_current_value = trg_value[:, -num_new_tokens: ]
 
                 shared_dict = kv_cache["shared_dict"]
+                target_owned_handoff = bool(
+                    shared_dict.get(
+                        "target_owned_object_handoff",
+                        False,
+                    )
+                )
+                current_target_owned_mask = None
+                target_owned_history_mask = None
+                if target_owned_handoff:
+                    current_target_owned_mask = kv_cache.get(
+                        "current_target_owned_mask"
+                    )
+                    target_owned_cache = kv_cache.get(
+                        "target_owned_history_mask"
+                    )
+                    if (
+                        current_target_owned_mask is None
+                        or target_owned_cache is None
+                    ):
+                        raise RuntimeError(
+                            "Target-owned handoff requires aligned current "
+                            "and historical ownership masks"
+                        )
+                    if current_target_owned_mask.shape != (
+                        b // 2,
+                        num_new_tokens,
+                    ):
+                        raise ValueError(
+                            "Current target-owned mask must align with "
+                            "the current attention tokens"
+                        )
+                    target_owned_history_mask = (
+                        target_owned_cache[:, attn_seq_slice][
+                            :, :-num_new_tokens
+                        ]
+                    )
+                    if target_owned_history_mask.shape != (
+                        b // 2,
+                        src_prev_key.shape[1],
+                    ):
+                        raise ValueError(
+                            "Target-owned history must align with cached "
+                            "attention tokens"
+                        )
                 identity_states = shared_dict.get(
                     "target_identity_memory",
                     {},
                 )
+                factorized_target_identity = bool(
+                    shared_dict.get(
+                        "factorized_target_identity",
+                        False,
+                    )
+                )
+                core_conditioned_identity = bool(
+                    shared_dict.get(
+                        "appearance_leakage_decomposition",
+                        False,
+                    )
+                )
+                immutable_factorized_identity = bool(
+                    shared_dict.get(
+                        "factorized_immutable_target_memory",
+                        False,
+                    )
+                )
+                immutable_residual_subspace = bool(
+                    shared_dict.get(
+                        "immutable_target_residual_subspace",
+                        False,
+                    )
+                )
                 layer_index = kv_cache.get("layer_index", -1)
+                timestep_counterfactual_memory = bool(
+                    shared_dict.get(
+                        "native_history_timestep_counterfactual_memory",
+                        False,
+                    )
+                )
+                counterfactual_history = shared_dict.get(
+                    "role_native_history_object"
+                )
+                timestep_index = int(
+                    shared_dict.get("current_timestep_index", -1)
+                )
+                if (
+                    timestep_counterfactual_memory
+                    and counterfactual_history is not None
+                    and layer_index in counterfactual_history.layers
+                ):
+                    timestep_selection_weight = kv_cache.get(
+                        "current_causal_owner_mask"
+                    )
+                    if timestep_selection_weight is None:
+                        timestep_selection_weight = kv_cache.get(
+                            "current_target_memory_action"
+                        )
+                    if timestep_selection_weight is None:
+                        raise RuntimeError(
+                            "Timestep counterfactual capture requires an "
+                            "automatic owner weight"
+                        )
+                    counterfactual_history.stage_timestep_counterfactual(
+                        layer=layer_index,
+                        timestep_index=timestep_index,
+                        source_key=k.chunk(2, dim=0)[0],
+                        source_value=v.chunk(2, dim=0)[0],
+                        target_key=k.chunk(2, dim=0)[1],
+                        target_value=v.chunk(2, dim=0)[1],
+                        selection_weight=timestep_selection_weight,
+                    )
                 identity_state = identity_states.get(layer_index)
                 if identity_state is not None:
-                    raw_source_key, _ = k.chunk(2, dim=0)
+                    raw_source_key, raw_target_key = k.chunk(2, dim=0)
                     source_identity_keys = shared_dict.get(
                         "source_identity_keys",
                         {},
@@ -369,12 +557,52 @@ class CausalWanSelfAttention(nn.Module):
                         device=raw_source_key.device,
                         dtype=raw_source_key.dtype,
                     )
+                    identity_read_mask = kv_cache.get(
+                        "current_identity_read_mask"
+                    )
+                    support_mask = (
+                        identity_read_mask
+                        if (
+                            factorized_target_identity
+                            or core_conditioned_identity
+                            or immutable_factorized_identity
+                        )
+                        else kv_cache["current_src_fg_mask"]
+                    )
+                    if (
+                        (
+                            factorized_target_identity
+                            or core_conditioned_identity
+                            or immutable_factorized_identity
+                        )
+                        and identity_read_mask is None
+                    ):
+                        raise RuntimeError(
+                            "Core-conditioned identity requires an explicit "
+                            "current read mask"
+                        )
+                    prototype_appearance_key = getattr(
+                        identity_state,
+                        "appearance_key",
+                        None,
+                    )
+                    if (
+                        factorized_target_identity
+                        and not core_conditioned_identity
+                        and prototype_appearance_key is None
+                    ):
+                        raise RuntimeError(
+                            "Factorized identity memory is missing its "
+                            "target appearance key"
+                        )
                     (
                         trg_current_value,
                         identity_support,
+                        identity_diagnostics,
                     ) = apply_target_identity_value_correction(
                         correspondence_key=correspondence_key,
                         target_value=trg_current_value,
+                        source_value=src_current_value,
                         prototype_key=identity_state.key.to(
                             device=correspondence_key.device,
                             dtype=correspondence_key.dtype,
@@ -386,26 +614,1584 @@ class CausalWanSelfAttention(nn.Module):
                         prototype_evidence=identity_state.evidence.to(
                             device=correspondence_key.device,
                         ),
+                        prototype_value_is_residual=bool(
+                            getattr(
+                                identity_state,
+                                "value_is_residual",
+                                False,
+                            )
+                        ),
+                        residual_subspace=immutable_residual_subspace,
+                        target_appearance_key=(
+                            raw_target_key
+                            if (
+                                factorized_target_identity
+                                and not core_conditioned_identity
+                            )
+                            else None
+                        ),
+                        prototype_appearance_key=(
+                            None
+                            if (
+                                not factorized_target_identity
+                                or core_conditioned_identity
+                                or prototype_appearance_key is None
+                            )
+                            else prototype_appearance_key.to(
+                                device=trg_current_key.device,
+                                dtype=trg_current_key.dtype,
+                            )
+                        ),
                         tokens_per_frame=frame_seqlen,
-                        support_mask=kv_cache[
-                            "current_src_fg_mask"
-                        ],
+                        support_mask=support_mask,
+                        support_floor=float(
+                            shared_dict.get(
+                                "identity_support_floor", 0.0
+                            )
+                        ),
+                        correction_strength=(
+                            resolve_target_identity_correction_strength(
+                                shared_dict.get(
+                                    "identity_correction_strength",
+                                    1.0,
+                                ),
+                                factorized_target_identity=(
+                                    factorized_target_identity
+                                ),
+                                immutable_factorized_identity=(
+                                    immutable_factorized_identity
+                                ),
+                                prototype_value_is_residual=bool(
+                                    getattr(
+                                        identity_state,
+                                        "value_is_residual",
+                                        False,
+                                    )
+                                ),
+                            )
+                        ),
+                        return_diagnostics=True,
                     )
                     shared_dict.setdefault(
                         "target_identity_support",
                         {},
                     )[layer_index] = identity_support.detach()
+                    shared_dict.setdefault(
+                        "target_identity_diagnostics",
+                        {},
+                    )[layer_index] = {
+                        name: value.detach()
+                        for name, value in identity_diagnostics.items()
+                    }
 
                 x_list = [
                     attention(src_query, src_key, src_value)   # source
                 ]
                 for b_idx in range(b // 2):
+                    factorized_bayes_kv = all(
+                        kv_cache.get(name) is not None
+                        for name in (
+                            "cached_source_key_action",
+                            "cached_source_value_action",
+                            "cached_target_memory_action",
+                            "cached_unknown_action",
+                            "current_source_key_action",
+                            "current_source_value_action",
+                            "current_target_memory_action",
+                            "current_unknown_action",
+                        )
+                    )
+                    if factorized_bayes_kv:
+                        history_actions = {
+                            name: kv_cache[f"cached_{name}"][
+                                b_idx, attn_seq_slice
+                            ][:-num_new_tokens]
+                            for name in (
+                                "source_key_action",
+                                "source_value_action",
+                                "target_memory_action",
+                                "unknown_action",
+                            )
+                        }
+                        current_actions = {
+                            name: kv_cache[f"current_{name}"][b_idx]
+                            for name in (
+                                "source_key_action",
+                                "source_value_action",
+                                "target_memory_action",
+                                "unknown_action",
+                            )
+                        }
+                        if any(
+                            action.shape != (src_prev_key.shape[1],)
+                            for action in history_actions.values()
+                        ):
+                            raise ValueError(
+                                "Cached factorized actions must align with "
+                                "historical memory"
+                            )
+                        if any(
+                            action.shape != (num_new_tokens,)
+                            for action in current_actions.values()
+                        ):
+                            raise ValueError(
+                                "Current factorized actions must align with "
+                                "the current attention block"
+                            )
+                        paired_reads = kv_cache["shared_dict"].get(
+                            "causal_paired_edit_memory", {}
+                        )
+                        paired_read = paired_reads.get(layer_index)
+                        if paired_read is not None and (
+                            paired_read.residual.shape
+                            != (
+                                b // 2,
+                                num_new_tokens,
+                                self.num_heads,
+                                self.head_dim,
+                            )
+                            or paired_read.support.shape
+                            != (b // 2, num_new_tokens)
+                        ):
+                            raise ValueError(
+                                "Source-addressed residual read must "
+                                "align with current target tokens"
+                            )
+                        paired_value_projection = bool(
+                            kv_cache["shared_dict"].get(
+                                "paired_memory_value_projection", False
+                            )
+                        )
+                        query_gated_projection = bool(
+                            kv_cache["shared_dict"].get(
+                                "paired_memory_query_gated_projection",
+                                False,
+                            )
+                        )
+                        single_confidence = bool(
+                            kv_cache["shared_dict"].get(
+                                "paired_memory_single_confidence",
+                                False,
+                            )
+                        )
+                        dual_timescale_anchor = bool(
+                            kv_cache["shared_dict"].get(
+                                "paired_memory_dual_timescale_anchor",
+                                False,
+                            )
+                        )
+                        canonical_key_anchor = bool(
+                            kv_cache["shared_dict"].get(
+                                "paired_memory_canonical_key_anchor",
+                                False,
+                            )
+                        )
+                        role_fixed_native_history = bool(
+                            kv_cache["shared_dict"].get(
+                                "role_fixed_native_history", False
+                            )
+                        )
+                        native_target_value = trg_current_value[
+                            b_idx
+                        ].unsqueeze(0)
+                        attention_target_value = native_target_value
+                        value_projection_delta = (
+                            attention_target_value.new_zeros(())
+                        )
+                        if (
+                            paired_value_projection
+                            and paired_read is not None
+                            and not dual_timescale_anchor
+                        ):
+                            if (
+                                paired_read.source_value is None
+                                or paired_read.source_value.shape
+                                != paired_read.residual.shape
+                            ):
+                                raise ValueError(
+                                    "Value projection requires aligned "
+                                    "clean-source values"
+                                )
+                            projected_target_value = (
+                                project_source_addressed_target_value(
+                                    attention_target_value,
+                                    paired_read.source_value[b_idx]
+                                    .to(attention_target_value.device)
+                                    .unsqueeze(0),
+                                    paired_read.residual[b_idx]
+                                    .to(attention_target_value.device)
+                                    .unsqueeze(0),
+                                    paired_read.support[b_idx]
+                                    .to(attention_target_value.device)
+                                    .unsqueeze(0),
+                                    strength=float(
+                                        kv_cache["shared_dict"].get(
+                                            "paired_memory_read_strength",
+                                            0.0,
+                                        )
+                                    ),
+                                )
+                            )
+                            value_projection_delta = (
+                                projected_target_value.float()
+                                - attention_target_value.float()
+                            ).abs().mean()
+                            attention_target_value = (
+                                projected_target_value
+                            )
+
+                        # Source Q/K supplies correspondence according to the
+                        # native timestep schedule. Unknown history exactly
+                        # recovers StreamGVE's foreground-key fallback.
+                        history_native_key = (
+                            kv_cache["trg_fg_mask"][
+                                b_idx, attn_seq_slice
+                            ][:-num_new_tokens].float()
+                            * (1.0 - blender_rate)
+                        )
+                        history_source_key = (
+                            history_actions["source_key_action"]
+                            * (1.0 - blender_rate)
+                            + history_actions["unknown_action"]
+                            * history_native_key
+                        ).clamp(0.0, 1.0)
+                        history_known = (
+                            history_actions["source_value_action"]
+                            + history_actions["target_memory_action"]
+                        ).clamp(0.0, 1.0)
+                        history_read_mask = (
+                            build_factorized_history_read_mask(
+                                history_actions[
+                                    "source_value_action"
+                                ],
+                                history_actions[
+                                    "target_memory_action"
+                                ],
+                            )
+                        )
+                        normalized_history_source_value = torch.where(
+                            history_read_mask,
+                            history_actions["source_value_action"]
+                            / history_known.clamp_min(1e-6),
+                            torch.zeros_like(history_known),
+                        )
+                        normalized_history_target_value = torch.where(
+                            history_read_mask,
+                            history_actions["target_memory_action"]
+                            / history_known.clamp_min(1e-6),
+                            torch.zeros_like(history_known),
+                        )
+                        previous_key, previous_value = (
+                            fuse_factorized_aligned_memory(
+                                trg_prev_key[b_idx].unsqueeze(0),
+                                trg_prev_value[b_idx].unsqueeze(0),
+                                src_prev_key[b_idx].unsqueeze(0),
+                                src_prev_value[b_idx].unsqueeze(0),
+                                history_source_key.unsqueeze(0),
+                                normalized_history_source_value.unsqueeze(0),
+                                normalized_history_target_value.unsqueeze(0),
+                                torch.zeros_like(
+                                    history_known
+                                ).unsqueeze(0),
+                            )
+                        )
+                        previous_key = previous_key[:, history_read_mask]
+                        previous_value = previous_value[:, history_read_mask]
+
+                        current_source_key = (
+                            (
+                                current_actions["source_key_action"]
+                                + current_actions["unknown_action"]
+                            )
+                            * (1.0 - blender_rate)
+                        ).clamp(0.0, 1.0)
+                        current_key, current_value = (
+                            fuse_factorized_aligned_memory(
+                                trg_current_key[b_idx].unsqueeze(0),
+                                attention_target_value,
+                                src_current_key[b_idx].unsqueeze(0),
+                                src_current_value[b_idx].unsqueeze(0),
+                                current_source_key.unsqueeze(0),
+                                current_actions[
+                                    "source_value_action"
+                                ].unsqueeze(0),
+                                current_actions[
+                                    "target_memory_action"
+                                ].unsqueeze(0),
+                                current_actions[
+                                    "unknown_action"
+                                ].unsqueeze(0),
+                            )
+                        )
+                        query_source_weight = current_source_key[
+                            :, None, None
+                        ]
+                        factorized_query = (
+                            trg_query[b_idx].float()
+                            + query_source_weight
+                            * (
+                                src_query[b_idx].float()
+                                - trg_query[b_idx].float()
+                            )
+                        ).to(trg_query.dtype)
+                        factorized_output = attention(
+                            factorized_query.unsqueeze(0),
+                            torch.cat(
+                                [
+                                    previous_key.squeeze(0),
+                                    current_key.squeeze(0),
+                                ],
+                                dim=0,
+                            ).unsqueeze(0),
+                            torch.cat(
+                                [
+                                    previous_value.squeeze(0),
+                                    current_value.squeeze(0),
+                                ],
+                                dim=0,
+                            ).unsqueeze(0),
+                        )
+
+                        # Unknown is a true abstention: reproduce native
+                        # StreamGVE, including its late source-background
+                        # context, and select that expert per unknown query.
+                        native_prev_key = trg_prev_key[b_idx].clone()
+                        native_prev_mask = kv_cache[
+                            "trg_fg_mask"
+                        ][b_idx, attn_seq_slice][:-num_new_tokens]
+                        native_prev_key[native_prev_mask] = (
+                            native_prev_key[native_prev_mask]
+                            * blender_rate
+                            + src_prev_key[b_idx, native_prev_mask]
+                            * (1.0 - blender_rate)
+                        )
+                        native_key_list = [native_prev_key]
+                        native_value_list = [trg_prev_value[b_idx]]
+                        if kv_cache["shared_dict"][
+                            "current_timestep_index"
+                        ] > kv_cache["shared_dict"][
+                            "total_timestep"
+                        ] // 2:
+                            native_background = ~kv_cache[
+                                "current_src_fg_mask"
+                            ][b_idx]
+                            native_key_list.append(
+                                src_current_key[b_idx][native_background]
+                            )
+                            native_value_list.append(
+                                src_current_value[b_idx][native_background]
+                            )
+                        native_key_list.append(
+                            trg_current_key[b_idx] * blender_rate
+                            + src_current_key[b_idx]
+                            * (1.0 - blender_rate)
+                        )
+                        # In query-gated mode this first pass must remain
+                        # genuinely native.  A masked V write is still
+                        # globally readable by self-attention, so using the
+                        # projected value here would already contaminate the
+                        # fallback before output arbitration.
+                        native_value_list.append(
+                            (
+                                native_target_value
+                                if query_gated_projection
+                                else attention_target_value
+                            ).squeeze(0)
+                        )
+                        native_query = (
+                            trg_query[b_idx] * blender_rate
+                            + src_query[b_idx] * (1.0 - blender_rate)
+                        )
+                        native_output = attention(
+                            native_query.unsqueeze(0),
+                            torch.cat(native_key_list, dim=0).unsqueeze(0),
+                            torch.cat(native_value_list, dim=0).unsqueeze(0),
+                        )
+                        source_mixed_native_output = native_output
+                        projected_native_output = native_output
+                        ungated_projection_leakage = (
+                            native_output.new_zeros(())
+                        )
+                        if (
+                            query_gated_projection
+                            and paired_value_projection
+                            and paired_read is not None
+                        ):
+                            projected_value_list = [
+                                *native_value_list[:-1],
+                                attention_target_value.squeeze(0),
+                            ]
+                            projected_native_output = attention(
+                                native_query.unsqueeze(0),
+                                torch.cat(
+                                    native_key_list, dim=0
+                                ).unsqueeze(0),
+                                torch.cat(
+                                    projected_value_list, dim=0
+                                ).unsqueeze(0),
+                            )
+                            unsupported_query = (
+                                paired_read.support[b_idx]
+                                .to(native_output.device)
+                                .float()
+                                <= 0.0
+                            )
+                            ungated_delta = (
+                                projected_native_output.float()
+                                - native_output.float()
+                            ).abs().mean(dim=(-1, -2)).squeeze(0)
+                            unsupported_count = (
+                                unsupported_query.float().sum()
+                                .clamp_min(1.0)
+                            )
+                            ungated_projection_leakage = (
+                                ungated_delta
+                                * unsupported_query.float()
+                            ).sum() / unsupported_count
+                        if bool(
+                            kv_cache["shared_dict"].get(
+                                "factorized_native_target_history",
+                                False,
+                            )
+                        ):
+                            # 923: the backbone continuation remains the
+                            # authority.  Factorized Bayes still controls the
+                            # velocity/source-appearance policy, but it must
+                            # not prune or reconstruct the clean edited-target
+                            # history consumed by self-attention.  Keep the
+                            # old factorized result only as a counterfactual
+                            # diagnostic so this hypothesis is measurable.
+                            owner_weight = kv_cache.get(
+                                "current_causal_owner_mask"
+                            )
+                            object_weight = (
+                                owner_weight[b_idx].float()
+                                if owner_weight is not None
+                                else current_actions[
+                                    "target_memory_action"
+                                ].float()
+                            )
+                            token_gap = (
+                                native_output.float()
+                                - factorized_output.float()
+                            ).abs().mean(dim=(-1, -2)).squeeze(0)
+                            object_output_gap = (
+                                token_gap * object_weight
+                            ).sum() / object_weight.sum().clamp_min(1e-6)
+                            history_read_ratio = (
+                                history_read_mask.float().mean()
+                                if history_read_mask.numel() > 0
+                                else object_output_gap.new_tensor(1.0)
+                            )
+                            kv_cache["shared_dict"].setdefault(
+                                "native_target_history_diagnostics",
+                                {},
+                            )[layer_index] = {
+                                "factorized_history_read_ratio": (
+                                    history_read_ratio.detach()
+                                ),
+                                "owner_output_gap": (
+                                    object_output_gap.detach()
+                                ),
+                                "owner_coverage": (
+                                    object_weight.mean().detach()
+                                ),
+                            }
+                            native_history_reads = kv_cache[
+                                "shared_dict"
+                            ].get("role_native_history_reads", {})
+                            native_history_read = native_history_reads.get(
+                                layer_index
+                            )
+                            native_history_bypass = bool(
+                                kv_cache["shared_dict"].get(
+                                    "role_native_history_bypass", False
+                                )
+                            )
+                            if (
+                                role_fixed_native_history
+                                and native_history_read is not None
+                                and not native_history_bypass
+                            ):
+                                if sink_tokens != 0 or unrotated_attn_key is None:
+                                    raise RuntimeError(
+                                        "Role-fixed native history requires "
+                                        "sink-free pre-RoPE caches"
+                                    )
+                                canonical = native_history_read.canonical
+                                recent = native_history_read.recent
+                                source_lineage = (
+                                    native_history_read.source_lineage
+                                )
+                                flow_residual = (
+                                    native_history_read.flow_residual
+                                )
+                                canonical_correspondence = (
+                                    native_history_read
+                                    .canonical_correspondence
+                                )
+                                payload_invariant_lineage = bool(
+                                    kv_cache["shared_dict"].get(
+                                        "native_history_payload_invariant_lineage",
+                                        False,
+                                    )
+                                )
+                                if (
+                                    payload_invariant_lineage
+                                    and source_lineage is None
+                                ):
+                                    raise RuntimeError(
+                                        "Payload-invariant native history "
+                                        "requires a source lineage tier"
+                                    )
+                                (
+                                    native_recent_start_frame,
+                                    native_current_start_frame,
+                                ) = native_history_read.temporal_origins(
+                                    coalesce_bootstrap_alias=bool(
+                                        kv_cache["shared_dict"].get(
+                                            "native_history_coalesce_bootstrap_time",
+                                            False,
+                                        )
+                                    )
+                                )
+                                canonical_target_key = (
+                                    causal_rope_apply_indexed(
+                                        canonical.target_key.to(
+                                            device=q.device, dtype=q.dtype
+                                        ),
+                                        canonical.token_index.to(q.device),
+                                        grid_sizes[: b // 2],
+                                        freqs,
+                                        start_frame=0,
+                                    )
+                                )
+                                recent_target_key = (
+                                    q.new_empty(
+                                        (b // 2, 0, self.num_heads, self.head_dim)
+                                    )
+                                    if recent is None
+                                    else causal_rope_apply_indexed(
+                                        recent.target_key.to(
+                                            device=q.device, dtype=q.dtype
+                                        ),
+                                        recent.token_index.to(q.device),
+                                        grid_sizes[: b // 2],
+                                        freqs,
+                                        start_frame=(
+                                            native_recent_start_frame
+                                        ),
+                                    )
+                                )
+                                recent_target_value = (
+                                    v.new_empty(
+                                        (b // 2, 0, self.num_heads, self.head_dim)
+                                    )
+                                    if recent is None
+                                    else recent.target_value.to(
+                                        device=v.device, dtype=v.dtype
+                                    )
+                                )
+                                current_fixed_query = causal_rope_apply(
+                                    (
+                                        raw_trg_query[b_idx] * blender_rate
+                                        + raw_src_query[b_idx]
+                                        * (1.0 - blender_rate)
+                                    ).unsqueeze(0),
+                                    grid_sizes[b_idx].unsqueeze(0),
+                                    freqs,
+                                    start_frame=native_current_start_frame,
+                                ).type_as(v)
+                                current_unrotated_target_key = (
+                                    (
+                                        unrotated_attn_key.chunk(2, dim=0)[1][
+                                            b_idx, -num_new_tokens:
+                                        ]
+                                        * blender_rate
+                                        + unrotated_attn_key.chunk(2, dim=0)[0][
+                                            b_idx, -num_new_tokens:
+                                        ]
+                                        * (1.0 - blender_rate)
+                                    ).unsqueeze(0)
+                                )
+                                current_fixed_key = causal_rope_apply(
+                                    current_unrotated_target_key,
+                                    grid_sizes[b_idx].unsqueeze(0),
+                                    freqs,
+                                    start_frame=native_current_start_frame,
+                                ).type_as(v)
+                                clean_source_cache = kv_cache.get(
+                                    "k_src_clean"
+                                )
+                                clean_source_value_cache = kv_cache.get(
+                                    "v_src_clean"
+                                )
+                                if (
+                                    clean_source_cache is None
+                                    or clean_source_value_cache is None
+                                ):
+                                    raise RuntimeError(
+                                        "Role-fixed native history requires "
+                                        "the clean-source K/V cache"
+                                    )
+                                current_unrotated_source_key = (
+                                    clean_source_cache[
+                                        b_idx:b_idx + 1,
+                                        local_start_index:local_end_index,
+                                    ].to(device=q.device, dtype=q.dtype)
+                                )
+                                current_clean_source_value = (
+                                    clean_source_value_cache[
+                                        b_idx:b_idx + 1,
+                                        local_start_index:local_end_index,
+                                    ].to(device=v.device, dtype=v.dtype)
+                                )
+                                timestep_frame = (
+                                    None
+                                    if not timestep_counterfactual_memory
+                                    else counterfactual_history
+                                    .read_timestep_counterfactual(
+                                        layer_index, timestep_index
+                                    )
+                                )
+                                if timestep_counterfactual_memory and (
+                                    timestep_frame is None
+                                    or canonical_correspondence is None
+                                    or flow_residual is None
+                                ):
+                                    raise RuntimeError(
+                                        "TCCM read is missing its synchronized "
+                                        "B0 bank, canonical flow correspondence, "
+                                        "or local trust state"
+                                    )
+                                if timestep_counterfactual_memory:
+                                    appearance_trust = (
+                                        flow_residual.appearance_trust
+                                        if flow_residual.appearance_trust is not None
+                                        else flow_residual.confidence
+                                    )[b_idx:b_idx + 1].to(q.device)
+                                    local_transport_confidence = (
+                                        flow_residual.transport_confidence
+                                        if flow_residual.transport_confidence is not None
+                                        else flow_residual.confidence
+                                    )[b_idx:b_idx + 1].to(q.device)
+                                    native_history_output, native_history_diag = (
+                                        closed_loop_counterfactual_memory_attention(
+                                            native_output=native_output,
+                                            current_source_query=raw_src_query[
+                                                b_idx:b_idx + 1
+                                            ],
+                                            current_source_key=k.chunk(2, dim=0)[0][
+                                                b_idx:b_idx + 1
+                                            ],
+                                            current_source_value=v.chunk(2, dim=0)[0][
+                                                b_idx:b_idx + 1
+                                            ],
+                                            current_target_key=k.chunk(2, dim=0)[1][
+                                                b_idx:b_idx + 1
+                                            ],
+                                            current_target_value=v.chunk(2, dim=0)[1][
+                                                b_idx:b_idx + 1
+                                            ],
+                                            canonical_source_key=timestep_frame.source_key[
+                                                b_idx:b_idx + 1
+                                            ].to(device=q.device, dtype=q.dtype),
+                                            canonical_source_value=timestep_frame.source_value[
+                                                b_idx:b_idx + 1
+                                            ].to(device=v.device, dtype=v.dtype),
+                                            canonical_target_key=timestep_frame.target_key[
+                                                b_idx:b_idx + 1
+                                            ].to(device=q.device, dtype=q.dtype),
+                                            canonical_target_value=timestep_frame.target_value[
+                                                b_idx:b_idx + 1
+                                            ].to(device=v.device, dtype=v.dtype),
+                                            canonical_support=timestep_frame.support[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device),
+                                            canonical_token_index=timestep_frame.token_index[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device),
+                                            mapped_current_index=canonical_correspondence.current_index[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device),
+                                            correspondence_support=canonical_correspondence.support[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device),
+                                            correspondence_confidence=canonical_correspondence.confidence[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device),
+                                            owner_gate=(
+                                                object_weight
+                                                if bool(shared_dict.get(
+                                                    "native_history_transactional_owner",
+                                                    False,
+                                                ))
+                                                else object_weight * current_actions[
+                                                    "target_memory_action"
+                                                ].float()
+                                            )[None].to(q.device),
+                                            appearance_trust=appearance_trust,
+                                            transport_confidence=(
+                                                local_transport_confidence
+                                            ),
+                                            current_address_key=(
+                                                current_unrotated_source_key
+                                            ),
+                                            canonical_address_key=canonical.source_key[
+                                                b_idx:b_idx + 1
+                                            ].to(device=q.device, dtype=q.dtype),
+                                            tokens_per_frame=frame_seqlen,
+                                            spatial_shape=tuple(
+                                                int(value.item())
+                                                for value in grid_sizes[b_idx][1:]
+                                            ),
+                                            canonical_frame_count=(
+                                                timestep_frame.frame_count
+                                            ),
+                                            current_frame_count=(
+                                                num_new_tokens // frame_seqlen
+                                            ),
+                                            topk_per_frame=int(shared_dict.get(
+                                                "native_history_multiframe_sink_topk_per_frame",
+                                                8,
+                                            )),
+                                            min_source_similarity=float(
+                                                shared_dict.get(
+                                                    "native_history_min_similarity",
+                                                    0.35,
+                                                )
+                                            ),
+                                            source_logit_bias=float(shared_dict.get(
+                                                "native_history_multiframe_sink_source_logit_bias",
+                                                1.0,
+                                            )),
+                                            flow_radius=float(shared_dict.get(
+                                                "native_history_tccm_flow_radius",
+                                                2.0,
+                                            )),
+                                            strength=float(shared_dict.get(
+                                                "native_history_tccm_strength",
+                                                1.0,
+                                            )),
+                                            max_error_ratio=float(shared_dict.get(
+                                                "native_history_tccm_max_error_ratio",
+                                                1.0,
+                                            )),
+                                        )
+                                    )
+                                else:
+                                    native_history_output, native_history_diag = (
+                                        source_addressed_native_history_attention(
+                                        native_output,
+                                        current_fixed_query,
+                                        canonical_target_key[
+                                            b_idx:b_idx + 1
+                                        ],
+                                        canonical.target_value[
+                                            b_idx:b_idx + 1
+                                        ].to(device=v.device, dtype=v.dtype),
+                                        recent_target_key[
+                                            b_idx:b_idx + 1
+                                        ],
+                                        recent_target_value[
+                                            b_idx:b_idx + 1
+                                        ],
+                                        (
+                                            torch.empty(
+                                                (1, 0),
+                                                dtype=torch.bool,
+                                                device=q.device,
+                                            )
+                                            if recent is None
+                                            else recent.support[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device)
+                                        ),
+                                        current_fixed_key,
+                                        native_target_value,
+                                        current_unrotated_source_key,
+                                        canonical.source_key[
+                                            b_idx:b_idx + 1
+                                        ].to(device=q.device, dtype=q.dtype),
+                                        canonical.support[
+                                            b_idx:b_idx + 1
+                                        ].to(q.device),
+                                        (
+                                            object_weight
+                                            if bool(
+                                                kv_cache["shared_dict"].get(
+                                                    "native_history_transactional_owner",
+                                                    False,
+                                                )
+                                            )
+                                            else (
+                                                object_weight
+                                                * current_actions[
+                                                    "target_memory_action"
+                                                ].float()
+                                            )
+                                        )[None].to(q.device),
+                                        current_source_value=(
+                                            current_clean_source_value
+                                        ),
+                                        canonical_source_value=(
+                                            canonical.source_value[
+                                                b_idx:b_idx + 1
+                                            ].to(
+                                                device=v.device,
+                                                dtype=v.dtype,
+                                            )
+                                        ),
+                                        recent_source_value=(
+                                            v.new_empty(
+                                                (
+                                                    b // 2, 0,
+                                                    self.num_heads,
+                                                    self.head_dim,
+                                                )
+                                            )[b_idx:b_idx + 1]
+                                            if recent is None
+                                            else recent.source_value[
+                                                b_idx:b_idx + 1
+                                            ].to(
+                                                device=v.device,
+                                                dtype=v.dtype,
+                                            )
+                                        ),
+                                        topk=int(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_topk", 8
+                                            )
+                                        ),
+                                        min_similarity=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_min_similarity",
+                                                0.35,
+                                            )
+                                        ),
+                                        min_request=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_min_query_confidence",
+                                                0.5,
+                                            )
+                                        ),
+                                        canonical_logit_bias=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_canonical_logit_bias",
+                                                1.0,
+                                            )
+                                        ),
+                                        source_part_consistency=bool(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_source_part_consistency",
+                                                False,
+                                            )
+                                        ),
+                                        min_part_similarity=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_min_part_similarity",
+                                                0.45,
+                                            )
+                                        ),
+                                        part_similarity_margin=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_part_similarity_margin",
+                                                0.08,
+                                            )
+                                        ),
+                                        part_bias_strength=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_part_bias_strength",
+                                                0.5,
+                                            )
+                                        ),
+                                        part_refinement_ratio=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_part_refinement_ratio",
+                                                0.25,
+                                            )
+                                        ),
+                                        payload_invariant_lineage=(
+                                            payload_invariant_lineage
+                                        ),
+                                        recent_source_key=(
+                                            (
+                                                recent.source_key[
+                                                    b_idx:b_idx + 1
+                                                ].to(
+                                                    device=q.device,
+                                                    dtype=q.dtype,
+                                                )
+                                                if (
+                                                    recent is not None
+                                                    and bool(
+                                                        kv_cache["shared_dict"].get(
+                                                            "native_history_consistent_transaction",
+                                                            False,
+                                                        )
+                                                    )
+                                                )
+                                                else None
+                                                if source_lineage is None
+                                                else source_lineage.source_key[
+                                                    b_idx:b_idx + 1
+                                                ].to(
+                                                    device=q.device,
+                                                    dtype=q.dtype,
+                                                )
+                                            )
+                                        ),
+                                        recent_lineage_index=(
+                                            None
+                                            if source_lineage is None
+                                            else source_lineage.canonical_index[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device)
+                                        ),
+                                        recent_lineage_support=(
+                                            None
+                                            if source_lineage is None
+                                            else source_lineage.support[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device)
+                                        ),
+                                        recent_lineage_confidence=(
+                                            None
+                                            if source_lineage is None
+                                            else source_lineage.confidence[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device)
+                                        ),
+                                        payload_blend_strength=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_payload_blend_strength",
+                                                0.35,
+                                            )
+                                        ),
+                                        consistent_transaction=bool(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_consistent_transaction",
+                                                False,
+                                            )
+                                        ),
+                                        entry_bridge=bool(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_recent_entry_bridge",
+                                                False,
+                                            )
+                                        ),
+                                        motion_owner_dense_read=bool(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_motion_owner_dense_read",
+                                                False,
+                                            )
+                                        ),
+                                        entry_query_count=frame_seqlen,
+                                        entry_bridge_strength=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_entry_bridge_strength",
+                                                1.0,
+                                            )
+                                        ),
+                                        dual_evidence_arbitration=bool(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_dual_evidence_arbitration",
+                                                False,
+                                            )
+                                        ),
+                                        min_payload_consistency=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_min_payload_consistency",
+                                                0.15,
+                                            )
+                                        ),
+                                        recent_payload_support=(
+                                            None
+                                            if recent is None
+                                            or recent.payload_support is None
+                                            else recent.payload_support[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device)
+                                        ),
+                                        residual_rebased_payload=(
+                                            False
+                                            if recent is None
+                                            else bool(
+                                                recent.residual_rebased_payload
+                                            )
+                                        ),
+                                        last_trusted_appearance=bool(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_last_trusted_appearance",
+                                                False,
+                                            )
+                                        ),
+                                        flow_indexed_value_residual=(
+                                            None
+                                            if flow_residual is None
+                                            else flow_residual.value_residual[
+                                                b_idx:b_idx + 1
+                                            ].to(
+                                                device=v.device,
+                                                dtype=v.dtype,
+                                            )
+                                        ),
+                                        flow_indexed_support=(
+                                            None
+                                            if flow_residual is None
+                                            else flow_residual.support[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device)
+                                        ),
+                                        flow_indexed_confidence=(
+                                            None
+                                            if flow_residual is None
+                                            else flow_residual.confidence[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device)
+                                        ),
+                                        flow_indexed_appearance_trust=(
+                                            None
+                                            if flow_residual is None
+                                            or flow_residual.appearance_trust is None
+                                            else flow_residual.appearance_trust[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device)
+                                        ),
+                                        flow_indexed_transport_confidence=(
+                                            None
+                                            if flow_residual is None
+                                            or flow_residual.transport_confidence is None
+                                            else flow_residual.transport_confidence[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device)
+                                        ),
+                                        multiframe_identity_sink=bool(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_multiframe_identity_sink",
+                                                False,
+                                            )
+                                        ),
+                                        canonical_token_index=(
+                                            canonical.token_index[
+                                                b_idx:b_idx + 1
+                                            ].to(q.device)
+                                        ),
+                                        canonical_tokens_per_frame=(
+                                            frame_seqlen
+                                        ),
+                                        canonical_frame_count=(
+                                            canonical.frame_count
+                                        ),
+                                        multiframe_sink_topk_per_frame=int(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_multiframe_sink_topk_per_frame",
+                                                8,
+                                            )
+                                        ),
+                                        multiframe_sink_source_logit_bias=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_multiframe_sink_source_logit_bias",
+                                                1.0,
+                                            )
+                                        ),
+                                        multiframe_sink_strength=float(
+                                            kv_cache["shared_dict"].get(
+                                                "native_history_multiframe_sink_strength",
+                                                1.0,
+                                            )
+                                        ),
+                                        )
+                                    )
+                                native_output = native_history_output
+                                native_history_diag.update({
+                                    "bootstrap_alias": (
+                                        native_output.new_tensor(
+                                            float(
+                                                native_history_read
+                                                .recent_shares_canonical_time
+                                            )
+                                        )
+                                    ),
+                                    "recent_start_frame": (
+                                        native_output.new_tensor(
+                                            float(native_recent_start_frame)
+                                        )
+                                    ),
+                                    "current_start_frame": (
+                                        native_output.new_tensor(
+                                            float(native_current_start_frame)
+                                        )
+                                    ),
+                                    "bypass": native_output.new_zeros(()),
+                                })
+                                kv_cache["shared_dict"].setdefault(
+                                    "role_native_history_diagnostics", {}
+                                )[layer_index] = {
+                                    name: value.detach()
+                                    for name, value in native_history_diag.items()
+                                }
+                                kv_cache["shared_dict"].setdefault(
+                                    "role_native_history_admissions", {}
+                                ).setdefault(layer_index, []).append(
+                                    (
+                                        native_history_diag["read_strength"]
+                                        if (
+                                            payload_invariant_lineage
+                                            or bool(
+                                                kv_cache["shared_dict"].get(
+                                                    "native_history_consistent_transaction",
+                                                    False,
+                                                )
+                                            )
+                                        )
+                                        else native_history_diag["admitted"]
+                                    ).detach()
+                                )
+                                if bool(
+                                    kv_cache["shared_dict"].get(
+                                        "native_history_verified_attention_authority",
+                                        False,
+                                    )
+                                ):
+                                    read_strength = native_history_diag[
+                                        "read_strength"
+                                    ][0].detach().float()
+                                    authority_states = kv_cache[
+                                        "shared_dict"
+                                    ].setdefault(
+                                        "verified_attention_authority_state",
+                                        {},
+                                    )
+                                    authority_state = authority_states.get(
+                                        b_idx
+                                    )
+                                    if authority_state is None:
+                                        authority_state = {
+                                            "strength_sum": (
+                                                torch.zeros_like(read_strength)
+                                            ),
+                                            "support_sum": (
+                                                torch.zeros_like(read_strength)
+                                            ),
+                                            "layer_count": 0,
+                                        }
+                                    authority_state["strength_sum"] = (
+                                        authority_state["strength_sum"]
+                                        + read_strength
+                                    )
+                                    authority_state["support_sum"] = (
+                                        authority_state["support_sum"]
+                                        + (read_strength > 0.0).float()
+                                    )
+                                    authority_state["layer_count"] += 1
+                                    authority_states[b_idx] = authority_state
+                            elif (
+                                role_fixed_native_history
+                                and native_history_read is not None
+                                and native_history_bypass
+                            ):
+                                canonical = native_history_read.canonical
+                                recent = native_history_read.recent
+                                (
+                                    native_recent_start_frame,
+                                    native_current_start_frame,
+                                ) = native_history_read.temporal_origins(
+                                    coalesce_bootstrap_alias=bool(
+                                        kv_cache["shared_dict"].get(
+                                            "native_history_coalesce_bootstrap_time",
+                                            False,
+                                        )
+                                    )
+                                )
+                                zero_query = object_weight.new_zeros(
+                                    (1, object_weight.numel())
+                                )
+                                kv_cache["shared_dict"].setdefault(
+                                    "role_native_history_diagnostics", {}
+                                )[layer_index] = {
+                                    "admitted": zero_query.bool(),
+                                    "best_similarity": zero_query - 1.0,
+                                    "output_delta": zero_query,
+                                    "canonical_candidates": (
+                                        canonical.support.float().sum(dim=-1)
+                                    ),
+                                    "recent_tokens": zero_query.new_full(
+                                        (1,),
+                                        float(
+                                            0
+                                            if recent is None
+                                            else recent.target_key.shape[1]
+                                        ),
+                                    ),
+                                    "bootstrap_alias": zero_query.new_tensor(
+                                        float(
+                                            native_history_read
+                                            .recent_shares_canonical_time
+                                        )
+                                    ),
+                                    "recent_start_frame": (
+                                        zero_query.new_tensor(
+                                            float(native_recent_start_frame)
+                                        )
+                                    ),
+                                    "current_start_frame": (
+                                        zero_query.new_tensor(
+                                            float(native_current_start_frame)
+                                        )
+                                    ),
+                                    "bypass": zero_query.new_ones(()),
+                                }
+                                kv_cache["shared_dict"].setdefault(
+                                    "role_native_history_admissions", {}
+                                ).setdefault(layer_index, []).append(
+                                    zero_query.bool()
+                                )
+                            if (
+                                paired_read is None
+                                and not role_fixed_native_history
+                            ):
+                                # Exact 926/923 fallback outside configured
+                                # memory layers and before bootstrap.
+                                x_list.append(native_output)
+                                continue
+                            if bool(
+                                kv_cache["shared_dict"].get(
+                                    "native_history_verified_attention_authority",
+                                    False,
+                                )
+                            ) and layer_index >= int(
+                                kv_cache["shared_dict"].get(
+                                    "native_history_attention_authority_start_layer",
+                                    layer_index,
+                                )
+                            ):
+                                authority_state = kv_cache[
+                                    "shared_dict"
+                                ].get(
+                                    "verified_attention_authority_state", {}
+                                ).get(b_idx)
+                                if authority_state is not None:
+                                    layer_count = max(
+                                        int(authority_state["layer_count"]), 1
+                                    )
+                                    mean_strength = (
+                                        authority_state["strength_sum"]
+                                        / float(layer_count)
+                                    )
+                                    layer_agreement = (
+                                        authority_state["support_sum"]
+                                        / float(layer_count)
+                                    )
+                                    authority_gate = (
+                                        mean_strength * layer_agreement
+                                    ).clamp(0.0, 1.0)
+                                    authority_input = native_output
+                                    native_output = (
+                                        arbitrate_verified_factorized_attention(
+                                            native_output,
+                                            source_mixed_native_output,
+                                            factorized_output,
+                                            authority_gate.unsqueeze(0),
+                                            strength=float(
+                                                kv_cache["shared_dict"].get(
+                                                    "native_history_attention_authority_strength",
+                                                    1.0,
+                                                )
+                                            ),
+                                        )
+                                    )
+                                    authority_delta = (
+                                        native_output.float()
+                                        - authority_input.float()
+                                    ).abs().mean(dim=(-1, -2)).squeeze(0)
+                                    native_gap = (
+                                        factorized_output.float()
+                                        - source_mixed_native_output.float()
+                                    ).abs().mean(dim=(-1, -2)).squeeze(0)
+                                    active = authority_gate > 0.0
+                                    active_count = (
+                                        active.float().sum().clamp_min(1.0)
+                                    )
+                                    kv_cache["shared_dict"].setdefault(
+                                        "verified_attention_authority_diagnostics",
+                                        {},
+                                    )[layer_index] = {
+                                        "gate": authority_gate.detach(),
+                                        "active": active.detach(),
+                                        "active_gate": (
+                                            authority_gate[active].sum()
+                                            / active_count
+                                        ).detach(),
+                                        "active_output_delta": (
+                                            authority_delta[active].sum()
+                                            / active_count
+                                        ).detach(),
+                                        "active_native_factorized_gap": (
+                                            native_gap[active].sum()
+                                            / active_count
+                                        ).detach(),
+                                        "verified_layers": (
+                                            authority_gate.new_tensor(
+                                                float(layer_count)
+                                            )
+                                        ),
+                                    }
+                            read_support = (
+                                paired_read.support[b_idx]
+                                .to(native_output.device).float()
+                                if paired_read is not None
+                                else torch.zeros_like(object_weight)
+                            )
+                            read_residual = (
+                                paired_read.residual[b_idx]
+                                .to(native_output.device).float()
+                                if paired_read is not None
+                                else native_output.new_zeros(
+                                    native_output.shape[1:]
+                                )
+                            )
+                            read_strength = float(
+                                kv_cache["shared_dict"].get(
+                                    "paired_memory_read_strength", 0.0
+                                )
+                            )
+                            anchor_delta = native_output.new_zeros(())
+                            anchor_query_coverage = (
+                                native_output.new_zeros(())
+                            )
+                            anchor_key_count = native_output.new_zeros(())
+                            if role_fixed_native_history:
+                                paired_output = native_output
+                            elif dual_timescale_anchor:
+                                # 935: motion remains in the untouched dense
+                                # native target-history branch above.  A
+                                # separate current-source attention computes
+                                # only the canonical appearance delta, so the
+                                # immutable signal does not share a softmax
+                                # with an ever-growing, potentially drifting
+                                # target history.  Current source Q/K provide
+                                # pose-following addresses without changing
+                                # the backbone RoPE layout.
+                                canonical_anchors = (
+                                    kv_cache["shared_dict"].get(
+                                        "paired_memory_canonical_anchors",
+                                        {},
+                                    )
+                                )
+                                canonical_anchor = canonical_anchors.get(
+                                    layer_index
+                                )
+                                if (
+                                    canonical_key_anchor
+                                    and canonical_anchor is None
+                                ):
+                                    # Before proposal bootstrap there is no
+                                    # canonical bank.  The native path is the
+                                    # exact and only valid fallback.
+                                    supported = torch.zeros_like(
+                                        read_support, dtype=torch.bool
+                                    )
+                                elif canonical_key_anchor:
+                                    supported = canonical_anchor.query_support[
+                                        b_idx
+                                    ].to(native_output.device) > 0.0
+                                else:
+                                    supported = read_support > 0.0
+                                anchor_query_coverage = (
+                                    supported.float().mean()
+                                )
+                                anchor_key_count = (
+                                    supported.float().sum()
+                                )
+                                if bool(supported.any()):
+                                    if canonical_key_anchor:
+                                        canonical_evidence = (
+                                            canonical_anchor.evidence[b_idx]
+                                            .to(native_output.device)
+                                        )
+                                        valid_keys = canonical_evidence > 0.0
+                                        anchor_query = raw_src_query[
+                                            b_idx, supported
+                                        ].unsqueeze(0)
+                                        canonical_anchor_delta = (
+                                            immutable_canonical_anchor_attention_delta(
+                                                anchor_query,
+                                                canonical_anchor.source_key[
+                                                    b_idx, valid_keys
+                                                ].to(native_output.device).unsqueeze(0),
+                                                canonical_anchor.target_value_residual[
+                                                    b_idx, valid_keys
+                                                ].to(native_output.device).unsqueeze(0),
+                                                canonical_evidence[
+                                                    valid_keys
+                                                ].unsqueeze(0),
+                                                canonical_anchor.query_lineage_id[
+                                                    b_idx, supported
+                                                ].to(native_output.device).unsqueeze(0),
+                                                canonical_anchor.lineage_id[
+                                                    b_idx, valid_keys
+                                                ].to(native_output.device).unsqueeze(0),
+                                                query_key_mask=(
+                                                    canonical_anchor.query_key_mask[
+                                                        b_idx, supported
+                                                    ][:, valid_keys]
+                                                    .to(native_output.device)
+                                                    .unsqueeze(0)
+                                                ),
+                                            )
+                                        )
+                                        anchor_key_count = (
+                                            valid_keys.float().sum()
+                                        )
+                                    else:
+                                        anchor_query = src_query[
+                                            b_idx, supported
+                                        ].unsqueeze(0)
+                                        anchor_key = src_current_key[
+                                            b_idx, supported
+                                        ].unsqueeze(0)
+                                        anchor_residual = (
+                                            read_residual[supported]
+                                        ).unsqueeze(0)
+                                        if paired_read.lineage_id is None:
+                                            raise RuntimeError(
+                                                "Dual-timescale anchor requires "
+                                                "source-transport lineage ids"
+                                            )
+                                        anchor_lineage = paired_read.lineage_id[
+                                            b_idx, supported
+                                        ].to(native_output.device).unsqueeze(0)
+                                        canonical_anchor_delta = (
+                                            source_addressed_anchor_attention_delta(
+                                                anchor_query,
+                                                anchor_key,
+                                                anchor_residual,
+                                                read_support[
+                                                    supported
+                                                ].unsqueeze(0),
+                                                anchor_lineage,
+                                            )
+                                        )
+                                    paired_output = (
+                                        scatter_source_addressed_anchor_delta(
+                                            native_output,
+                                            canonical_anchor_delta,
+                                            supported.unsqueeze(0),
+                                            strength=read_strength,
+                                        )
+                                    )
+                                    anchor_delta = (
+                                        canonical_anchor_delta.float()
+                                    ).abs().mean()
+                                else:
+                                    paired_output = native_output
+                            elif paired_value_projection:
+                                # The residual has already been materialized
+                                # as V_source + delta_V before attention. In
+                                # query-gated mode, compare projected and raw
+                                # attention and expose that difference only
+                                # to queries with a successful paired read.
+                                # This is an output-side access policy, not a
+                                # second residual addition.
+                                paired_output = (
+                                    arbitrate_projected_attention_output(
+                                        native_output,
+                                        projected_native_output,
+                                        read_support.unsqueeze(0),
+                                        binary_access=single_confidence,
+                                    )
+                                    if query_gated_projection
+                                    else native_output
+                                )
+                            else:
+                                paired_output = (
+                                    blend_source_addressed_residual(
+                                        native_output,
+                                        read_residual.unsqueeze(0),
+                                        read_support.unsqueeze(0),
+                                        strength=read_strength,
+                                    )
+                                )
+                            correction = (
+                                paired_output.float()
+                                - native_output.float()
+                            ).abs().mean(dim=(-1, -2)).squeeze(0)
+                            matched_read = read_support > 0.0
+                            matched_count = (
+                                matched_read.float().sum().clamp_min(1.0)
+                            )
+                            if paired_read is not None:
+                                kv_cache["shared_dict"].setdefault(
+                                    "paired_edit_memory_diagnostics", {}
+                                )[layer_index] = {
+                                    "read_support": (
+                                        read_support.mean().detach()
+                                    ),
+                                    "read_similarity": (
+                                        (
+                                            paired_read.best_similarity[b_idx]
+                                            .float()
+                                            * matched_read.float()
+                                        ).sum().div(matched_count).detach()
+                                    ),
+                                    "correction": (
+                                        (correction * matched_read.float())
+                                        .sum().div(matched_count).detach()
+                                    ),
+                                    "value_projection": (
+                                        value_projection_delta.detach()
+                                    ),
+                                    "ungated_projection_leakage": (
+                                        ungated_projection_leakage.detach()
+                                    ),
+                                    "query_gated_projection": (
+                                        read_support.new_tensor(
+                                            float(query_gated_projection)
+                                        ).detach()
+                                    ),
+                                    "dual_timescale_anchor": (
+                                        read_support.new_tensor(
+                                            float(dual_timescale_anchor)
+                                        ).detach()
+                                    ),
+                                    "canonical_key_anchor": (
+                                        read_support.new_tensor(
+                                            float(canonical_key_anchor)
+                                        ).detach()
+                                    ),
+                                    "anchor_delta": anchor_delta.detach(),
+                                    "anchor_query_coverage": (
+                                        anchor_query_coverage.detach()
+                                    ),
+                                    "anchor_key_count": (
+                                        anchor_key_count.detach()
+                                    ),
+                                }
+                            x_list.append(paired_output)
+                            continue
+                        x_list.append(
+                            blend_factorized_with_native_fallback(
+                                factorized_output,
+                                native_output,
+                                current_actions[
+                                    "unknown_action"
+                                ].unsqueeze(0),
+                            )
+                        )
+                        continue
+
                     dual_belief_kv = all(
                         kv_cache.get(name) is not None
                         for name in (
                             "cached_preserve_kv_action",
                         )
                     )
+                    if target_owned_handoff and not dual_belief_kv:
+                        raise RuntimeError(
+                            "Target-owned handoff requires aligned belief "
+                            "KV history"
+                        )
                     if dual_belief_kv:
                         cached_preserve_action = kv_cache[
                             "cached_preserve_kv_action"
@@ -417,7 +2203,7 @@ class CausalWanSelfAttention(nn.Module):
                                 "Cached belief KV actions must align with "
                                 "historical memory tokens"
                             )
-                        fused_prev_key, fused_prev_value = (
+                        legacy_prev_key, legacy_prev_value = (
                             fuse_aligned_memory(
                                 trg_prev_key[b_idx].unsqueeze(0),
                                 trg_prev_value[b_idx].unsqueeze(0),
@@ -426,13 +2212,16 @@ class CausalWanSelfAttention(nn.Module):
                                 cached_preserve_action.unsqueeze(0),
                             )
                         )
-                        current_target_key = (
+                        legacy_current_key = (
                             trg_current_key[b_idx] * blender_rate
-                            + src_current_key[b_idx] * (1 - blender_rate)
+                            + src_current_key[b_idx]
+                            * (1 - blender_rate)
                         )
-                        target_key_list = [fused_prev_key.squeeze(0)]
-                        target_value_list = [
-                            fused_prev_value.squeeze(0)
+                        legacy_key_list = [
+                            legacy_prev_key.squeeze(0)
+                        ]
+                        legacy_value_list = [
+                            legacy_prev_value.squeeze(0)
                         ]
                         if kv_cache["shared_dict"][
                             "current_timestep_index"
@@ -443,36 +2232,111 @@ class CausalWanSelfAttention(nn.Module):
                                 "current_src_fg_mask"
                             ][b_idx]
                             current_background_mask = ~current_edit_mask
-                            target_key_list.append(
+                            legacy_key_list.append(
                                 src_current_key[b_idx][
                                     current_background_mask
                                 ]
                             )
-                            target_value_list.append(
+                            legacy_value_list.append(
                                 src_current_value[b_idx][
                                     current_background_mask
                                 ]
                             )
-                        target_key_list.append(current_target_key)
-                        target_value_list.append(
+                        legacy_key_list.append(legacy_current_key)
+                        legacy_value_list.append(
                             trg_current_value[b_idx]
                         )
-                        target_memory_key = torch.cat(
-                            target_key_list,
+                        legacy_memory_key = torch.cat(
+                            legacy_key_list,
                             dim=0,
                         )
-                        target_memory_value = torch.cat(
-                            target_value_list,
+                        legacy_memory_value = torch.cat(
+                            legacy_value_list,
                             dim=0,
                         )
-                        b_query = (
+                        legacy_query = (
                             trg_query[b_idx] * blender_rate
                             + src_query[b_idx] * (1 - blender_rate)
                         )
-                        b_target_output = attention(
-                            b_query.unsqueeze(0),
-                            target_memory_key.unsqueeze(0),
-                            target_memory_value.unsqueeze(0),
+                        legacy_target_output = attention(
+                            legacy_query.unsqueeze(0),
+                            legacy_memory_key.unsqueeze(0),
+                            legacy_memory_value.unsqueeze(0),
+                        )
+                        owned = (
+                            None
+                            if current_target_owned_mask is None
+                            else current_target_owned_mask[b_idx]
+                        )
+                        if owned is None or not owned.any():
+                            x_list.append(legacy_target_output)
+                            continue
+
+                        owned_preserve_action = (
+                            suppress_source_preserve_on_target_owned_history(
+                                cached_preserve_action,
+                                target_owned_history_mask[b_idx],
+                            )
+                        )
+                        owned_prev_key, owned_prev_value = (
+                            fuse_aligned_memory(
+                                trg_prev_key[b_idx].unsqueeze(0),
+                                trg_prev_value[b_idx].unsqueeze(0),
+                                src_prev_key[b_idx].unsqueeze(0),
+                                src_prev_value[b_idx].unsqueeze(0),
+                                owned_preserve_action.unsqueeze(0),
+                            )
+                        )
+                        owned_current_key = blend_target_owned_tensor(
+                            trg_current_key[b_idx],
+                            src_current_key[b_idx],
+                            blender_rate,
+                            owned,
+                        )
+                        owned_key_list = [owned_prev_key.squeeze(0)]
+                        owned_value_list = [owned_prev_value.squeeze(0)]
+                        if kv_cache["shared_dict"][
+                            "current_timestep_index"
+                        ] > kv_cache["shared_dict"][
+                            "total_timestep"
+                        ] // 2:
+                            owned_background_mask = (
+                                build_target_owned_source_background_mask(
+                                    current_edit_mask,
+                                    owned,
+                                )
+                            )
+                            owned_key_list.append(
+                                src_current_key[b_idx][
+                                    owned_background_mask
+                                ]
+                            )
+                            owned_value_list.append(
+                                src_current_value[b_idx][
+                                    owned_background_mask
+                                ]
+                            )
+                        owned_key_list.append(owned_current_key)
+                        owned_value_list.append(trg_current_value[b_idx])
+                        owned_query = blend_target_owned_tensor(
+                            trg_query[b_idx],
+                            src_query[b_idx],
+                            blender_rate,
+                            owned,
+                        )
+                        owned_target_output = attention(
+                            owned_query[owned].unsqueeze(0),
+                            torch.cat(
+                                owned_key_list, dim=0
+                            ).unsqueeze(0),
+                            torch.cat(
+                                owned_value_list, dim=0
+                            ).unsqueeze(0),
+                        )
+                        b_target_output = scatter_target_owned_output(
+                            legacy_target_output,
+                            owned_target_output,
+                            owned.unsqueeze(0),
                         )
                         x_list.append(b_target_output)
                         continue

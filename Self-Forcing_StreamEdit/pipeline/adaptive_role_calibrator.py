@@ -282,6 +282,7 @@ class AdaptiveRoleCalibrator:
         self,
         attention: torch.Tensor,
         hand_probability: torch.Tensor,
+        proximity_hand_probability: torch.Tensor | None = None,
     ) -> AdaptiveObservation:
         if attention.shape != hand_probability.shape:
             raise ValueError(
@@ -289,6 +290,15 @@ class AdaptiveRoleCalibrator:
             )
         attention = attention.float().clamp(0.0, 1.0)
         hand_probability = hand_probability.float().clamp(0.0, 1.0)
+        if proximity_hand_probability is None:
+            proximity_hand_probability = hand_probability
+        if proximity_hand_probability.shape != attention.shape:
+            raise ValueError(
+                "proximity hand evidence must share [B,T,H,W]"
+            )
+        proximity_hand_probability = (
+            proximity_hand_probability.float().clamp(0.0, 1.0)
+        )
         (
             hand_binary,
             hand_present,
@@ -296,7 +306,7 @@ class AdaptiveRoleCalibrator:
             near_hand,
             extended_hand,
             proximity,
-        ) = self._hand_geometry(hand_probability)
+        ) = self._hand_geometry(proximity_hand_probability)
         (
             attention_reliability,
             seed_threshold,
@@ -346,7 +356,7 @@ class AdaptiveRoleCalibrator:
         gate = attention * semantic_candidate.float()
         semantic_extent = semantic_candidate & extended_hand
         extent_coverage = semantic_extent.flatten(2).float().mean(dim=-1)
-        hand_coverage = hand_binary.flatten(2).float().mean(dim=-1)
+        hand_coverage = hand_probability.flatten(2).mean(dim=-1)
         minimum_coverage = attention.new_tensor(1.0 / token_count)
         coverage_budget = torch.maximum(
             1.25 * extent_coverage,
@@ -367,6 +377,8 @@ class AdaptiveRoleCalibrator:
             "adaptive_support_center": support_center,
             "adaptive_support_mad": support_mad,
             "hand_proximity": proximity,
+            "adaptive_near_hand": near_hand.float(),
+            "adaptive_extended_hand": extended_hand.float(),
             "object_seed": seed,
             "interaction_support": interaction_support,
             "visibility_threshold": visibility_threshold,

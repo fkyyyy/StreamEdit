@@ -6,6 +6,8 @@ from typing import Dict, TYPE_CHECKING
 import torch
 import torch.nn.functional as F
 
+from .appearance_leakage import remove_antagonistic_source_residual
+
 if TYPE_CHECKING:
     from .control_belief import CausalControlBelief
 
@@ -365,6 +367,12 @@ class BayesResidualFlowRouter:
         source_velocity: torch.Tensor,
         source_reconstruction_velocity: torch.Tensor,
         belief: CausalControlBelief,
+        target_owned_mask: torch.Tensor | None = None,
+        target_change_core: torch.Tensor | None = None,
+        protect_mask: torch.Tensor | None = None,
+        identity_owner_weight: torch.Tensor | None = None,
+        identity_source_suppression: float = 0.0,
+        denoising_fraction: float = 1.0,
     ):
         velocity_shapes = {
             tuple(target_velocity.shape),
@@ -377,6 +385,14 @@ class BayesResidualFlowRouter:
                 f"have the same shape, got {sorted(velocity_shapes)}"
             )
         belief.validate()
+        if not 0.0 <= identity_source_suppression <= 1.0:
+            raise ValueError(
+                "identity_source_suppression must lie in [0, 1]"
+            )
+        if not 0.0 <= denoising_fraction <= 1.0:
+            raise ValueError(
+                "denoising_fraction must lie in [0, 1]"
+            )
         spatial_size = target_velocity.shape[-2:]
         edit_belief = self._resize_map(
             belief.edit_belief,
@@ -409,12 +425,82 @@ class BayesResidualFlowRouter:
             torch.ones_like(total_strength),
             preserve_strength / total_strength.clamp_min(self.eps),
         )
+        target_owned = None
+        if target_owned_mask is not None:
+            if target_owned_mask.ndim != 4:
+                raise ValueError(
+                    "target_owned_mask must have shape [B,T,H,W]"
+                )
+            if target_owned_mask.shape[:2] != target_velocity.shape[:2]:
+                raise ValueError(
+                    "Target-owned mask and velocity must share [B,T]"
+                )
+            target_owned = F.interpolate(
+                target_owned_mask.detach().float().reshape(
+                    target_owned_mask.shape[0]
+                    * target_owned_mask.shape[1],
+                    1,
+                    *target_owned_mask.shape[-2:],
+                ),
+                size=spatial_size,
+                mode="nearest",
+            ).reshape(
+                target_owned_mask.shape[0],
+                target_owned_mask.shape[1],
+                1,
+                *spatial_size,
+            ).bool()
+            preserve_action_weight = torch.where(
+                target_owned,
+                torch.zeros_like(preserve_action_weight),
+                preserve_action_weight,
+            )
+            edit_action_weight = torch.where(
+                target_owned,
+                torch.ones_like(edit_action_weight),
+                edit_action_weight,
+            )
+        source_suppression = torch.zeros_like(preserve_action_weight)
+        if identity_owner_weight is not None:
+            if identity_owner_weight.ndim != 4:
+                raise ValueError(
+                    "identity_owner_weight must have shape [B,T,H,W]"
+                )
+            if identity_owner_weight.shape[:2] != target_velocity.shape[:2]:
+                raise ValueError(
+                    "Identity ownership and velocity must share [B,T]"
+                )
+            owner = self._resize_map(
+                identity_owner_weight, spatial_size
+            ).clamp(0.0, 1.0)
+            source_suppression = (
+                owner
+                * float(identity_source_suppression)
+                * float(denoising_fraction)
+            ).clamp(0.0, 1.0)
+            preserve_action_weight = (
+                preserve_action_weight * (1.0 - source_suppression)
+            )
 
         target_f32 = target_velocity.float()
         source_residual_f32 = (
             source_reconstruction_velocity.float()
             - source_velocity.float()
         )
+        leakage_diagnostics = None
+        if target_change_core is not None:
+            source_residual_f32, leakage_diagnostics = (
+                remove_antagonistic_source_residual(
+                    source_residual=source_residual_f32,
+                    edit_direction=(
+                        target_velocity.float()
+                        - source_velocity.float()
+                    ),
+                    target_change_core=target_change_core,
+                    protect_mask=protect_mask,
+                    eps=self.eps,
+                )
+            )
         routed_velocity = (
             target_f32
             + preserve_action_weight * source_residual_f32
@@ -432,5 +518,10 @@ class BayesResidualFlowRouter:
                 edit_action_weight + preserve_action_weight - 1.0
             ).abs(),
             "no_evidence": no_evidence.float(),
+            "identity_source_suppression": source_suppression,
         }
+        if target_owned is not None:
+            diagnostics["target_owned_mask"] = target_owned.float()
+        if leakage_diagnostics is not None:
+            diagnostics.update(leakage_diagnostics)
         return routed_velocity, diagnostics

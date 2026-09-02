@@ -288,6 +288,53 @@ class WanT2VCrossAttention(WanSelfAttention):
             # store
             crossattn_cache["fg_mask_soft"] = mask_soft
 
+        # Collect several prompt-role maps from one forward.  Each value is
+        # the mean attention probability assigned to the requested phrase.
+        # Unlike the legacy foreground mask this is deliberately unsigned:
+        # edit and preserve phrases are calibrated independently and compete
+        # downstream.  This also avoids making the score depend on the 512
+        # token padding length or on how many unrelated words are present.
+        if (
+            crossattn_cache is not None
+            and crossattn_cache.get("semantic_group_indices")
+            and crossattn_cache.get("obtain_semantic_masks", False)
+        ):
+            semantic_masks = {}
+            for group_name, group_indices in crossattn_cache[
+                "semantic_group_indices"
+            ].items():
+                if not isinstance(group_indices[0], list):
+                    batch_indices = [group_indices] * b
+                else:
+                    batch_indices = group_indices
+                if len(batch_indices) != b:
+                    raise ValueError(
+                        "Semantic token-index groups must match the "
+                        "cross-attention batch"
+                    )
+                mask_values = []
+                for current_indices in batch_indices:
+                    if not current_indices:
+                        raise ValueError(
+                            f"Semantic group {group_name!r} is empty"
+                        )
+                    if max(current_indices) >= v.size(1):
+                        raise ValueError(
+                            "Semantic token index exceeds text context"
+                        )
+                    value = torch.zeros_like(v[:1])
+                    value[:, current_indices] = (
+                        1.0
+                        / len(current_indices)
+                    )
+                    mask_values.append(value)
+                mask_value = torch.cat(mask_values, dim=0)
+                semantic_masks[group_name] = flash_attention(
+                    q, k, mask_value, k_lens=context_lens
+                ).mean(dim=[2, 3], keepdim=True)
+            crossattn_cache["obtain_semantic_masks"] = False
+            crossattn_cache["semantic_masks_soft"] = semantic_masks
+
         # output
         x = x.flatten(2)
         x = self.o(x)

@@ -6,7 +6,11 @@ import torch
 import torch.nn.functional as F
 
 from .adaptive_role_calibrator import AdaptiveRoleCalibrator
+from .motion.flow_role_evidence import FlowRoleEvidence
 from .role_router import RoleState
+from .source_flow_verified_region import (
+    build_source_flow_verified_region,
+)
 
 
 def _dilate(mask: torch.Tensor, radius: int) -> torch.Tensor:
@@ -28,6 +32,36 @@ def _neighbor_max(value: torch.Tensor) -> torch.Tensor:
     flat = value.reshape(batch * frames, 1, height, width)
     propagated = F.max_pool2d(flat, kernel_size=3, stride=1, padding=1)
     return propagated.reshape(batch, frames, height, width)
+
+
+def _connected_hysteresis_growth(
+    seed: torch.Tensor,
+    candidate: torch.Tensor,
+    *,
+    steps: int,
+) -> torch.Tensor:
+    """Grow seed support through a low-threshold candidate corridor.
+
+    Unlike unconstrained dilation, every admitted token must have an
+    8-connected path of at most ``steps`` cells back to a high-confidence
+    seed. This recovers low-attention object interiors and thin structure
+    without letting an unrelated semantic response ignite on its own.
+    """
+    if seed.shape != candidate.shape or seed.ndim != 4:
+        raise ValueError(
+            "seed and candidate must share shape [B,T,H,W]"
+        )
+    if steps < 0:
+        raise ValueError("steps must be non-negative")
+    # A seed is already the high-confidence decision.  The lower-threshold
+    # candidate mask is only a corridor through which that decision may grow;
+    # it must never be allowed to erase the seed itself.
+    support = seed.bool()
+    for _ in range(steps):
+        support = support | (
+            _neighbor_max(support.float()).bool() & candidate.bool()
+        )
+    return support
 
 
 def _quantile_normalize(
@@ -97,6 +131,10 @@ class HandRoleInferencer:
         field_power: float = 1.5,
         field_weight: float = 0.65,
         field_candidate_radius: int = 2,
+        connected_hysteresis: bool = False,
+        connected_growth_steps: int = 3,
+        connected_candidate_ratio: float = 1.0,
+        soft_hand_contact: bool = False,
         adaptive: bool = False,
         eps: float = 1e-6,
     ):
@@ -138,6 +176,14 @@ class HandRoleInferencer:
             raise ValueError("field_weight must be in [0, 1]")
         if field_candidate_radius < 0:
             raise ValueError("field_candidate_radius must be non-negative")
+        if connected_growth_steps < 0:
+            raise ValueError(
+                "connected_growth_steps must be non-negative"
+            )
+        if not 0.0 < connected_candidate_ratio <= 1.0:
+            raise ValueError(
+                "connected_candidate_ratio must lie in (0, 1]"
+            )
 
         self.attention_quantile_low = attention_quantile_low
         self.attention_quantile_high = attention_quantile_high
@@ -156,6 +202,12 @@ class HandRoleInferencer:
         self.field_power = field_power
         self.field_weight = field_weight
         self.field_candidate_radius = field_candidate_radius
+        self.connected_hysteresis = bool(connected_hysteresis)
+        self.connected_growth_steps = int(connected_growth_steps)
+        self.connected_candidate_ratio = float(
+            connected_candidate_ratio
+        )
+        self.soft_hand_contact = bool(soft_hand_contact)
         self.adaptive = adaptive
         self.eps = eps
         self.previous_features = None
@@ -168,9 +220,11 @@ class HandRoleInferencer:
     @staticmethod
     def _build_roles(
         posterior: torch.Tensor,
-        hand_mask: torch.Tensor,
+        hand_occupancy: torch.Tensor,
+        *,
+        soft_hand_contact: bool = False,
     ) -> RoleState:
-        batch, frames, height, width = hand_mask.shape
+        batch, frames, height, width = hand_occupancy.shape
         token_height, token_width = posterior.shape[-2:]
         posterior_latent = F.interpolate(
             posterior.reshape(
@@ -180,8 +234,16 @@ class HandRoleInferencer:
             mode="bilinear",
             align_corners=False,
         ).reshape(batch, frames, height, width).clamp(0.0, 1.0)
-        hand_latent = hand_mask.float().clamp(0.0, 1.0)
-        hand_band = _dilate(hand_latent, 1).clamp(0.0, 1.0)
+        hand_latent = hand_occupancy.float().clamp(0.0, 1.0)
+        if soft_hand_contact:
+            # In causal-evidence mode a moving hand is soft contact evidence.
+            # Dilating its temporal union would convert most of a held object
+            # into read-only boundary.
+            hand_band = hand_latent
+        else:
+            # Preserve the pre-950 role semantics for every baseline that does
+            # not explicitly enable causal hand evidence.
+            hand_band = _dilate(hand_latent, 1).clamp(0.0, 1.0)
 
         contact = posterior_latent * hand_band
         object_core = posterior_latent * (1.0 - hand_band)
@@ -202,6 +264,7 @@ class HandRoleInferencer:
         source_velocity: torch.Tensor,
         target_velocity: torch.Tensor,
         hand_mask: torch.Tensor,
+        hand_occupancy: torch.Tensor | None = None,
         apply_update: bool = True,
     ) -> HandRoleInferenceResult:
         """Measure field disagreement and optionally refine a role prior."""
@@ -221,6 +284,12 @@ class HandRoleInferencer:
             raise ValueError(
                 "Velocity and hand-mask grids differ: "
                 f"{tuple(source_velocity.shape)} vs {tuple(hand_mask.shape)}"
+            )
+        if hand_occupancy is None:
+            hand_occupancy = hand_mask.float()
+        if tuple(hand_occupancy.shape) != (batch, frames, height, width):
+            raise ValueError(
+                "hand_occupancy must align with the velocity grid"
             )
 
         prior_posterior = prior.debug["object_posterior"].float()
@@ -247,7 +316,9 @@ class HandRoleInferencer:
         ).reshape(batch, frames, token_height, token_width)
 
         hand_probability = F.avg_pool2d(
-            hand_mask.reshape(batch * frames, 1, height, width).float(),
+            hand_occupancy.reshape(
+                batch * frames, 1, height, width
+            ).float(),
             kernel_size=2,
             stride=2,
         ).reshape(batch, frames, token_height, token_width)
@@ -264,13 +335,60 @@ class HandRoleInferencer:
                     prior_threshold=prior.debug[
                         "posterior_threshold"
                     ].float(),
-                    update_state=apply_update,
+                    # The final threshold is committed once, after the
+                    # hand/semantic-constrained flow expansion below.
+                    update_state=False,
                 )
             )
-            field_candidate = prior_posterior > self.eps
-            field_observation = adaptive_debug[
-                "adaptive_field_likelihood"
-            ]
+            semantic_threshold = torch.quantile(
+                source_attention.flatten(2),
+                self.candidate_quantile,
+                dim=-1,
+                keepdim=True,
+            ).reshape(batch, frames, 1, 1)
+            semantic_candidate = (
+                source_attention >= semantic_threshold
+            )
+            spatial_candidate = _dilate(
+                (prior_posterior > self.eps)
+                | (prior.debug["object_seed"] > self.eps),
+                self.field_candidate_radius,
+            ).bool()
+            proximity = prior.debug["hand_proximity"].float()
+            field_candidate = (
+                spatial_candidate
+                & semantic_candidate
+                & (proximity > self.eps)
+                & (hand_probability < 0.95)
+                & object_visible.bool()
+            )
+            field_observation = (
+                adaptive_debug["adaptive_field_likelihood"]
+                * adaptive_debug["adaptive_field_reliability"]
+                * (0.25 + 0.75 * source_attention)
+                * torch.sqrt(proximity.clamp_min(0.0))
+                * field_candidate.float()
+                * (1.0 - hand_probability)
+            ).clamp(0.0, 1.0)
+            if apply_update:
+                posterior = torch.maximum(
+                    posterior,
+                    self.field_weight * field_observation,
+                )
+                posterior = self.adaptive_calibrator.limit_posterior(
+                    posterior,
+                    prior.debug["adaptive_coverage_budget"].float(),
+                    object_visible,
+                )
+                posterior_threshold = (
+                    self.adaptive_calibrator.posterior_threshold(
+                        posterior, update_state=True
+                    )
+                )
+                posterior_threshold = torch.maximum(
+                    posterior_threshold,
+                    prior.debug["posterior_threshold"].float(),
+                )
             if not apply_update:
                 posterior = prior_posterior
                 posterior_threshold = prior.debug[
@@ -327,6 +445,28 @@ class HandRoleInferencer:
                 ),
             )
 
+        if self.connected_hysteresis:
+            connected_support = prior.debug.get(
+                "connected_hysteresis_support"
+            )
+            if connected_support is not None:
+                connected_support = connected_support.bool()
+                if connected_support.shape != posterior.shape:
+                    raise ValueError(
+                        "Connected support must align with the posterior"
+                    )
+                # The flow pass may score the recovered extent, but its
+                # top-k coverage limiter must not silently erase the
+                # hand-connected object region before routing/KV consume it.
+                posterior = torch.where(
+                    connected_support,
+                    torch.maximum(
+                        posterior,
+                        posterior_threshold.expand_as(posterior),
+                    ),
+                    posterior,
+                )
+
         if apply_update:
             self.previous_posterior = posterior[:, -1].detach()
 
@@ -343,8 +483,152 @@ class HandRoleInferencer:
         if self.adaptive:
             debug.update(adaptive_debug)
         return HandRoleInferenceResult(
-            roles=self._build_roles(posterior, hand_mask),
+            roles=self._build_roles(
+                posterior,
+                hand_occupancy,
+                soft_hand_contact=self.soft_hand_contact,
+            ),
             token_edit_confidence=posterior.reshape(batch, -1),
+            debug=debug,
+        )
+
+    @torch.no_grad()
+    def refine_with_source_flow(
+        self,
+        prior: HandRoleInferenceResult,
+        flow: FlowRoleEvidence,
+        *,
+        hand_occupancy: torch.Tensor,
+        flow_weight: float = 0.75,
+    ) -> HandRoleInferenceResult:
+        """Fuse camera-compensated source flow into token ownership.
+
+        The fusion is asymmetric. A transported owner may recover weak
+        semantic tokens, while background flow cannot erase an already
+        observed object token. This keeps flow useful for tracking without
+        turning egocentric camera motion into a destructive segmentation cue.
+        """
+        flow.validate()
+        if not 0.0 <= float(flow_weight) <= 1.0:
+            raise ValueError("flow_weight must lie in [0, 1]")
+        posterior = prior.debug["object_posterior"].float()
+        if flow.object_likelihood.shape != posterior.shape:
+            raise ValueError(
+                "Source-flow evidence must align with object posterior"
+            )
+        if hand_occupancy.ndim != 4 or hand_occupancy.shape[:2] != (
+            posterior.shape[0], posterior.shape[1]
+        ):
+            raise ValueError(
+                "hand_occupancy must align with flow evidence on [B,T]"
+            )
+
+        transported_object = torch.maximum(
+            flow.object_likelihood,
+            flow.transport_support * flow.cycle_confidence,
+        )
+        flow_observation = (
+            float(flow_weight) * transported_object
+        ).clamp(0.0, 1.0)
+        fused = torch.maximum(posterior, flow_observation)
+        # Positive clean-source background evidence is retained separately for
+        # the factorized Bayes operator. It is not allowed to crop the object
+        # hypothesis; occlusion and weak flow therefore fail to unknown/read
+        # abstention instead of accumulating chunk-wise shrinkage.
+        threshold = prior.debug["posterior_threshold"].float()
+        flow_selected = flow_observation >= threshold
+
+        debug = dict(prior.debug)
+        debug.update(flow.as_debug_maps())
+        debug.update({
+            "object_posterior_pre_source_flow": posterior,
+            "source_flow_object_observation": flow_observation,
+            "source_flow_recovered_support": (
+                flow_selected & (posterior < threshold)
+            ).float(),
+            "object_posterior": fused,
+        })
+        return HandRoleInferenceResult(
+            roles=self._build_roles(
+                fused, hand_occupancy,
+                soft_hand_contact=self.soft_hand_contact,
+            ),
+            token_edit_confidence=fused.reshape(fused.shape[0], -1),
+            debug=debug,
+        )
+
+    @torch.no_grad()
+    def apply_source_flow_verified_region(
+        self,
+        prior: HandRoleInferenceResult,
+        flow: FlowRoleEvidence,
+        *,
+        owner_support: torch.Tensor,
+        hand_exclusion: torch.Tensor,
+        hand_occupancy: torch.Tensor,
+        owner_radius: int = 1,
+        background_veto_threshold: float = 0.55,
+        background_veto_min_confidence: float = 0.50,
+    ) -> HandRoleInferenceResult:
+        """Turn high-recall token evidence into verified edit authority.
+
+        The original posterior remains available in diagnostics, but the role
+        maps and token confidence returned to routing are rebuilt from the
+        flow-verified support.  This prevents a later OR from restoring hand
+        or confident-background false positives.
+        """
+        # On the first pass, verify the semantic posterior from before the
+        # positive source-flow fusion.  Flow ownership already has its own
+        # explicit recovery path below, so reusing its positive observation
+        # as a semantic proposal would count the same evidence twice.  A
+        # later denoising-field pass is re-verified from its latest posterior.
+        proposal_posterior = prior.debug["object_posterior"]
+        if "source_flow_verified_support" not in prior.debug:
+            proposal_posterior = prior.debug.get(
+                "object_posterior_pre_source_flow",
+                proposal_posterior,
+            )
+        verified = build_source_flow_verified_region(
+            object_posterior=proposal_posterior,
+            posterior_threshold=prior.debug["posterior_threshold"],
+            owner_support=owner_support,
+            hand_exclusion=hand_exclusion,
+            background_likelihood=flow.background_likelihood,
+            flow_confidence=flow.cycle_confidence,
+            owner_radius=owner_radius,
+            background_veto_threshold=background_veto_threshold,
+            background_veto_min_confidence=(
+                background_veto_min_confidence
+            ),
+        )
+        debug = dict(prior.debug)
+        # Preserve the first unverified proposal across the later denoising
+        # field pass.  The latest map is also recorded so an offline replay
+        # can distinguish the original token proposal from a second
+        # verification of the field-refined posterior.
+        debug.setdefault(
+            "object_posterior_pre_flow_verification",
+            proposal_posterior.float(),
+        )
+        debug["object_posterior_pre_latest_flow_verification"] = (
+            proposal_posterior.float()
+        )
+        debug.update(verified.as_debug_maps())
+        debug["object_posterior"] = verified.posterior
+        # Temporal token propagation in the next causal block must start
+        # from the same verified authority consumed by routing/KV.  Leaving
+        # the pre-verification field posterior here would reintroduce the
+        # discarded hand/background fringe at every chunk boundary.
+        self.previous_posterior = verified.posterior[:, -1].detach()
+        return HandRoleInferenceResult(
+            roles=self._build_roles(
+                verified.posterior,
+                hand_occupancy,
+                soft_hand_contact=self.soft_hand_contact,
+            ),
+            token_edit_confidence=verified.posterior.reshape(
+                verified.posterior.shape[0], -1
+            ),
             debug=debug,
         )
 
@@ -439,6 +723,7 @@ class HandRoleInferencer:
         self,
         source_attention: torch.Tensor,
         hand_mask: torch.Tensor,
+        hand_occupancy: torch.Tensor | None = None,
         source_features: torch.Tensor = None,
     ) -> HandRoleInferenceResult:
         if source_attention.ndim != 2:
@@ -452,6 +737,14 @@ class HandRoleInferencer:
                 f"{tuple(hand_mask.shape)}"
             )
         batch, frames, height, width = hand_mask.shape
+        if hand_occupancy is None:
+            hand_occupancy = hand_mask.float()
+        if tuple(hand_occupancy.shape) != tuple(hand_mask.shape):
+            raise ValueError(
+                "hand_occupancy must share hand_mask shape [B,T,H,W]"
+            )
+        if (hand_occupancy < 0).any() or (hand_occupancy > 1).any():
+            raise ValueError("hand_occupancy must lie in [0, 1]")
         if height % 2 or width % 2:
             raise ValueError("Hand-mask height and width must be divisible by 2")
         token_height, token_width = height // 2, width // 2
@@ -492,7 +785,16 @@ class HandRoleInferencer:
             self.eps,
         )
         hand_probability = F.avg_pool2d(
-            hand_mask.reshape(batch * frames, 1, height, width).float(),
+            hand_occupancy.reshape(
+                batch * frames, 1, height, width
+            ).float(),
+            kernel_size=2,
+            stride=2,
+        ).reshape(batch, frames, token_height, token_width)
+        proximity_hand_probability = F.max_pool2d(
+            hand_mask.reshape(
+                batch * frames, 1, height, width
+            ).float(),
             kernel_size=2,
             stride=2,
         ).reshape(batch, frames, token_height, token_width)
@@ -502,6 +804,7 @@ class HandRoleInferencer:
             adaptive_observation = self.adaptive_calibrator.observe(
                 attention,
                 hand_probability,
+                proximity_hand_probability=proximity_hand_probability,
             )
             proximity = adaptive_observation.debug["hand_proximity"]
             seed = adaptive_observation.seed
@@ -515,8 +818,10 @@ class HandRoleInferencer:
             gate = adaptive_observation.gate
             adaptive_debug = adaptive_observation.debug
         else:
-            hand_binary = hand_probability > 0.0
-            hand_coverage = hand_probability.flatten(2).mean(dim=-1)
+            hand_binary = proximity_hand_probability > 0.0
+            hand_coverage = proximity_hand_probability.flatten(2).mean(
+                dim=-1
+            )
             hand_present = (
                 hand_binary.flatten(2).any(dim=-1)
                 & (hand_coverage < 0.95)
@@ -605,6 +910,56 @@ class HandRoleInferencer:
             )
             posterior = posterior * gate
         posterior = posterior * object_visible.float()
+        hysteresis_candidate = torch.zeros_like(
+            posterior, dtype=torch.bool
+        )
+        hysteresis_support = torch.zeros_like(
+            posterior, dtype=torch.bool
+        )
+        if self.connected_hysteresis:
+            if self.adaptive:
+                candidate_threshold = adaptive_observation.debug[
+                    "adaptive_candidate_threshold"
+                ]
+                extended_hand = adaptive_observation.debug[
+                    "adaptive_extended_hand"
+                ].bool()
+            else:
+                candidate_threshold = torch.quantile(
+                    attention.flatten(2),
+                    self.candidate_quantile,
+                    dim=-1,
+                    keepdim=True,
+                ).reshape(batch, frames, 1, 1)
+                extended_hand = _dilate(
+                    hand_probability > 0.0,
+                    2 * self.hand_proximity_radius,
+                ).bool()
+            connected_candidate_threshold = (
+                candidate_threshold * self.connected_candidate_ratio
+            )
+            hysteresis_candidate = (
+                (attention >= connected_candidate_threshold)
+                & (attention > self.eps)
+                & extended_hand
+                & object_visible.bool()
+            )
+            hysteresis_support = _connected_hysteresis_growth(
+                seed > self.eps,
+                hysteresis_candidate,
+                steps=self.connected_growth_steps,
+            )
+            # Candidate attention is calibrated evidence, not a binary mask.
+            # Preserve its confidence while ensuring connected low-score
+            # interiors survive later posterior thresholding.
+            connected_floor = torch.minimum(
+                connected_candidate_threshold.expand_as(attention),
+                attention.new_full(attention.shape, 0.20),
+            )
+            connected_posterior = torch.maximum(
+                attention, connected_floor
+            ) * hysteresis_support.float()
+            posterior = torch.maximum(posterior, connected_posterior)
 
         temporal_posterior = torch.zeros_like(posterior)
         temporal_confidence = torch.zeros_like(posterior)
@@ -694,6 +1049,14 @@ class HandRoleInferencer:
                 (batch, frames, 1, 1),
                 0.20,
             )
+        if self.connected_hysteresis:
+            posterior = torch.where(
+                hysteresis_support,
+                torch.maximum(
+                    posterior, posterior_threshold.expand_as(posterior)
+                ),
+                posterior,
+            )
         if source_features is not None:
             self.previous_features = source_features[:, -1].detach()
             self.previous_posterior = posterior[:, -1].detach()
@@ -712,6 +1075,17 @@ class HandRoleInferencer:
             "temporal_confidence": temporal_confidence,
             "object_posterior": posterior,
             "posterior_threshold": posterior_threshold,
+            "connected_hysteresis_candidate": (
+                hysteresis_candidate.float()
+            ),
+            "connected_candidate_threshold": (
+                connected_candidate_threshold.expand_as(attention)
+                if self.connected_hysteresis
+                else torch.zeros_like(attention)
+            ),
+            "connected_hysteresis_support": (
+                hysteresis_support.float()
+            ),
         }
         if self.adaptive:
             debug["adaptive_temporal_weight"] = (
@@ -719,7 +1093,11 @@ class HandRoleInferencer:
             )
         debug.update(adaptive_debug)
         return HandRoleInferenceResult(
-            roles=self._build_roles(posterior, hand_mask),
+            roles=self._build_roles(
+                posterior,
+                hand_occupancy,
+                soft_hand_contact=self.soft_hand_contact,
+            ),
             token_edit_confidence=posterior.reshape(batch, -1),
             debug=debug,
         )
