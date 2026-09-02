@@ -304,6 +304,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
         source_flow_verified_owner_radius: int = 1,
         source_flow_background_veto_threshold: float = 0.55,
         source_flow_background_veto_min_confidence: float = 0.50,
+        soft_region_modulation: bool = False,
+        soft_region_blend_strength: float = 0.5,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
         posterior_flow_mode: str = "soft",
@@ -801,6 +803,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 source_flow_background_veto_min_confidence=(
                     source_flow_background_veto_min_confidence
                 ),
+                soft_region_modulation=soft_region_modulation,
+                soft_region_blend_strength=soft_region_blend_strength,
                 global_frame_indices=list(range(src_video.shape[1])),
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
@@ -2417,6 +2421,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     source_flow_background_veto_min_confidence=(
                         source_flow_background_veto_min_confidence
                     ),
+                    soft_region_modulation=soft_region_modulation,
+                    soft_region_blend_strength=soft_region_blend_strength,
                     global_frame_indices=(
                         rollout_global_frame_indices[:proposal_frame_count]
                     ),
@@ -2934,6 +2940,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 source_flow_background_veto_min_confidence=(
                     source_flow_background_veto_min_confidence
                 ),
+                soft_region_modulation=soft_region_modulation,
+                soft_region_blend_strength=soft_region_blend_strength,
                 global_frame_indices=rollout_global_frame_indices,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
@@ -9343,15 +9351,78 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         + 1e-7
                     )
                     native_background_action = 1.0 - native_change
-                    v_t, factorized_flow_debug = (
-                        route_factorized_velocity(
-                            target_velocity=v_trg,
-                            source_velocity=v_src,
-                            source_reconstruction_velocity=v_gt,
-                            operators=current_factorized_operators,
-                            native_fallback_action=(
-                                native_background_action
-                            ),
+                    if soft_region_modulation:
+                        bg_mask = native_background_action
+                        region_posterior = hand_role_debug.get(
+                            "source_flow_verified_posterior",
+                            hand_role_debug.get("object_posterior"),
+                        )
+                        if region_posterior is not None:
+                            region_confidence = F.interpolate(
+                                region_posterior.float()
+                                .reshape(
+                                    batch_size * current_num_frames,
+                                    1,
+                                    *region_posterior.shape[-2:],
+                                ),
+                                size=v_trg.shape[-2:],
+                                mode="bilinear",
+                                align_corners=False,
+                            ).reshape(
+                                batch_size,
+                                current_num_frames,
+                                1,
+                                *v_trg.shape[-2:],
+                            ).clamp(0.0, 1.0)
+                            modulated_bg = bg_mask * (
+                                1.0
+                                - soft_region_blend_strength
+                                * region_confidence
+                            )
+                        else:
+                            modulated_bg = bg_mask
+                        v_t = (
+                            v_trg + modulated_bg * (v_gt - v_src)
+                        ).to(v_trg.dtype)
+                        factorized_flow_debug = {
+                            "source_residual_action": bg_mask,
+                            "unknown_action": torch.zeros_like(bg_mask),
+                            "native_fallback_action": native_background_action,
+                            "effective_source_residual_action": modulated_bg,
+                            "paired_memory_source_suppression_action": torch.zeros_like(bg_mask),
+                            "verified_native_history_source_suppression_action": torch.zeros_like(bg_mask),
+                            "orthogonal_geometry_action": torch.zeros_like(bg_mask),
+                            "owner_complement_source_action": torch.zeros_like(bg_mask),
+                            "owner_complement_abstain_action": torch.zeros_like(bg_mask),
+                        }
+                        if factorized_native_target_history:
+                            factorized_flow_debug[
+                                "target_owned_native_fallback_action"
+                            ] = torch.zeros_like(bg_mask)
+                        if index == 0:
+                            region_coverage = (
+                                region_confidence.mean().item()
+                                if region_posterior is not None
+                                else 0.0
+                            )
+                            print(
+                                "SOFT_REGION_MODULATION "
+                                f"block={current_start_frame // self.num_frame_per_block} "
+                                f"blend_strength={soft_region_blend_strength:.2f} "
+                                f"region_coverage={region_coverage:.4f} "
+                                f"bg_mask_mean={bg_mask.mean().item():.4f} "
+                                f"modulated_bg_mean={modulated_bg.mean().item():.4f}"
+                            )
+                    else:
+                        v_t, factorized_flow_debug = (
+                            route_factorized_velocity(
+                                target_velocity=v_trg,
+                                source_velocity=v_src,
+                                source_reconstruction_velocity=v_gt,
+                                operators=current_factorized_operators,
+                                native_fallback_action=(
+                                    native_background_action
+                                ),
                             target_owned_weight=(
                                 (
                                     current_edit_authority.support.float()
@@ -11265,19 +11336,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
             _, trg_fg_mask_bin, _, _ = self._aggregate_crossattn_mask(crossattn_cache_trg)
             legacy_trg_fg_mask = trg_fg_mask_bin | src_fg_mask_bin
             current_trg_fg_mask = (
-                role_edit_tokens
-                if (
-                    consistent_role_kv_enabled
-                    or (
-                        causal_owner_consistent_kv_metadata
-                        and causal_ownership_enabled
+                legacy_trg_fg_mask
+                if soft_region_modulation
+                else (
+                    role_edit_tokens
+                    if (
+                        consistent_role_kv_enabled
+                        or (
+                            causal_owner_consistent_kv_metadata
+                            and causal_ownership_enabled
+                        )
                     )
+                    else legacy_trg_fg_mask
                 )
-                else legacy_trg_fg_mask
             )
             if (
                 causal_owner_consistent_kv_metadata
                 and causal_ownership_enabled
+                and not soft_region_modulation
             ):
                 metadata_xor = (
                     role_edit_tokens.bool()

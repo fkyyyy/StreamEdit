@@ -1409,6 +1409,28 @@ if __name__ == '__main__':
         default=0.50,
         help="Minimum flow confidence required for a background veto.",
     )
+    parser.add_argument(
+        "--soft_region_modulation",
+        action="store_true",
+        default=False,
+        help=(
+            "Use the flow-verified region as a continuous [0,1] spatial "
+            "modulation signal on top of the native StreamEdit velocity "
+            "blend, instead of hard-switching velocity/KV/attention "
+            "routing. KV metadata falls back to the legacy cross-attention "
+            "union mask."
+        ),
+    )
+    parser.add_argument(
+        "--soft_region_blend_strength",
+        type=float,
+        default=0.5,
+        help=(
+            "How strongly the flow-verified region confidence suppresses "
+            "the background velocity correction inside the detected edit "
+            "region. 0 = no effect, 1 = full suppression."
+        ),
+    )
     parser.add_argument("--mask_white_threshold", type=int, default=245)
     parser.add_argument(
         "--hand_mask_mode",
@@ -3351,6 +3373,8 @@ if __name__ == '__main__':
         source_flow_background_veto_min_confidence=(
             args.source_flow_background_veto_min_confidence
         ),
+        soft_region_modulation=args.soft_region_modulation,
+        soft_region_blend_strength=args.soft_region_blend_strength,
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,
         posterior_flow_mode=args.posterior_flow_mode,
