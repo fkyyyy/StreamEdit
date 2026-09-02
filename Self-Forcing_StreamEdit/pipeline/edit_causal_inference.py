@@ -3219,6 +3219,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
         source_flow_verified_owner_radius: int = 1,
         source_flow_background_veto_threshold: float = 0.55,
         source_flow_background_veto_min_confidence: float = 0.50,
+        soft_region_modulation: bool = False,
+        soft_region_blend_strength: float = 0.5,
         global_frame_indices: Optional[List[int]] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
