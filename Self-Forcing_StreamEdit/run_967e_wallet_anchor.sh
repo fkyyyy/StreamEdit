@@ -12,8 +12,8 @@ DATA_PATH="${DATA_PATH:-$REPO_ROOT/source_video1.mp4}"
 HAND_MASK="${HAND_MASK:-$REPO_ROOT/hand_mask1.mp4}"
 FLOW_CACHE="${FLOW_CACHE:-$SCRIPT_DIR/outputs/952b_phone_to_cardboard_box/source_flow/raft_large_bidirectional_flow.pt}"
 PHONE_GT="${PHONE_GT:-$REPO_ROOT/phone_mask.mp4}"
-OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/967e_wallet_anchor}"
-OUTPUT_NAME="${OUTPUT_NAME:-967e-wallet-anchor.mp4}"
+OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/967e2_wallet_anchor_amplified}"
+OUTPUT_NAME="${OUTPUT_NAME:-967e2-wallet-anchor-amplified.mp4}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 CUDA_DEVICE="${CUDA_DEVICE:-7}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -26,12 +26,11 @@ HAND_PERSISTENT_OCCUPANCY="${HAND_PERSISTENT_OCCUPANCY:-1.0}"
 CONNECTED_GROWTH_STEPS="${CONNECTED_GROWTH_STEPS:-3}"
 CONNECTED_CANDIDATE_RATIO="${CONNECTED_CANDIDATE_RATIO:-0.75}"
 FLOW_ROLE_WEIGHT="${FLOW_ROLE_WEIGHT:-0.75}"
-VERIFIED_OWNER_RADIUS="${VERIFIED_OWNER_RADIUS:-1}"
+VERIFIED_OWNER_RADIUS="${VERIFIED_OWNER_RADIUS:-2}"
 BACKGROUND_VETO_THRESHOLD="${BACKGROUND_VETO_THRESHOLD:-0.55}"
 BACKGROUND_VETO_MIN_CONFIDENCE="${BACKGROUND_VETO_MIN_CONFIDENCE:-0.50}"
 SOFT_REGION_BLEND_STRENGTH="${SOFT_REGION_BLEND_STRENGTH:-0.5}"
 IDENTITY_ANCHOR_SCALE="${IDENTITY_ANCHOR_SCALE:-1.5}"
-VERIFIED_OWNER_RADIUS="${VERIFIED_OWNER_RADIUS:-2}"
 
 readonly SRC_PROMPT='First-person POV shot, wide-angle lens. A person is relaxing on a beige sofa, holding a smartphone with both hands and actively scrolling through a calendar app interface. An open silver laptop rests on their lap, displaying a screen filled with blue technical diagrams or data charts. In the mid-ground, a pair of feet wearing white socks are propped up on a dark wooden coffee table, which is scattered with small white puzzle pieces. The background features a spacious, modern living room with a dark staircase on the left, a large black TV on a wooden cabinet, and two blue armchairs near a bright glass door on the right. Bright natural daylight, realistic 4k video style, slight fish-eye effect.'
 readonly TRG_PROMPT='First-person POV shot, wide-angle lens. A person is relaxing on a beige sofa, holding a brown leather wallet with both hands, casually flipping it open. The wallet is a classic bifold design made of rich, dark brown genuine leather with visible grain texture and neat stitching along the edges. It has a slightly worn, warm patina on the surface. Beneath the wallet, an open silver laptop rests on their lap, displaying a screen filled with blue technical diagrams. In the mid-ground, a pair of feet wearing white socks are propped up on a dark wooden coffee table scattered with small white puzzle pieces. The background features a spacious, modern living room with a dark staircase on the left, a large black TV on a wooden cabinet, and two blue armchairs near a bright glass door on the right. Bright natural daylight, realistic 4k video style, slight fish-eye effect.'
@@ -121,7 +120,7 @@ COMMAND=(
   printf 'command='
   printf ' %q' "${COMMAND[@]}"
   printf '\n'
-} > "$OUTDIR/967e_config.txt"
+} > "$OUTDIR/967e2_config.txt"
 
 echo "967E_EDIT smartphone → brown leather wallet"
 echo "967E_REGION auto flow-verified (no object mask)"
