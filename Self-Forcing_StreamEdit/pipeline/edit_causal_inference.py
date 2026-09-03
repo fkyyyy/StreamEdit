@@ -9398,21 +9398,27 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 1,
                                 *v_trg.shape[-2:],
                             ).clamp(0.0, 1.0)
-                            modulated_bg = bg_mask * (
-                                1.0
-                                - soft_region_blend_strength
+                            source_suppression = (
+                                soft_region_blend_strength
                                 * region_confidence
                             )
                         else:
-                            modulated_bg = bg_mask
+                            source_suppression = torch.zeros_like(bg_mask)
+                        source_residual = (v_gt - v_src)
                         v_t = (
-                            v_trg + modulated_bg * (v_gt - v_src)
+                            v_trg
+                            + bg_mask
+                            * (1.0 - source_suppression)
+                            * source_residual
                         ).to(v_trg.dtype)
                         factorized_flow_debug = {
                             "source_residual_action": bg_mask,
                             "unknown_action": torch.zeros_like(bg_mask),
                             "native_fallback_action": native_background_action,
-                            "effective_source_residual_action": modulated_bg,
+                            "effective_source_residual_action": (
+                                bg_mask * (1.0 - source_suppression)
+                            ),
+                            "source_suppression": source_suppression,
                             "paired_memory_source_suppression_action": torch.zeros_like(bg_mask),
                             "verified_native_history_source_suppression_action": torch.zeros_like(bg_mask),
                             "orthogonal_geometry_action": torch.zeros_like(bg_mask),
@@ -9429,13 +9435,20 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 if region_posterior is not None
                                 else 0.0
                             )
+                            suppression_mean = (
+                                source_suppression.mean().item()
+                            )
+                            effective_residual = (
+                                bg_mask * (1.0 - source_suppression)
+                            ).mean().item()
                             print(
                                 "SOFT_REGION_MODULATION "
                                 f"block={current_start_frame // self.num_frame_per_block} "
                                 f"blend_strength={soft_region_blend_strength:.2f} "
                                 f"region_coverage={region_coverage:.4f} "
                                 f"bg_mask_mean={bg_mask.mean().item():.4f} "
-                                f"modulated_bg_mean={modulated_bg.mean().item():.4f}"
+                                f"source_suppression={suppression_mean:.4f} "
+                                f"effective_residual={effective_residual:.4f}"
                             )
                     else:
                         v_t, factorized_flow_debug = (
