@@ -1431,6 +1431,17 @@ if __name__ == '__main__':
             "region. 0 = no effect, 1 = full suppression."
         ),
     )
+    parser.add_argument(
+        "--first_block_identity_anchor",
+        action="store_true",
+        default=False,
+        help=(
+            "Freeze the first generation block's clean target KV as a "
+            "persistent identity anchor. All subsequent blocks attend to "
+            "this anchor in addition to the mutable KV history, preventing "
+            "identity drift."
+        ),
+    )
     parser.add_argument("--mask_white_threshold", type=int, default=245)
     parser.add_argument(
         "--hand_mask_mode",
@@ -3375,6 +3386,7 @@ if __name__ == '__main__':
         ),
         soft_region_modulation=args.soft_region_modulation,
         soft_region_blend_strength=args.soft_region_blend_strength,
+        first_block_identity_anchor=args.first_block_identity_anchor,
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,
         posterior_flow_mode=args.posterior_flow_mode,

@@ -2372,6 +2372,23 @@ class CausalWanSelfAttention(nn.Module):
                     b_key_list.append(b_trg_current_key)
                     b_value_list.append(b_trg_current_value)
 
+                    # Identity anchor: concat frozen first-block KV
+                    identity_anchor = shared_dict.get(
+                        "identity_anchor_kv"
+                    )
+                    if identity_anchor is not None:
+                        anchor_layer = identity_anchor[layer_index]
+                        b_key_list.append(
+                            anchor_layer["k"][b_idx].to(
+                                b_trg_current_key.dtype
+                            )
+                        )
+                        b_value_list.append(
+                            anchor_layer["v"][b_idx].to(
+                                b_trg_current_value.dtype
+                            )
+                        )
+
                     # store and concatenate key and value
                     b_trg_key = torch.cat(b_key_list, dim=0)
                     b_trg_value = torch.cat(b_value_list, dim=0)

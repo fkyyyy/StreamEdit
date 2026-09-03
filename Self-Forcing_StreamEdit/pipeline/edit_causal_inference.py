@@ -306,6 +306,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         source_flow_background_veto_min_confidence: float = 0.50,
         soft_region_modulation: bool = False,
         soft_region_blend_strength: float = 0.5,
+        first_block_identity_anchor: bool = False,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
         posterior_flow_mode: str = "soft",
@@ -805,6 +806,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 ),
                 soft_region_modulation=soft_region_modulation,
                 soft_region_blend_strength=soft_region_blend_strength,
+                first_block_identity_anchor=first_block_identity_anchor,
                 global_frame_indices=list(range(src_video.shape[1])),
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
@@ -2423,6 +2425,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     ),
                     soft_region_modulation=soft_region_modulation,
                     soft_region_blend_strength=soft_region_blend_strength,
+                    first_block_identity_anchor=first_block_identity_anchor,
                     global_frame_indices=(
                         rollout_global_frame_indices[:proposal_frame_count]
                     ),
@@ -2942,6 +2945,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 ),
                 soft_region_modulation=soft_region_modulation,
                 soft_region_blend_strength=soft_region_blend_strength,
+                first_block_identity_anchor=first_block_identity_anchor,
                 global_frame_indices=rollout_global_frame_indices,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
@@ -3221,6 +3225,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         source_flow_background_veto_min_confidence: float = 0.50,
         soft_region_modulation: bool = False,
         soft_region_blend_strength: float = 0.5,
+        first_block_identity_anchor: bool = False,
         global_frame_indices: Optional[List[int]] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
@@ -10364,6 +10369,35 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 crossattn_cache=crossattn_cache_trg,
                 current_start=current_start_frame * self.frame_seq_length,
             )
+            block_index = current_start_frame // self.num_frame_per_block
+            if first_block_identity_anchor and block_index == 0:
+                anchor_num_tokens = (
+                    current_num_frames * self.frame_seq_length
+                )
+                identity_anchor_kv = []
+                for layer_idx in range(self.num_transformer_blocks):
+                    layer_cache = kv_cache_trg[layer_idx]
+                    end_idx = int(
+                        layer_cache["local_end_index"].item()
+                    )
+                    start_idx = max(0, end_idx - anchor_num_tokens)
+                    identity_anchor_kv.append({
+                        "k": layer_cache["k"][
+                            :, start_idx:end_idx
+                        ].clone().detach(),
+                        "v": layer_cache["v"][
+                            :, start_idx:end_idx
+                        ].clone().detach(),
+                    })
+                shared_dict_dual[
+                    "identity_anchor_kv"
+                ] = identity_anchor_kv
+                print(
+                    "IDENTITY_ANCHOR frozen "
+                    f"block={block_index} "
+                    f"tokens={anchor_num_tokens} "
+                    f"layers={len(identity_anchor_kv)}"
+                )
             if role_fixed_native_history:
                 if (
                     role_native_kv_history is None
