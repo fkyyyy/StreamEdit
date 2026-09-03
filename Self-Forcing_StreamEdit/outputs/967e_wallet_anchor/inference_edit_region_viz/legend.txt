@@ -1,0 +1,21 @@
+No GT object mask is used.
+runtime edit = selected posterior OR causal owner support
+target route = factorized flow target-owned action
+source closure = locations forced to clean-source reconstruction
+immutable target-KV owner = automatic clean-source RGB flow owner; retrieval support and correction are read-only first-block target appearance diagnostics
+pose-preserving immutable mode constrains only the residual direction coherent across first-block prototypes; current chunk retains orthogonal pose, view, boundary, and occlusion structure
+prototype entropy/peak diagnose unstable soft retrieval and are never fed back into inference
+KV read = native history applied read strength > 0
+KV write core = transactional write confidence >= 0.5
+topology completion is read-only and never enlarges KV write
+persistent direct = current high-confidence target write
+persistent retained = previous trusted target-source residual rebased at a mutually matched current source address
+persistent total = direct OR retained; retained tokens are not counted as new writes
+persistent guarded = a current direct proposal was rejected because it regressed relative to the last trusted residual
+source-flow role evidence uses clean-source RGB flow; flow magnitude alone never defines an object
+flow recovered = weak counterfactual role support recovered only inside the transported hand-conditioned owner
+962 sink admission = automatic owner AND clean-source candidate AND flow-supported appearance/local-transport trust
+962 target attention is evaluated only inside per-frame clean-source top-k candidates from the immutable first block
+962 selected frame reports which frozen ignition view received the largest candidate-restricted target-query attention mass
+flow transport confidence = confidence of the residual injected at the current clean-source coordinate
+flow ledger support/confidence = last-frame state committed for transport into the next causal block
