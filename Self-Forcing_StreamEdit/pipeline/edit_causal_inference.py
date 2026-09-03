@@ -8312,38 +8312,42 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             hand_role_debug.update(
                                 current_factorized_operators.as_debug_maps()
                             )
-                        inloop_trg_fg_mask = role_edit_tokens
+                        if not soft_region_modulation:
+                            inloop_trg_fg_mask = role_edit_tokens
                         src_fg_mask_map = self._mask_reshape(
-                            role_edit_tokens,
+                            role_edit_tokens
+                            if not soft_region_modulation
+                            else inloop_trg_fg_mask,
                             size=(current_num_frames, height, width),
                         )
-                        self._inject_masks_to_kv_cache(
-                            kv_cache_dual,
-                            trg_fg_mask_cache,
-                            role_edit_tokens,
-                            factorized_operator_cache=(
-                                factorized_operator_cache
-                                if factorized_bayes_enabled
-                                else None
-                            ),
-                            current_factorized_operators=(
-                                current_factorized_operators
-                            ),
-                            target_owned_mask_cache=(
-                                target_owned_mask_cache
-                            ),
-                            current_target_owned_mask=(
-                                current_target_owned_mask
-                                if target_owned_object_handoff
-                                else None
-                            ),
-                            current_identity_read_mask=(
-                                current_identity_read_mask
-                            ),
-                            current_causal_owner_mask=(
-                                current_memory_query_weight
-                            ),
-                        )
+                        if not soft_region_modulation:
+                            self._inject_masks_to_kv_cache(
+                                kv_cache_dual,
+                                trg_fg_mask_cache,
+                                role_edit_tokens,
+                                factorized_operator_cache=(
+                                    factorized_operator_cache
+                                    if factorized_bayes_enabled
+                                    else None
+                                ),
+                                current_factorized_operators=(
+                                    current_factorized_operators
+                                ),
+                                target_owned_mask_cache=(
+                                    target_owned_mask_cache
+                                ),
+                                current_target_owned_mask=(
+                                    current_target_owned_mask
+                                    if target_owned_object_handoff
+                                    else None
+                                ),
+                                current_identity_read_mask=(
+                                    current_identity_read_mask
+                                ),
+                                current_causal_owner_mask=(
+                                    current_memory_query_weight
+                                ),
+                            )
                     print(
                         "HAND_ROLE_FIELD "
                         "block="
@@ -8605,11 +8609,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         )
                         role_edit_tokens = (
                             role_edit_tokens
-                            | commitment_edit_tokens
                         )
-                        inloop_trg_fg_mask = role_edit_tokens
+                        if not soft_region_modulation:
+                            inloop_trg_fg_mask = role_edit_tokens
                         src_fg_mask_map = self._mask_reshape(
-                            role_edit_tokens,
+                            role_edit_tokens
+                            if not soft_region_modulation
+                            else inloop_trg_fg_mask,
                             size=(
                                 current_num_frames,
                                 height,
@@ -8726,9 +8732,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 -1,
                             )
                         )
-                        inloop_trg_fg_mask = role_edit_tokens
+                        if not soft_region_modulation:
+                            inloop_trg_fg_mask = role_edit_tokens
                         src_fg_mask_map = self._mask_reshape(
-                            role_edit_tokens,
+                            role_edit_tokens
+                            if not soft_region_modulation
+                            else inloop_trg_fg_mask,
                             size=(
                                 current_num_frames,
                                 height,
@@ -8914,9 +8923,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             role_edit_tokens = (
                                 role_edit_tokens | committed_memory_tokens
                             )
-                            inloop_trg_fg_mask = role_edit_tokens
+                            if not soft_region_modulation:
+                                inloop_trg_fg_mask = role_edit_tokens
                             src_fg_mask_map = self._mask_reshape(
-                                role_edit_tokens,
+                                role_edit_tokens
+                                if not soft_region_modulation
+                                else inloop_trg_fg_mask,
                                 size=(
                                     current_num_frames,
                                     height,
@@ -10278,8 +10290,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         )
                     # #endregion
                     if (
-                        consistent_role_kv_enabled
-                        or causal_ownership_enabled
+                        not soft_region_modulation
+                        and (
+                            consistent_role_kv_enabled
+                            or causal_ownership_enabled
+                        )
                     ):
                         inloop_trg_fg_mask = role_edit_tokens
                     self._inject_masks_to_kv_cache(
