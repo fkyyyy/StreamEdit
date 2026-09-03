@@ -978,9 +978,17 @@ class CausalWanSelfAttention(nn.Module):
                             native_key_list.append(
                                 src_current_key[b_idx][native_background]
                             )
-                            native_value_list.append(
-                                src_current_value[b_idx][native_background]
+                            suppress_source_bg = shared_dict.get(
+                                "suppress_source_bg_value", False
                             )
+                            if suppress_source_bg:
+                                native_value_list.append(
+                                    trg_current_value[b_idx][native_background]
+                                )
+                            else:
+                                native_value_list.append(
+                                    src_current_value[b_idx][native_background]
+                                )
                         native_key_list.append(
                             trg_current_key[b_idx] * blender_rate
                             + src_current_key[b_idx]
@@ -2375,7 +2383,13 @@ class CausalWanSelfAttention(nn.Module):
                     # t^inj=0.5
                     if kv_cache['shared_dict']['current_timestep_index'] > kv_cache['shared_dict']['total_timestep'] // 2:
                         b_src_current_bg_key = src_current_key[b_idx][b_src_current_bg_mask]        # [L_bg, Nh, Dk]
-                        b_src_current_bg_value = src_current_value[b_idx][b_src_current_bg_mask]    # [L_bg, Nh, Dv]
+                        suppress_source_bg_value = shared_dict.get(
+                            "suppress_source_bg_value", False
+                        )
+                        if suppress_source_bg_value:
+                            b_src_current_bg_value = trg_current_value[b_idx][b_src_current_bg_mask]
+                        else:
+                            b_src_current_bg_value = src_current_value[b_idx][b_src_current_bg_mask]
                         b_key_list.append(b_src_current_bg_key)
                         b_value_list.append(b_src_current_bg_value)
 

@@ -308,6 +308,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         soft_region_blend_strength: float = 0.5,
         first_block_identity_anchor: bool = False,
         identity_anchor_scale: float = 1.5,
+        suppress_source_bg_value: bool = False,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
         posterior_flow_mode: str = "soft",
@@ -809,6 +810,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 soft_region_blend_strength=soft_region_blend_strength,
                 first_block_identity_anchor=first_block_identity_anchor,
                 identity_anchor_scale=identity_anchor_scale,
+                suppress_source_bg_value=suppress_source_bg_value,
                 global_frame_indices=list(range(src_video.shape[1])),
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
@@ -2429,6 +2431,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     soft_region_blend_strength=soft_region_blend_strength,
                     first_block_identity_anchor=first_block_identity_anchor,
                 identity_anchor_scale=identity_anchor_scale,
+                suppress_source_bg_value=suppress_source_bg_value,
                     global_frame_indices=(
                         rollout_global_frame_indices[:proposal_frame_count]
                     ),
@@ -2950,6 +2953,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 soft_region_blend_strength=soft_region_blend_strength,
                 first_block_identity_anchor=first_block_identity_anchor,
                 identity_anchor_scale=identity_anchor_scale,
+                suppress_source_bg_value=suppress_source_bg_value,
                 global_frame_indices=rollout_global_frame_indices,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
@@ -3231,6 +3235,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         soft_region_blend_strength: float = 0.5,
         first_block_identity_anchor: bool = False,
         identity_anchor_scale: float = 1.5,
+        suppress_source_bg_value: bool = False,
         global_frame_indices: Optional[List[int]] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
@@ -5535,6 +5540,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
             
             # obtain currently inprocessed kv_cache for dual branch
             shared_dict_dual = dict()
+            if suppress_source_bg_value:
+                shared_dict_dual[
+                    "suppress_source_bg_value"
+                ] = True
             if persistent_identity_anchor_kv is not None:
                 shared_dict_dual[
                     "identity_anchor_kv"

@@ -1453,6 +1453,17 @@ if __name__ == '__main__':
             "to Helios Guidance Attention but training-free."
         ),
     )
+    parser.add_argument(
+        "--suppress_source_bg_value",
+        action="store_true",
+        default=False,
+        help=(
+            "Replace source background values with target background "
+            "values in the late injection (after t^inj=0.5). Source keys "
+            "remain unchanged so attention addressing is preserved, but "
+            "source appearance no longer leaks through the value path."
+        ),
+    )
     parser.add_argument("--mask_white_threshold", type=int, default=245)
     parser.add_argument(
         "--hand_mask_mode",
@@ -3399,6 +3410,7 @@ if __name__ == '__main__':
         soft_region_blend_strength=args.soft_region_blend_strength,
         first_block_identity_anchor=args.first_block_identity_anchor,
         identity_anchor_scale=args.identity_anchor_scale,
+        suppress_source_bg_value=args.suppress_source_bg_value,
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,
         posterior_flow_mode=args.posterior_flow_mode,
