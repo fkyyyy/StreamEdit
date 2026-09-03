@@ -2343,14 +2343,28 @@ class CausalWanSelfAttention(nn.Module):
 
                     b_key_list = []
                     b_value_list = []
-                    
+
+                    # Spatial blender rate: boost inside edit region
+                    spatial_blender = shared_dict.get(
+                        "spatial_blender_rate"
+                    )
+                    if spatial_blender is not None:
+                        current_blender = spatial_blender[b_idx]  # [Lq]
+                        # For previous KV: use scalar blender_rate (no spatial info for history tokens)
+                        prev_blender = blender_rate
+                        # For current KV and query: use spatial blender
+                        current_key_blender = current_blender.unsqueeze(-1).unsqueeze(-1)  # [Lq, 1, 1]
+                    else:
+                        prev_blender = blender_rate
+                        current_key_blender = blender_rate
+
                     #✨ masked-blended previous kv
                     b_trg_fg_mask = kv_cache["trg_fg_mask"][b_idx]                              # [L_cache_size, ]
                     b_trg_attn_fg_mask = b_trg_fg_mask[attn_seq_slice]                          # [L_attn_size, ]
                     b_trg_prev_fg_mask = b_trg_attn_fg_mask[: -num_new_tokens]
                     b_trg_prev_fg_key = trg_prev_key[b_idx]
-                    b_trg_prev_fg_key[b_trg_prev_fg_mask] = b_trg_prev_fg_key[b_trg_prev_fg_mask] * blender_rate \
-                        + src_prev_key[b_idx, b_trg_prev_fg_mask] * (1 - blender_rate)
+                    b_trg_prev_fg_key[b_trg_prev_fg_mask] = b_trg_prev_fg_key[b_trg_prev_fg_mask] * prev_blender \
+                        + src_prev_key[b_idx, b_trg_prev_fg_mask] * (1 - prev_blender)
                     b_trg_prev_fg_value = trg_prev_value[b_idx]
                     b_key_list.append(b_trg_prev_fg_key)
                     b_value_list.append(b_trg_prev_fg_value)
@@ -2368,7 +2382,7 @@ class CausalWanSelfAttention(nn.Module):
                     #✨ masked-blended current target condition
                     b_trg_current_key = trg_current_key[b_idx]                                  # [Lq, Nh, Dk]
                     b_trg_current_value = trg_current_value[b_idx]                              # [Lq, Nh, Dk]
-                    b_trg_current_key = b_trg_current_key * blender_rate + src_current_key[b_idx] * (1 - blender_rate)
+                    b_trg_current_key = b_trg_current_key * current_key_blender + src_current_key[b_idx] * (1 - current_key_blender)
                     b_key_list.append(b_trg_current_key)
                     b_value_list.append(b_trg_current_value)
 
@@ -2398,7 +2412,8 @@ class CausalWanSelfAttention(nn.Module):
                     b_trg_value = torch.cat(b_value_list, dim=0)
 
                     #✨ query blending
-                    b_query = trg_query[b_idx] * blender_rate + src_query[b_idx] * (1 - blender_rate)
+                    query_blender = current_key_blender if spatial_blender is not None else blender_rate
+                    b_query = trg_query[b_idx] * query_blender + src_query[b_idx] * (1 - query_blender)
                     b_target_output = attention(
                         b_query.unsqueeze(0),
                         b_trg_key.unsqueeze(0),

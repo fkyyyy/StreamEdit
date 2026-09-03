@@ -9450,6 +9450,28 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 f"source_suppression={suppression_mean:.4f} "
                                 f"effective_residual={effective_residual:.4f}"
                             )
+                        if soft_region_modulation and region_posterior is not None:
+                            blender_rate_scalar = (
+                                1.0
+                                - float(timestep_next)
+                                ** blend_power
+                            )
+                            region_flat = region_posterior.reshape(
+                                batch_size, -1
+                            ).clamp(0.0, 1.0)
+                            spatial_blender = (
+                                blender_rate_scalar
+                                + (1.0 - blender_rate_scalar)
+                                * soft_region_blend_strength
+                                * region_flat
+                            ).clamp(0.0, 1.0)
+                            shared_dict_dual[
+                                "spatial_blender_rate"
+                            ] = spatial_blender
+                        elif soft_region_modulation:
+                            shared_dict_dual.pop(
+                                "spatial_blender_rate", None
+                            )
                     else:
                         v_t, factorized_flow_debug = (
                             route_factorized_velocity(
