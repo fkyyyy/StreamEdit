@@ -10462,6 +10462,41 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     f"layers={len(identity_anchor_kv)} "
                     f"scale={identity_anchor_scale:.2f}"
                 )
+            if (
+                first_block_identity_anchor
+                and block_index > 0
+                and "identity_anchor_kv" in shared_dict_dual
+            ):
+                anchor_kv = shared_dict_dual["identity_anchor_kv"]
+                anchor_blend = 0.3
+                anchor_tokens = anchor_kv[0]["v"].shape[1]
+                for layer_idx in range(self.num_transformer_blocks):
+                    layer_cache = kv_cache_trg[layer_idx]
+                    end_idx = int(
+                        layer_cache["local_end_index"].item()
+                    )
+                    current_tokens = (
+                        current_num_frames * self.frame_seq_length
+                    )
+                    start_idx = max(0, end_idx - current_tokens)
+                    current_v = layer_cache["v"][
+                        :, start_idx:end_idx
+                    ]
+                    anchor_v = anchor_kv[layer_idx]["v"]
+                    if current_v.shape[1] == anchor_v.shape[1]:
+                        layer_cache["v"][
+                            :, start_idx:end_idx
+                        ] = (
+                            (1.0 - anchor_blend) * current_v
+                            + anchor_blend * anchor_v
+                        )
+                if block_index == 1:
+                    print(
+                        "ANCHOR_WRITE_CORRECTION "
+                        f"block={block_index} "
+                        f"blend={anchor_blend:.2f} "
+                        f"tokens={current_tokens}"
+                    )
             if role_fixed_native_history:
                 if (
                     role_native_kv_history is None
