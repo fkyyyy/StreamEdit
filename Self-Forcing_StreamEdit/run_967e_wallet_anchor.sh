@@ -12,8 +12,8 @@ DATA_PATH="${DATA_PATH:-$REPO_ROOT/source_video1.mp4}"
 HAND_MASK="${HAND_MASK:-$REPO_ROOT/hand_mask1.mp4}"
 FLOW_CACHE="${FLOW_CACHE:-$SCRIPT_DIR/outputs/952b_phone_to_cardboard_box/source_flow/raft_large_bidirectional_flow.pt}"
 PHONE_GT="${PHONE_GT:-$REPO_ROOT/phone_mask.mp4}"
-OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/967e6_anchor_write_correction}"
-OUTPUT_NAME="${OUTPUT_NAME:-967e6-anchor-write-correction.mp4}"
+OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/967e7_persistent_anchor}"
+OUTPUT_NAME="${OUTPUT_NAME:-967e7-persistent-anchor.mp4}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 CUDA_DEVICE="${CUDA_DEVICE:-7}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -120,7 +120,7 @@ COMMAND=(
   printf 'command='
   printf ' %q' "${COMMAND[@]}"
   printf '\n'
-} > "$OUTDIR/967e6_config.txt"
+} > "$OUTDIR/967e7_config.txt"
 
 echo "967E_EDIT smartphone → brown leather wallet"
 echo "967E_REGION auto flow-verified (no object mask)"

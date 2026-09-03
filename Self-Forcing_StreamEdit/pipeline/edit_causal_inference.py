@@ -5440,6 +5440,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         # Step 3: Temporal denoising loop
         denoising_step_list = self.denoising_step_list
         all_num_frames = [self.num_frame_per_block] * num_blocks
+        persistent_identity_anchor_kv = None
         if independent_first_frame and trg_initial_latent is None:
             all_num_frames = [1] + all_num_frames
         for current_num_frames in tqdm(all_num_frames):
@@ -5534,6 +5535,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
             
             # obtain currently inprocessed kv_cache for dual branch
             shared_dict_dual = dict()
+            if persistent_identity_anchor_kv is not None:
+                shared_dict_dual[
+                    "identity_anchor_kv"
+                ] = persistent_identity_anchor_kv
+                shared_dict_dual[
+                    "identity_anchor_scale"
+                ] = float(identity_anchor_scale)
             if role_fixed_native_history:
                 if role_native_kv_history is None:
                     raise RuntimeError(
@@ -10449,6 +10457,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             :, start_idx:end_idx
                         ].clone().detach(),
                     })
+                persistent_identity_anchor_kv = identity_anchor_kv
                 shared_dict_dual[
                     "identity_anchor_kv"
                 ] = identity_anchor_kv
@@ -10465,11 +10474,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
             if (
                 first_block_identity_anchor
                 and block_index > 0
-                and "identity_anchor_kv" in shared_dict_dual
+                and persistent_identity_anchor_kv is not None
             ):
-                anchor_kv = shared_dict_dual["identity_anchor_kv"]
+                anchor_kv = persistent_identity_anchor_kv
                 anchor_blend = 0.3
-                anchor_tokens = anchor_kv[0]["v"].shape[1]
+                corrected_layers = 0
                 for layer_idx in range(self.num_transformer_blocks):
                     layer_cache = kv_cache_trg[layer_idx]
                     end_idx = int(
@@ -10490,13 +10499,20 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             (1.0 - anchor_blend) * current_v
                             + anchor_blend * anchor_v
                         )
-                if block_index == 1:
-                    print(
-                        "ANCHOR_WRITE_CORRECTION "
-                        f"block={block_index} "
-                        f"blend={anchor_blend:.2f} "
-                        f"tokens={current_tokens}"
-                    )
+                        corrected_layers += 1
+                print(
+                    "ANCHOR_WRITE_CORRECTION "
+                    f"block={block_index} "
+                    f"blend={anchor_blend:.2f} "
+                    f"tokens={current_tokens} "
+                    f"layers={corrected_layers}/{self.num_transformer_blocks}"
+                )
+                shared_dict_dual[
+                    "identity_anchor_kv"
+                ] = persistent_identity_anchor_kv
+                shared_dict_dual[
+                    "identity_anchor_scale"
+                ] = float(identity_anchor_scale)
             if role_fixed_native_history:
                 if (
                     role_native_kv_history is None
