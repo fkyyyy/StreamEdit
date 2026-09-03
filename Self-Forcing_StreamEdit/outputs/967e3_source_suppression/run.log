@@ -1,0 +1,227 @@
+/usr/local/lib/python3.11/dist-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (1.26.20) or chardet (7.4.3)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+Free VRAM 78.9140625 GB
+KV inference with 3 frames per block
+81 960 1280
+MOTION_GEOMETRY_INPUT_CONTRACT clean_source_rgb_flow=enabled external_hand_mask=enabled external_object_mask=disabled external_source_owner_mask=disabled latent_frames=21 cache=/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/outputs/952b_phone_to_cardboard_box/source_flow/raft_large_bidirectional_flow.pt
+MASK_TEMPORAL_ALIGNMENT mode=causal_first_frame_then_stride pixel_frames=81 latent_frames=21 temporal_stride=4
+HAND_ROLE_INPUT hand_pixel=0.0496 hand_latent=0.0503 causal_evidence=1 occupancy=0.0496 persistent=0.0437 hand_mode=overlay_white artifact=/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/outputs/967e3_source_suppression/967e3-source-suppression.hand_role_input.npz
+HAND_ROLE_ADAPTIVE online_radius=True online_visibility=True online_temporal=True online_threshold=True online_field_reliability=True
+FACTORIZED_BAYES_BRIDGE roles=object,boundary,hand,background,unknown provenance=source,target,unknown operators=source_key,source_value,source_residual,target_memory attention=asymmetric_qk_value unknown=native_streamgve
+CAUSAL_OBJECT_OWNERSHIP ignition=text_hand_interaction transport=bidirectional_source_rgb_raft camera_motion=background_median velocity_role=counterfactual_edit_response provenance=target_value_target_residual absence=no_write_keep_reassociation_state
+NATIVE_TARGET_HISTORY_MODE attention=native_streamgve_dense_clean_target factorized_attention=counterfactual_only immutable_kv_write=disabled owner_source_block=0
+[[23]] [[23, 24, 25]]
+  0%|          | 0/7 [00:00<?, ?it/s]SOURCE_FLOW_ROLE_FUSION block=0 external_object_mask=disabled flow=clean_source_rgb_camera_compensated object=0.0625 background=0.5777 boundary=0.0716 unknown=0.0900 recovered=0.0118
+SOURCE_FLOW_VERIFIED_REGION block=0 external_object_mask=disabled radius=2 proposal=0.1024 verified=0.0780 background_veto=0.2921 hand_exclusion=0.0543
+CAUSAL_OWNER_FLOW block=0 observation=0.0817 transport=0.0427 owner=0.0646 support=0.0780 source=hand_conditioned_raft_geometry visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=0 edit_tokens=0.0780 visible=1.0000 temporal=0.0178 adaptive=1 object=0.0613 boundary=0.0020 hand=0.0459 background=0.8908 radius=3.000 attention_reliability=0.999 threshold=0.535 budget=0.165
+FACTORIZED_OPERATOR block=0 source_key=0.9488 source_value=0.8426 source_residual=0.8426 target_memory=0.1062 unknown=0.0512
+CAUSAL_OWNER_OPERATOR block=0 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:03<00:45,  3.23s/it][A
+ 13%|█▎        | 2/15 [00:03<00:20,  1.57s/it][A
+ 20%|██        | 3/15 [00:04<00:12,  1.04s/it][A
+ 27%|██▋       | 4/15 [00:04<00:08,  1.27it/s][A
+ 33%|███▎      | 5/15 [00:04<00:06,  1.53it/s][A
+ 40%|████      | 6/15 [00:05<00:05,  1.76it/s][A
+ 47%|████▋     | 7/15 [00:05<00:04,  1.94it/s][A
+ 53%|█████▎    | 8/15 [00:06<00:03,  2.06it/s][A
+ 60%|██████    | 9/15 [00:06<00:02,  2.13it/s][A
+ 67%|██████▋   | 10/15 [00:06<00:02,  2.18it/s][A
+ 73%|███████▎  | 11/15 [00:07<00:01,  2.22it/s][A
+ 80%|████████  | 12/15 [00:07<00:01,  2.25it/s][A
+ 87%|████████▋ | 13/15 [00:08<00:00,  2.27it/s][A
+ 93%|█████████▎| 14/15 [00:08<00:00,  2.28it/s][A
+100%|██████████| 15/15 [00:09<00:00,  2.29it/s][A
+                                               [A 14%|█▍        | 1/7 [00:10<01:02, 10.44s/it]NATIVE_TARGET_HISTORY block=0 selected=1 dense_read=1.0000 counterfactual_factorized_read=1.0000 owner_output_gap=0.0822 owner_coverage=0.0780 owner_source_block=0
+HAND_ROLE_FIELD block=0 mode=adaptive applied=0 edit_tokens=0.0780 field=0.1724 observation=0.0020 reliability=0.0365
+CAUSAL_CONTROL_BELIEF block=0 edit=0.0633 preserve=0.9274 edit_precision=0.4631 preserve_precision=0.9460 conflict=0.0203 uncertainty=0.0195
+SOFT_REGION_MODULATION block=0 blend_strength=1.00 region_coverage=0.0633 bg_mask_mean=0.8398 source_suppression=0.0633 effective_residual=0.7900
+FACTORIZED_FLOW block=0 source_residual=0.8398 unknown=0.0000 native_fallback=0.8398 effective=0.7900 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=0 blocked=0 fallback=0.0000
+IDENTITY_ANCHOR frozen block=0 tokens=4680 layers=30 scale=1.50
+NATIVE_TARGET_KV_COMMIT block=0 owner_tokens=365 owner_key_cosine=0.8852 owner_value_cosine=0.4570 immutable_write=0
+SOURCE_FLOW_ROLE_FUSION block=1 external_object_mask=disabled flow=clean_source_rgb_camera_compensated object=0.0698 background=0.4398 boundary=0.0718 unknown=0.0931 recovered=0.0212
+SOURCE_FLOW_VERIFIED_REGION block=1 external_object_mask=disabled radius=2 proposal=0.1028 verified=0.0861 background_veto=0.0017 hand_exclusion=0.0564
+CAUSAL_OWNER_FLOW block=1 observation=0.0738 transport=0.0682 owner=0.0652 support=0.0842 source=hand_conditioned_raft_geometry visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=1 edit_tokens=0.0861 visible=1.0000 temporal=0.0254 adaptive=1 object=0.0562 boundary=0.0021 hand=0.0482 background=0.8935 radius=3.333 attention_reliability=0.991 threshold=0.309 budget=0.165
+FACTORIZED_OPERATOR block=1 source_key=0.9306 source_value=0.8087 source_residual=0.8087 target_memory=0.1220 unknown=0.0694
+CAUSAL_OWNER_OPERATOR block=1 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:03<00:46,  3.31s/it][A
+ 13%|█▎        | 2/15 [00:03<00:21,  1.67s/it][A
+ 20%|██        | 3/15 [00:04<00:13,  1.14s/it][A
+ 27%|██▋       | 4/15 [00:04<00:09,  1.11it/s][A
+ 33%|███▎      | 5/15 [00:05<00:07,  1.31it/s][A
+ 40%|████      | 6/15 [00:05<00:06,  1.47it/s][A
+ 47%|████▋     | 7/15 [00:06<00:05,  1.60it/s][A
+ 53%|█████▎    | 8/15 [00:06<00:04,  1.67it/s][A
+ 60%|██████    | 9/15 [00:07<00:03,  1.72it/s][A
+ 67%|██████▋   | 10/15 [00:08<00:02,  1.75it/s][A
+ 73%|███████▎  | 11/15 [00:08<00:02,  1.78it/s][A
+ 80%|████████  | 12/15 [00:09<00:01,  1.79it/s][A
+ 87%|████████▋ | 13/15 [00:09<00:01,  1.80it/s][A
+ 93%|█████████▎| 14/15 [00:10<00:00,  1.81it/s][A
+100%|██████████| 15/15 [00:10<00:00,  1.82it/s][A
+                                               [A 29%|██▊       | 2/7 [00:22<00:56, 11.38s/it]NATIVE_TARGET_HISTORY block=1 selected=1 dense_read=1.0000 counterfactual_factorized_read=1.0000 owner_output_gap=0.0235 owner_coverage=0.0842 owner_source_block=0
+HAND_ROLE_FIELD block=1 mode=adaptive applied=0 edit_tokens=0.0861 field=0.0931 observation=0.0208 reliability=0.4286
+CAUSAL_CONTROL_BELIEF block=1 edit=0.0583 preserve=0.9263 edit_precision=0.3603 preserve_precision=0.9441 conflict=0.0218 uncertainty=0.0329
+SOFT_REGION_MODULATION block=1 blend_strength=1.00 region_coverage=0.0583 bg_mask_mean=0.9375 source_suppression=0.0583 effective_residual=0.9068
+FACTORIZED_FLOW block=1 source_residual=0.9375 unknown=0.0000 native_fallback=0.9375 effective=0.9068 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=1 blocked=0 fallback=0.0000
+NATIVE_TARGET_KV_COMMIT block=1 owner_tokens=394 owner_key_cosine=0.8410 owner_value_cosine=0.5493 immutable_write=0
+SOURCE_FLOW_ROLE_FUSION block=2 external_object_mask=disabled flow=clean_source_rgb_camera_compensated object=0.0602 background=0.5049 boundary=0.0575 unknown=0.1156 recovered=0.0190
+SOURCE_FLOW_VERIFIED_REGION block=2 external_object_mask=disabled radius=2 proposal=0.1182 verified=0.0981 background_veto=0.7509 hand_exclusion=0.0519
+CAUSAL_OWNER_FLOW block=2 observation=0.0856 transport=0.0659 owner=0.0604 support=0.0921 source=hand_conditioned_raft_geometry visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=2 edit_tokens=0.0981 visible=1.0000 temporal=0.0227 adaptive=1 object=0.0625 boundary=0.0045 hand=0.0457 background=0.8873 radius=4.000 attention_reliability=0.986 threshold=0.286 budget=0.201
+FACTORIZED_OPERATOR block=2 source_key=0.9226 source_value=0.7899 source_residual=0.7899 target_memory=0.1327 unknown=0.0774
+CAUSAL_OWNER_OPERATOR block=2 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:03<00:48,  3.44s/it][A
+ 13%|█▎        | 2/15 [00:04<00:23,  1.78s/it][A
+ 20%|██        | 3/15 [00:04<00:15,  1.25s/it][A
+ 27%|██▋       | 4/15 [00:05<00:11,  1.01s/it][A
+ 33%|███▎      | 5/15 [00:05<00:08,  1.15it/s][A
+ 40%|████      | 6/15 [00:06<00:07,  1.27it/s][A
+ 47%|████▋     | 7/15 [00:07<00:05,  1.36it/s][A
+ 53%|█████▎    | 8/15 [00:07<00:04,  1.42it/s][A
+ 60%|██████    | 9/15 [00:08<00:04,  1.46it/s][A
+ 67%|██████▋   | 10/15 [00:09<00:03,  1.48it/s][A
+ 73%|███████▎  | 11/15 [00:09<00:02,  1.50it/s][A
+ 80%|████████  | 12/15 [00:10<00:01,  1.51it/s][A
+ 87%|████████▋ | 13/15 [00:11<00:01,  1.52it/s][A
+ 93%|█████████▎| 14/15 [00:11<00:00,  1.52it/s][A
+100%|██████████| 15/15 [00:12<00:00,  1.52it/s][A
+                                               [A 43%|████▎     | 3/7 [00:36<00:49, 12.45s/it]NATIVE_TARGET_HISTORY block=2 selected=1 dense_read=1.0000 counterfactual_factorized_read=1.0000 owner_output_gap=0.0255 owner_coverage=0.0921 owner_source_block=0
+HAND_ROLE_FIELD block=2 mode=adaptive applied=0 edit_tokens=0.0981 field=0.0835 observation=0.0193 reliability=0.3189
+CAUSAL_CONTROL_BELIEF block=2 edit=0.0670 preserve=0.9027 edit_precision=0.4270 preserve_precision=0.9335 conflict=0.0257 uncertainty=0.0402
+SOFT_REGION_MODULATION block=2 blend_strength=1.00 region_coverage=0.0670 bg_mask_mean=0.9453 source_suppression=0.0670 effective_residual=0.9083
+FACTORIZED_FLOW block=2 source_residual=0.9453 unknown=0.0000 native_fallback=0.9453 effective=0.9083 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=2 blocked=0 fallback=0.0000
+NATIVE_TARGET_KV_COMMIT block=2 owner_tokens=431 owner_key_cosine=0.8412 owner_value_cosine=0.5410 immutable_write=0
+SOURCE_FLOW_ROLE_FUSION block=3 external_object_mask=disabled flow=clean_source_rgb_camera_compensated object=0.0685 background=0.4601 boundary=0.0633 unknown=0.0994 recovered=0.0329
+SOURCE_FLOW_VERIFIED_REGION block=3 external_object_mask=disabled radius=2 proposal=0.1154 verified=0.1111 background_veto=0.2182 hand_exclusion=0.0509
+CAUSAL_OWNER_FLOW block=3 observation=0.0821 transport=0.0660 owner=0.0588 support=0.1011 source=hand_conditioned_raft_geometry visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=3 edit_tokens=0.1111 visible=1.0000 temporal=0.0291 adaptive=1 object=0.0661 boundary=0.0026 hand=0.0439 background=0.8874 radius=3.333 attention_reliability=0.972 threshold=0.280 budget=0.188
+FACTORIZED_OPERATOR block=3 source_key=0.9200 source_value=0.7746 source_residual=0.7746 target_memory=0.1455 unknown=0.0800
+CAUSAL_OWNER_OPERATOR block=3 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:03<00:49,  3.53s/it][A
+ 13%|█▎        | 2/15 [00:04<00:24,  1.89s/it][A
+ 20%|██        | 3/15 [00:04<00:16,  1.36s/it][A
+ 27%|██▋       | 4/15 [00:05<00:12,  1.11s/it][A
+ 33%|███▎      | 5/15 [00:06<00:09,  1.02it/s][A
+ 40%|████      | 6/15 [00:07<00:08,  1.12it/s][A
+ 47%|████▋     | 7/15 [00:07<00:06,  1.19it/s][A
+ 53%|█████▎    | 8/15 [00:08<00:05,  1.23it/s][A
+ 60%|██████    | 9/15 [00:09<00:04,  1.26it/s][A
+ 67%|██████▋   | 10/15 [00:10<00:03,  1.27it/s][A
+ 73%|███████▎  | 11/15 [00:10<00:03,  1.29it/s][A
+ 80%|████████  | 12/15 [00:11<00:02,  1.29it/s][A
+ 87%|████████▋ | 13/15 [00:12<00:01,  1.30it/s][A
+ 93%|█████████▎| 14/15 [00:13<00:00,  1.30it/s][A
+100%|██████████| 15/15 [00:14<00:00,  1.31it/s][A
+                                               [A 57%|█████▋    | 4/7 [00:51<00:40, 13.62s/it]NATIVE_TARGET_HISTORY block=3 selected=1 dense_read=1.0000 counterfactual_factorized_read=1.0000 owner_output_gap=0.0231 owner_coverage=0.1011 owner_source_block=0
+HAND_ROLE_FIELD block=3 mode=adaptive applied=0 edit_tokens=0.1111 field=0.0796 observation=0.0172 reliability=0.3465
+CAUSAL_CONTROL_BELIEF block=3 edit=0.0687 preserve=0.9071 edit_precision=0.3975 preserve_precision=0.9180 conflict=0.0256 uncertainty=0.0579
+SOFT_REGION_MODULATION block=3 blend_strength=1.00 region_coverage=0.0687 bg_mask_mean=0.9414 source_suppression=0.0687 effective_residual=0.9039
+FACTORIZED_FLOW block=3 source_residual=0.9414 unknown=0.0000 native_fallback=0.9414 effective=0.9039 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=3 blocked=0 fallback=0.0000
+NATIVE_TARGET_KV_COMMIT block=3 owner_tokens=473 owner_key_cosine=0.8584 owner_value_cosine=0.6052 immutable_write=0
+SOURCE_FLOW_ROLE_FUSION block=4 external_object_mask=disabled flow=clean_source_rgb_camera_compensated object=0.0628 background=0.4999 boundary=0.0561 unknown=0.1153 recovered=0.0308
+SOURCE_FLOW_VERIFIED_REGION block=4 external_object_mask=disabled radius=2 proposal=0.1226 verified=0.1158 background_veto=0.5030 hand_exclusion=0.0543
+CAUSAL_OWNER_FLOW block=4 observation=0.0857 transport=0.0672 owner=0.0593 support=0.1090 source=hand_conditioned_raft_geometry visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=4 edit_tokens=0.1158 visible=1.0000 temporal=0.0294 adaptive=1 object=0.0658 boundary=0.0051 hand=0.0474 background=0.8818 radius=3.667 attention_reliability=0.979 threshold=0.272 budget=0.193
+FACTORIZED_OPERATOR block=4 source_key=0.9327 source_value=0.7811 source_residual=0.7811 target_memory=0.1516 unknown=0.0673
+CAUSAL_OWNER_OPERATOR block=4 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:03<00:51,  3.66s/it][A
+ 13%|█▎        | 2/15 [00:04<00:25,  2.00s/it][A
+ 20%|██        | 3/15 [00:05<00:17,  1.47s/it][A
+ 27%|██▋       | 4/15 [00:06<00:13,  1.22s/it][A
+ 33%|███▎      | 5/15 [00:07<00:10,  1.08s/it][A
+ 40%|████      | 6/15 [00:07<00:09,  1.00s/it][A
+ 47%|████▋     | 7/15 [00:08<00:07,  1.05it/s][A
+ 53%|█████▎    | 8/15 [00:09<00:06,  1.09it/s][A
+ 60%|██████    | 9/15 [00:10<00:05,  1.11it/s][A
+ 67%|██████▋   | 10/15 [00:11<00:04,  1.12it/s][A
+ 73%|███████▎  | 11/15 [00:12<00:03,  1.13it/s][A
+ 80%|████████  | 12/15 [00:13<00:02,  1.14it/s][A
+ 87%|████████▋ | 13/15 [00:13<00:01,  1.14it/s][A
+ 93%|█████████▎| 14/15 [00:14<00:00,  1.14it/s][A
+100%|██████████| 15/15 [00:15<00:00,  1.14it/s][A
+                                               [A 71%|███████▏  | 5/7 [01:08<00:29, 14.88s/it]NATIVE_TARGET_HISTORY block=4 selected=1 dense_read=1.0000 counterfactual_factorized_read=1.0000 owner_output_gap=0.0256 owner_coverage=0.1090 owner_source_block=0
+HAND_ROLE_FIELD block=4 mode=adaptive applied=0 edit_tokens=0.1158 field=0.0772 observation=0.0218 reliability=0.3661
+CAUSAL_CONTROL_BELIEF block=4 edit=0.0708 preserve=0.9113 edit_precision=0.3903 preserve_precision=0.9249 conflict=0.0297 uncertainty=0.0540
+SOFT_REGION_MODULATION block=4 blend_strength=1.00 region_coverage=0.0708 bg_mask_mean=0.9453 source_suppression=0.0708 effective_residual=0.9026
+FACTORIZED_FLOW block=4 source_residual=0.9453 unknown=0.0000 native_fallback=0.9453 effective=0.9026 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=4 blocked=0 fallback=0.0000
+NATIVE_TARGET_KV_COMMIT block=4 owner_tokens=510 owner_key_cosine=0.8894 owner_value_cosine=0.6998 immutable_write=0
+SOURCE_FLOW_ROLE_FUSION block=5 external_object_mask=disabled flow=clean_source_rgb_camera_compensated object=0.0601 background=0.4290 boundary=0.0512 unknown=0.1238 recovered=0.0329
+SOURCE_FLOW_VERIFIED_REGION block=5 external_object_mask=disabled radius=2 proposal=0.1141 verified=0.1152 background_veto=0.0015 hand_exclusion=0.0558
+CAUSAL_OWNER_FLOW block=5 observation=0.0817 transport=0.0660 owner=0.0582 support=0.1124 source=hand_conditioned_raft_geometry visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=5 edit_tokens=0.1152 visible=1.0000 temporal=0.0326 adaptive=1 object=0.0697 boundary=0.0018 hand=0.0472 background=0.8813 radius=3.333 attention_reliability=0.990 threshold=0.248 budget=0.184
+FACTORIZED_OPERATOR block=5 source_key=0.9299 source_value=0.7764 source_residual=0.7764 target_memory=0.1536 unknown=0.0701
+CAUSAL_OWNER_OPERATOR block=5 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:03<00:52,  3.78s/it][A
+ 13%|█▎        | 2/15 [00:04<00:27,  2.11s/it][A
+ 20%|██        | 3/15 [00:05<00:18,  1.58s/it][A
+ 27%|██▋       | 4/15 [00:06<00:14,  1.33s/it][A
+ 33%|███▎      | 5/15 [00:07<00:11,  1.20s/it][A
+ 40%|████      | 6/15 [00:08<00:10,  1.11s/it][A
+ 47%|████▋     | 7/15 [00:09<00:08,  1.06s/it][A
+ 53%|█████▎    | 8/15 [00:10<00:07,  1.03s/it][A
+ 60%|██████    | 9/15 [00:11<00:06,  1.02s/it][A
+ 67%|██████▋   | 10/15 [00:12<00:05,  1.01s/it][A
+ 73%|███████▎  | 11/15 [00:13<00:03,  1.00it/s][A
+ 80%|████████  | 12/15 [00:14<00:02,  1.01it/s][A
+ 87%|████████▋ | 13/15 [00:15<00:01,  1.01it/s][A
+ 93%|█████████▎| 14/15 [00:16<00:00,  1.01it/s][A
+100%|██████████| 15/15 [00:17<00:00,  1.01it/s][A
+                                               [A 86%|████████▌ | 6/7 [01:27<00:16, 16.23s/it]NATIVE_TARGET_HISTORY block=5 selected=1 dense_read=1.0000 counterfactual_factorized_read=1.0000 owner_output_gap=0.0244 owner_coverage=0.1124 owner_source_block=0
+HAND_ROLE_FIELD block=5 mode=adaptive applied=0 edit_tokens=0.1152 field=0.0764 observation=0.0201 reliability=0.3468
+CAUSAL_CONTROL_BELIEF block=5 edit=0.0715 preserve=0.9107 edit_precision=0.4021 preserve_precision=0.9287 conflict=0.0239 uncertainty=0.0410
+SOFT_REGION_MODULATION block=5 blend_strength=1.00 region_coverage=0.0715 bg_mask_mean=0.9414 source_suppression=0.0715 effective_residual=0.9045
+FACTORIZED_FLOW block=5 source_residual=0.9414 unknown=0.0000 native_fallback=0.9414 effective=0.9045 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=5 blocked=0 fallback=0.0000
+NATIVE_TARGET_KV_COMMIT block=5 owner_tokens=526 owner_key_cosine=0.9218 owner_value_cosine=0.7765 immutable_write=0
+SOURCE_FLOW_ROLE_FUSION block=6 external_object_mask=disabled flow=clean_source_rgb_camera_compensated object=0.0585 background=0.4624 boundary=0.0616 unknown=0.1097 recovered=0.0340
+SOURCE_FLOW_VERIFIED_REGION block=6 external_object_mask=disabled radius=2 proposal=0.1113 verified=0.1132 background_veto=0.3487 hand_exclusion=0.0568
+CAUSAL_OWNER_FLOW block=6 observation=0.0766 transport=0.0555 owner=0.0469 support=0.1047 source=hand_conditioned_raft_geometry visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=6 edit_tokens=0.1132 visible=1.0000 temporal=0.0206 adaptive=1 object=0.0651 boundary=0.0018 hand=0.0488 background=0.8843 radius=3.333 attention_reliability=0.979 threshold=0.235 budget=0.180
+FACTORIZED_OPERATOR block=6 source_key=0.9315 source_value=0.7774 source_residual=0.7774 target_memory=0.1540 unknown=0.0685
+CAUSAL_OWNER_OPERATOR block=6 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:03<00:54,  3.93s/it][A
+ 13%|█▎        | 2/15 [00:04<00:29,  2.24s/it][A
+ 20%|██        | 3/15 [00:06<00:20,  1.70s/it][A
+ 27%|██▋       | 4/15 [00:07<00:15,  1.45s/it][A
+ 33%|███▎      | 5/15 [00:08<00:13,  1.31s/it][A
+ 40%|████      | 6/15 [00:09<00:11,  1.23s/it][A
+ 47%|████▋     | 7/15 [00:10<00:09,  1.17s/it][A
+ 53%|█████▎    | 8/15 [00:11<00:07,  1.14s/it][A
+ 60%|██████    | 9/15 [00:12<00:06,  1.12s/it][A
+ 67%|██████▋   | 10/15 [00:13<00:05,  1.11s/it][A
+ 73%|███████▎  | 11/15 [00:14<00:04,  1.11s/it][A
+ 80%|████████  | 12/15 [00:15<00:03,  1.10s/it][A
+ 87%|████████▋ | 13/15 [00:16<00:02,  1.10s/it][A
+ 93%|█████████▎| 14/15 [00:17<00:01,  1.09s/it][A
+100%|██████████| 15/15 [00:18<00:00,  1.09s/it][A
+                                               [A100%|██████████| 7/7 [01:48<00:00, 17.66s/it]100%|██████████| 7/7 [01:48<00:00, 15.46s/it]
+/usr/local/lib/python3.11/dist-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+NATIVE_TARGET_HISTORY block=6 selected=1 dense_read=1.0000 counterfactual_factorized_read=1.0000 owner_output_gap=0.0218 owner_coverage=0.1047 owner_source_block=0
+HAND_ROLE_FIELD block=6 mode=adaptive applied=0 edit_tokens=0.1132 field=0.0817 observation=0.0144 reliability=0.2376
+CAUSAL_CONTROL_BELIEF block=6 edit=0.0669 preserve=0.9144 edit_precision=0.4602 preserve_precision=0.9234 conflict=0.0234 uncertainty=0.0473
+SOFT_REGION_MODULATION block=6 blend_strength=1.00 region_coverage=0.0669 bg_mask_mean=0.9414 source_suppression=0.0669 effective_residual=0.9024
+FACTORIZED_FLOW block=6 source_residual=0.9414 unknown=0.0000 native_fallback=0.9414 effective=0.9024 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=6 blocked=0 fallback=0.0000
+NATIVE_TARGET_KV_COMMIT block=6 owner_tokens=490 owner_key_cosine=0.9195 owner_value_cosine=0.7237 immutable_write=0
