@@ -3230,6 +3230,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         soft_region_modulation: bool = False,
         soft_region_blend_strength: float = 0.5,
         first_block_identity_anchor: bool = False,
+        identity_anchor_scale: float = 1.5,
         global_frame_indices: Optional[List[int]] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
