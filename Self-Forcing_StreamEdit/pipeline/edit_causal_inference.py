@@ -9377,11 +9377,31 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     native_background_action = 1.0 - native_change
                     if soft_region_modulation:
                         bg_mask = native_background_action
-                        region_posterior = hand_role_debug.get(
-                            "source_flow_verified_posterior",
+                        raw_posterior = hand_role_debug.get(
+                            "object_posterior_pre_source_flow",
                             hand_role_debug.get("object_posterior"),
                         )
-                        if region_posterior is not None:
+                        flow_boost = hand_role_debug.get(
+                            "source_flow_verified_support",
+                        )
+                        hand_excl = hand_role_debug.get(
+                            "hand_hard_exclusion",
+                        )
+                        if raw_posterior is not None:
+                            region_posterior = raw_posterior.float(
+                            ).clamp(0.0, 1.0)
+                            if flow_boost is not None:
+                                flow_support = flow_boost.float(
+                                ).clamp(0.0, 1.0)
+                                region_posterior = torch.maximum(
+                                    region_posterior, flow_support
+                                )
+                            if hand_excl is not None:
+                                region_posterior = region_posterior * (
+                                    1.0 - hand_excl.float().clamp(
+                                        0.0, 1.0
+                                    )
+                                )
                             region_confidence = F.interpolate(
                                 region_posterior.float()
                                 .reshape(
