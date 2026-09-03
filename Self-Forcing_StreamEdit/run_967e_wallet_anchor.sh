@@ -30,6 +30,8 @@ VERIFIED_OWNER_RADIUS="${VERIFIED_OWNER_RADIUS:-1}"
 BACKGROUND_VETO_THRESHOLD="${BACKGROUND_VETO_THRESHOLD:-0.55}"
 BACKGROUND_VETO_MIN_CONFIDENCE="${BACKGROUND_VETO_MIN_CONFIDENCE:-0.50}"
 SOFT_REGION_BLEND_STRENGTH="${SOFT_REGION_BLEND_STRENGTH:-0.5}"
+IDENTITY_ANCHOR_SCALE="${IDENTITY_ANCHOR_SCALE:-1.5}"
+VERIFIED_OWNER_RADIUS="${VERIFIED_OWNER_RADIUS:-2}"
 
 readonly SRC_PROMPT='First-person POV shot, wide-angle lens. A person is relaxing on a beige sofa, holding a smartphone with both hands and actively scrolling through a calendar app interface. An open silver laptop rests on their lap, displaying a screen filled with blue technical diagrams or data charts. In the mid-ground, a pair of feet wearing white socks are propped up on a dark wooden coffee table, which is scattered with small white puzzle pieces. The background features a spacious, modern living room with a dark staircase on the left, a large black TV on a wooden cabinet, and two blue armchairs near a bright glass door on the right. Bright natural daylight, realistic 4k video style, slight fish-eye effect.'
 readonly TRG_PROMPT='First-person POV shot, wide-angle lens. A person is relaxing on a beige sofa, holding a brown leather wallet with both hands, casually flipping it open. The wallet is a classic bifold design made of rich, dark brown genuine leather with visible grain texture and neat stitching along the edges. It has a slightly worn, warm patina on the surface. Beneath the wallet, an open silver laptop rests on their lap, displaying a screen filled with blue technical diagrams. In the mid-ground, a pair of feet wearing white socks are propped up on a dark wooden coffee table scattered with small white puzzle pieces. The background features a spacious, modern living room with a dark staircase on the left, a large black TV on a wooden cabinet, and two blue armchairs near a bright glass door on the right. Bright natural daylight, realistic 4k video style, slight fish-eye effect.'
@@ -81,8 +83,9 @@ COMMAND=(
   --soft_region_modulation
   --soft_region_blend_strength "$SOFT_REGION_BLEND_STRENGTH"
 
-  # Identity anchor: freeze block 0 target KV
+  # Identity anchor: freeze block 0 target KV with amplified keys
   --first_block_identity_anchor
+  --identity_anchor_scale "$IDENTITY_ANCHOR_SCALE"
 
   # Keep native StreamGVE dense clean-target history
   --factorized_native_target_history
@@ -106,10 +109,11 @@ COMMAND=(
     'edit=smartphone_to_brown_leather_wallet' \
     'semantic_region=token_proposal_only' \
     'region_usage=soft_velocity_modulation' \
-    'identity_anchor=frozen_first_block_target_kv' \
+    'identity_anchor=frozen_first_block_amplified_keys' \
     'kv_metadata=legacy_cross_attention_union' \
     'external_hand_mask=enabled' \
     'external_object_mask=disabled' \
+    "identity_anchor_scale=$IDENTITY_ANCHOR_SCALE" \
     "soft_region_blend_strength=$SOFT_REGION_BLEND_STRENGTH" \
     "data_path=$DATA_PATH" \
     "hand_mask=$HAND_MASK" \
@@ -121,7 +125,7 @@ COMMAND=(
 
 echo "967E_EDIT smartphone → brown leather wallet"
 echo "967E_REGION auto flow-verified (no object mask)"
-echo "967E_ANCHOR frozen_first_block_target_kv"
+echo "967E_ANCHOR frozen_first_block scale=$IDENTITY_ANCHOR_SCALE"
 echo "967E_OUTPUT $OUTDIR/$OUTPUT_NAME"
 
 if [[ "$DRY_RUN" == 1 ]]; then

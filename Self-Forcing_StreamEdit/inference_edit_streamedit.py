@@ -1442,6 +1442,17 @@ if __name__ == '__main__':
             "identity drift."
         ),
     )
+    parser.add_argument(
+        "--identity_anchor_scale",
+        type=float,
+        default=1.5,
+        help=(
+            "Multiplicative scaling applied to anchor keys before "
+            "attention. Values > 1 amplify anchor influence, counteracting "
+            "the natural dilution as more blocks are committed. Analogous "
+            "to Helios Guidance Attention but training-free."
+        ),
+    )
     parser.add_argument("--mask_white_threshold", type=int, default=245)
     parser.add_argument(
         "--hand_mask_mode",
@@ -3387,6 +3398,7 @@ if __name__ == '__main__':
         soft_region_modulation=args.soft_region_modulation,
         soft_region_blend_strength=args.soft_region_blend_strength,
         first_block_identity_anchor=args.first_block_identity_anchor,
+        identity_anchor_scale=args.identity_anchor_scale,
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,
         posterior_flow_mode=args.posterior_flow_mode,

@@ -2378,11 +2378,15 @@ class CausalWanSelfAttention(nn.Module):
                     )
                     if identity_anchor is not None:
                         anchor_layer = identity_anchor[layer_index]
-                        b_key_list.append(
-                            anchor_layer["k"][b_idx].to(
-                                b_trg_current_key.dtype
-                            )
+                        anchor_scale = shared_dict.get(
+                            "identity_anchor_scale", 1.0
                         )
+                        anchor_k = anchor_layer["k"][b_idx].to(
+                            b_trg_current_key.dtype
+                        )
+                        if anchor_scale != 1.0:
+                            anchor_k = anchor_k * anchor_scale
+                        b_key_list.append(anchor_k)
                         b_value_list.append(
                             anchor_layer["v"][b_idx].to(
                                 b_trg_current_value.dtype
