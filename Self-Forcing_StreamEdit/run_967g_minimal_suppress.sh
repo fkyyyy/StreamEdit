@@ -10,8 +10,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 DATA_PATH="${DATA_PATH:-$REPO_ROOT/source_video1.mp4}"
-OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/967g_minimal_suppress}"
-OUTPUT_NAME="${OUTPUT_NAME:-967g-minimal-suppress.mp4}"
+OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/967g2_region_aware_suppress}"
+OUTPUT_NAME="${OUTPUT_NAME:-967g2-region-aware-suppress.mp4}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 CUDA_DEVICE="${CUDA_DEVICE:-7}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -73,7 +73,7 @@ COMMAND=(
   printf 'command='
   printf ' %q' "${COMMAND[@]}"
   printf '\n'
-} > "$OUTDIR/967g_config.txt"
+} > "$OUTDIR/967g2_config.txt"
 
 echo "967G minimal single-variable: StreamGVE + suppress_source_bg_value only"
 echo "967G no hand mask, no flow, no factorized routing, no soft modulation"

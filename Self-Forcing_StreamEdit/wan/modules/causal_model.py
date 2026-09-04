@@ -982,8 +982,25 @@ class CausalWanSelfAttention(nn.Module):
                                 "suppress_source_bg_value", False
                             )
                             if suppress_source_bg:
+                                native_fg = kv_cache[
+                                    "current_src_fg_mask"
+                                ][b_idx]
+                                gh = grid_sizes[0][1].item()
+                                gw = grid_sizes[0][2].item()
+                                nf = num_new_tokens // (gh * gw)
+                                near_fg = torch.nn.functional.max_pool2d(
+                                    native_fg.float().reshape(
+                                        nf, 1, gh, gw
+                                    ),
+                                    kernel_size=5, stride=1, padding=2,
+                                ).reshape(-1).bool()
+                                suppress_at = near_fg[native_background]
                                 native_value_list.append(
-                                    trg_current_value[b_idx][native_background]
+                                    torch.where(
+                                        suppress_at.unsqueeze(-1).unsqueeze(-1),
+                                        trg_current_value[b_idx][native_background],
+                                        src_current_value[b_idx][native_background],
+                                    )
                                 )
                             else:
                                 native_value_list.append(
@@ -2387,7 +2404,20 @@ class CausalWanSelfAttention(nn.Module):
                             "suppress_source_bg_value", False
                         )
                         if suppress_source_bg_value:
-                            b_src_current_bg_value = trg_current_value[b_idx][b_src_current_bg_mask]
+                            fg_flat = b_src_current_fg_mask  # [Lq] bool
+                            gh = grid_sizes[0][1].item()
+                            gw = grid_sizes[0][2].item()
+                            nf = num_new_tokens // (gh * gw)
+                            near_fg = torch.nn.functional.max_pool2d(
+                                fg_flat.float().reshape(nf, 1, gh, gw),
+                                kernel_size=5, stride=1, padding=2,
+                            ).reshape(-1).bool()
+                            suppress_at = near_fg[b_src_current_bg_mask]
+                            b_src_current_bg_value = torch.where(
+                                suppress_at.unsqueeze(-1).unsqueeze(-1),
+                                trg_current_value[b_idx][b_src_current_bg_mask],
+                                src_current_value[b_idx][b_src_current_bg_mask],
+                            )
                         else:
                             b_src_current_bg_value = src_current_value[b_idx][b_src_current_bg_mask]
                         b_key_list.append(b_src_current_bg_key)
