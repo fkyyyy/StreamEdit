@@ -47,7 +47,339 @@ __all__ = [
     'closed_loop_counterfactual_memory_attention',
     'source_addressed_native_history_attention',
     'arbitrate_verified_factorized_attention',
+    'diagnose_attention_segment',
+    'route_source_background_kv',
+    'build_counterfactual_segment_values',
+    'counterfactual_replace_attention_segment',
 ]
+
+
+def route_source_background_kv(
+    source_key,
+    source_value,
+    target_value,
+    background_mask,
+    *,
+    suppress_value=False,
+    drop_pair=False,
+):
+    """Select the late source-background K/V segment as one unit.
+
+    ``suppress_value`` preserves the historical 967g/967h ablation in which
+    source keys are paired with target values.  ``drop_pair`` is the
+    appearance-safe successor: neither member of the source-addressed pair is
+    admitted, so a source key can never retrieve a non-corresponding target
+    value.
+    """
+    if suppress_value and drop_pair:
+        raise ValueError(
+            "suppress_value and drop_pair are mutually exclusive"
+        )
+    if background_mask.ndim != 1:
+        raise ValueError(
+            "Source-background mask must be one-dimensional"
+        )
+    expected_tokens = source_key.shape[0]
+    if (
+        source_value.shape[0] != expected_tokens
+        or target_value.shape[0] != expected_tokens
+        or background_mask.shape[0] != expected_tokens
+    ):
+        raise ValueError(
+            "Source-background K/V tensors and mask must align"
+        )
+    if drop_pair:
+        return None
+    selected_value = target_value if suppress_value else source_value
+    return (
+        source_key[background_mask],
+        selected_value[background_mask],
+    )
+
+
+def counterfactual_replace_attention_segment(
+    native_output,
+    source_contribution,
+    target_contribution,
+    foreground_mask,
+    *,
+    eps=1e-8,
+    max_scale=4.0,
+):
+    """Replace one source-V attention contribution with target content.
+
+    ``source_contribution`` and ``target_contribution`` must be evaluated with
+    exactly the same query, complete key sequence and softmax denominator; only
+    the selected segment's values differ.  The target contribution is scaled
+    by one positive scalar per query to match the source contribution RMS.
+    Consequently the replacement preserves contribution energy without
+    restoring the source value direction.  Queries outside the existing
+    automatic foreground are returned bit-for-bit from ``native_output``.
+    """
+    tensors = {
+        "native_output": native_output,
+        "source_contribution": source_contribution,
+        "target_contribution": target_contribution,
+    }
+    if any(value.ndim != 4 for value in tensors.values()):
+        raise ValueError(
+            "Attention outputs must have shape [B,L,H,D]"
+        )
+    if len({value.shape for value in tensors.values()}) != 1:
+        raise ValueError(
+            "Native, source and target attention contributions must align"
+        )
+    if foreground_mask.shape != native_output.shape[:2]:
+        raise ValueError(
+            "foreground_mask must align with attention queries"
+        )
+    if float(eps) <= 0:
+        raise ValueError("eps must be positive")
+    if float(max_scale) < 1.0:
+        raise ValueError("max_scale must be at least 1")
+
+    native = native_output.float()
+    source = source_contribution.float()
+    target = target_contribution.float()
+    source_rms = source.square().mean(dim=(2, 3)).sqrt()
+    target_rms = target.square().mean(dim=(2, 3)).sqrt()
+    target_valid = target_rms > float(eps)
+    raw_scale = source_rms / target_rms.clamp_min(float(eps))
+    scale = torch.where(
+        target_valid,
+        raw_scale.clamp(max=float(max_scale)),
+        torch.zeros_like(raw_scale),
+    ).detach()
+    matched_target = target * scale[:, :, None, None]
+    foreground = foreground_mask.detach().bool()
+    active = foreground & target_valid
+    corrected = native - source + matched_target
+    output = torch.where(
+        active[:, :, None, None],
+        corrected.to(native_output.dtype),
+        native_output,
+    )
+
+    foreground_count = foreground.float().sum().clamp_min(1.0)
+
+    def foreground_mean(value):
+        return (value * foreground.float()).sum() / foreground_count
+
+    diagnostics = {
+        "foreground_fraction": foreground.float().mean().detach(),
+        "active_fraction": active.float().mean().detach(),
+        "source_contribution_rms": foreground_mean(
+            source_rms
+        ).detach(),
+        "target_contribution_rms_raw": foreground_mean(
+            target_rms
+        ).detach(),
+        "target_contribution_rms_matched": foreground_mean(
+            matched_target.square().mean(dim=(2, 3)).sqrt()
+        ).detach(),
+        "replacement_scale": foreground_mean(scale).detach(),
+        "replacement_scale_max": torch.where(
+            foreground, scale, torch.zeros_like(scale)
+        ).max().detach(),
+        "scale_capped_fraction": foreground_mean(
+            (target_valid & (raw_scale > float(max_scale))).float()
+        ).detach(),
+        "degenerate_target_fraction": foreground_mean(
+            (~target_valid).float()
+        ).detach(),
+        "correction_rms": foreground_mean(
+            (corrected - native).square().mean(dim=(2, 3)).sqrt()
+        ).detach(),
+    }
+    return output, diagnostics
+
+
+def build_counterfactual_segment_values(
+    native_value,
+    target_segment_value,
+    *,
+    segment_start,
+    segment_end,
+):
+    """Build source and target V-only rows for an exact segment audit."""
+    if native_value.ndim != 3:
+        raise ValueError("native_value must have shape [K,H,D]")
+    start, end = int(segment_start), int(segment_end)
+    if not 0 <= start < end <= native_value.shape[0]:
+        raise ValueError("Counterfactual segment lies outside native V")
+    expected_shape = (end - start,) + tuple(native_value.shape[1:])
+    if target_segment_value.shape != expected_shape:
+        raise ValueError(
+            "target_segment_value must align with the selected native V "
+            f"segment {expected_shape}, got "
+            f"{tuple(target_segment_value.shape)}"
+        )
+    counterfactual = torch.zeros(
+        (2,) + tuple(native_value.shape),
+        dtype=native_value.dtype,
+        device=native_value.device,
+    )
+    counterfactual[0, start:end] = native_value[start:end]
+    counterfactual[1, start:end] = target_segment_value
+    return counterfactual
+
+
+def _evenly_spaced_mask_indices(mask, max_samples):
+    """Select deterministic, approximately uniform positions from a mask."""
+    if mask.ndim != 1:
+        raise ValueError("Query mask must be one-dimensional")
+    if max_samples <= 0:
+        raise ValueError("max_samples must be positive")
+    positions = torch.nonzero(mask.bool(), as_tuple=False).flatten()
+    if positions.numel() <= max_samples:
+        return positions
+    offsets = torch.linspace(
+        0,
+        positions.numel() - 1,
+        steps=max_samples,
+        device=positions.device,
+    ).round().long()
+    return positions[offsets]
+
+
+@torch.no_grad()
+def diagnose_attention_segment(
+    query,
+    key,
+    *,
+    segment_start,
+    segment_end,
+    foreground_mask,
+    max_query_samples=16,
+    key_chunk_size=4096,
+    softmax_scale=None,
+):
+    """Estimate the softmax mass assigned to one contiguous KV segment.
+
+    ``query`` and ``key`` use the native Wan layout ``[L, H, D]``.  Query
+    positions are sampled independently from the foreground and background,
+    while every key participates in the denominator.  Key chunking avoids
+    materializing the full attention matrix for long native histories.
+
+    The returned ``all`` mass is population-weighted by the actual foreground
+    coverage rather than by the deliberately balanced diagnostic sample.
+    """
+    if query.ndim != 3 or key.ndim != 3:
+        raise ValueError("Query and key must have shape [L,H,D]")
+    if query.shape[1:] != key.shape[1:]:
+        raise ValueError("Query and key head dimensions must match")
+    if foreground_mask.shape != (query.shape[0],):
+        raise ValueError(
+            "Foreground mask must align with the query sequence"
+        )
+    if not 0 <= int(segment_start) <= int(segment_end) <= key.shape[0]:
+        raise ValueError("Attention segment lies outside the key sequence")
+    if key_chunk_size <= 0:
+        raise ValueError("key_chunk_size must be positive")
+
+    foreground_mask = foreground_mask.bool()
+    foreground_indices = _evenly_spaced_mask_indices(
+        foreground_mask, max_query_samples
+    )
+    background_indices = _evenly_spaced_mask_indices(
+        ~foreground_mask, max_query_samples
+    )
+    query_indices = torch.cat(
+        [foreground_indices, background_indices], dim=0
+    )
+    zero = query.new_zeros((), dtype=torch.float32)
+    if query_indices.numel() == 0 or segment_start == segment_end:
+        per_head_zero = query.new_zeros(
+            query.shape[1], dtype=torch.float32
+        )
+        return {
+            "all": zero,
+            "foreground": zero,
+            "background": zero,
+            "all_per_head": per_head_zero,
+            "foreground_per_head": per_head_zero,
+            "background_per_head": per_head_zero,
+            "foreground_fraction": foreground_mask.float().mean(),
+            "foreground_samples": int(foreground_indices.numel()),
+            "background_samples": int(background_indices.numel()),
+        }
+
+    sampled_query = query[query_indices].float()
+    scale = (
+        float(softmax_scale)
+        if softmax_scale is not None
+        else query.shape[-1] ** -0.5
+    )
+    denominator_lse = torch.full(
+        (query.shape[1], query_indices.numel()),
+        -torch.inf,
+        dtype=torch.float32,
+        device=query.device,
+    )
+    segment_lse = torch.full_like(denominator_lse, -torch.inf)
+    for key_start in range(0, key.shape[0], key_chunk_size):
+        key_end = min(key_start + key_chunk_size, key.shape[0])
+        logits = torch.einsum(
+            "qhd,khd->hqk",
+            sampled_query,
+            key[key_start:key_end].float(),
+        ) * scale
+        denominator_lse = torch.logaddexp(
+            denominator_lse, logits.logsumexp(dim=-1)
+        )
+        overlap_start = max(int(segment_start), key_start)
+        overlap_end = min(int(segment_end), key_end)
+        if overlap_start < overlap_end:
+            local_start = overlap_start - key_start
+            local_end = overlap_end - key_start
+            segment_lse = torch.logaddexp(
+                segment_lse,
+                logits[..., local_start:local_end].logsumexp(dim=-1),
+            )
+
+    mass_per_head_query = (segment_lse - denominator_lse).exp()
+    mass_per_query = mass_per_head_query.mean(dim=0)
+    foreground_count = foreground_indices.numel()
+    foreground_mass = (
+        mass_per_query[:foreground_count].mean()
+        if foreground_count
+        else zero
+    )
+    background_mass = (
+        mass_per_query[foreground_count:].mean()
+        if background_indices.numel()
+        else zero
+    )
+    foreground_fraction = foreground_mask.float().mean()
+    foreground_mass_per_head = (
+        mass_per_head_query[:, :foreground_count].mean(dim=1)
+        if foreground_count
+        else query.new_zeros(query.shape[1], dtype=torch.float32)
+    )
+    background_mass_per_head = (
+        mass_per_head_query[:, foreground_count:].mean(dim=1)
+        if background_indices.numel()
+        else query.new_zeros(query.shape[1], dtype=torch.float32)
+    )
+    all_mass = (
+        foreground_fraction * foreground_mass
+        + (1.0 - foreground_fraction) * background_mass
+    )
+    all_mass_per_head = (
+        foreground_fraction * foreground_mass_per_head
+        + (1.0 - foreground_fraction) * background_mass_per_head
+    )
+    return {
+        "all": all_mass,
+        "foreground": foreground_mass,
+        "background": background_mass,
+        "all_per_head": all_mass_per_head,
+        "foreground_per_head": foreground_mass_per_head,
+        "background_per_head": background_mass_per_head,
+        "foreground_fraction": foreground_fraction,
+        "foreground_samples": int(foreground_indices.numel()),
+        "background_samples": int(background_indices.numel()),
+    }
 
 
 def resolve_target_identity_correction_strength(

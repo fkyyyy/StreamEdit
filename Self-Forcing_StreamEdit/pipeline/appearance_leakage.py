@@ -9,7 +9,7 @@ component that is antagonistic to the target edit direction.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict
 
 import torch
@@ -379,3 +379,209 @@ def remove_antagonistic_source_residual(
         "appearance_leakage_preserved_energy": filtered_energy,
     }
     return filtered, diagnostics
+
+
+def restore_projected_residual_norm(
+    source_residual: torch.Tensor,
+    projected_residual: torch.Tensor,
+    application_weight: torch.Tensor,
+    *,
+    eps: float = 1e-8,
+    max_scale: float = 4.0,
+):
+    """Restore projected-residual magnitude without restoring its direction.
+
+    The norm is measured after applying the native StreamGVE soft background
+    weight, because that is the residual that is actually added to the target
+    velocity.  One positive scalar is computed independently for every sample
+    and latent timestep.  Positive scaling cannot reintroduce the antagonistic
+    component removed by :func:`remove_antagonistic_source_residual`.
+
+    ``max_scale`` is only a numerical degeneracy guard.  A projection that
+    leaves almost no safe direction cannot recover the source norm by scalar
+    rescaling without amplifying numerical noise.
+    """
+    if source_residual.shape != projected_residual.shape:
+        raise ValueError(
+            "source_residual and projected_residual must match"
+        )
+    if source_residual.ndim != 5:
+        raise ValueError(
+            "Residual fields must have shape [B,T,C,H,W]"
+        )
+    expected_weight_shape = (
+        source_residual.shape[0],
+        source_residual.shape[1],
+        1,
+        source_residual.shape[3],
+        source_residual.shape[4],
+    )
+    if application_weight.shape != expected_weight_shape:
+        raise ValueError(
+            "application_weight must have shape "
+            f"{expected_weight_shape}, got "
+            f"{tuple(application_weight.shape)}"
+        )
+    if eps <= 0:
+        raise ValueError("eps must be positive")
+    if max_scale < 1.0:
+        raise ValueError("max_scale must be at least 1")
+
+    source = source_residual.float()
+    projected = projected_residual.float()
+    weight = application_weight.float()
+    # Preserve temporal locality: reduce only channel and spatial dimensions.
+    reduction_dims = (2, 3, 4)
+    source_energy = (weight * source).square().sum(dim=reduction_dims)
+    projected_energy = (weight * projected).square().sum(
+        dim=reduction_dims
+    )
+    restorable = (source_energy > eps) & (projected_energy > eps)
+    raw_scale = torch.sqrt(
+        source_energy / projected_energy.clamp_min(eps)
+    )
+    scale = torch.where(
+        restorable,
+        raw_scale.clamp(max=max_scale),
+        torch.ones_like(raw_scale),
+    ).detach()
+    scale_view = scale.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+    calibrated = projected * scale_view
+    applied_energy = (weight * calibrated).square().sum(
+        dim=reduction_dims
+    )
+    diagnostics = {
+        "source_energy": source_energy.detach(),
+        "projected_energy": projected_energy.detach(),
+        "applied_energy": applied_energy.detach(),
+        "norm_scale": scale,
+        "scale_capped": (restorable & (raw_scale > max_scale)).detach(),
+        "degenerate": (~restorable).detach(),
+    }
+    return calibrated.to(projected_residual.dtype), diagnostics
+
+
+@dataclass
+class CausalResidualEnergyBudget:
+    """Freeze a causal projection-energy budget from the first block.
+
+    A separate reference is recorded for every denoising-step index.  Later
+    blocks may remove less antagonistic energy, but cannot remove a larger
+    fraction of the source residual than the corresponding first-block step.
+    The budget is global per sample and therefore introduces no moving spatial
+    boundary.
+    """
+
+    eps: float = 1e-8
+    reference_fractions: Dict[int, torch.Tensor] = field(
+        default_factory=dict
+    )
+
+    def __post_init__(self) -> None:
+        if self.eps <= 0:
+            raise ValueError("eps must be positive")
+
+    @staticmethod
+    def _validate(
+        source_residual: torch.Tensor,
+        projected_residual: torch.Tensor,
+        application_weight: torch.Tensor,
+    ) -> None:
+        if source_residual.shape != projected_residual.shape:
+            raise ValueError(
+                "source_residual and projected_residual must match"
+            )
+        if source_residual.ndim != 5:
+            raise ValueError(
+                "Residual fields must have shape [B,T,C,H,W]"
+            )
+        expected_weight_shape = (
+            source_residual.shape[0],
+            source_residual.shape[1],
+            1,
+            source_residual.shape[3],
+            source_residual.shape[4],
+        )
+        if application_weight.shape != expected_weight_shape:
+            raise ValueError(
+                "application_weight must have shape "
+                f"{expected_weight_shape}, got "
+                f"{tuple(application_weight.shape)}"
+            )
+
+    def apply(
+        self,
+        source_residual: torch.Tensor,
+        projected_residual: torch.Tensor,
+        application_weight: torch.Tensor,
+        *,
+        denoising_step_index: int,
+    ):
+        """Apply the frozen first-block budget to one denoising step."""
+        self._validate(
+            source_residual, projected_residual, application_weight
+        )
+        if denoising_step_index < 0:
+            raise ValueError("denoising_step_index must be non-negative")
+
+        source = source_residual.float()
+        projected = projected_residual.float()
+        weight = application_weight.float()
+        removed = source - projected
+        reduction_dims = tuple(range(1, source.ndim))
+        source_energy = (weight * source).square().sum(
+            dim=reduction_dims
+        )
+        raw_removed_energy = (weight * removed).square().sum(
+            dim=reduction_dims
+        )
+        raw_fraction = raw_removed_energy / (source_energy + self.eps)
+
+        reference_initialized = (
+            denoising_step_index not in self.reference_fractions
+        )
+        if reference_initialized:
+            # Keep the tiny state on CPU: it is a causal scalar per sample and
+            # denoising step, not a feature or appearance memory.
+            self.reference_fractions[denoising_step_index] = (
+                raw_fraction.detach().cpu()
+            )
+        reference_fraction = self.reference_fractions[
+            denoising_step_index
+        ].to(device=source.device, dtype=source.dtype)
+        if reference_fraction.shape != raw_fraction.shape:
+            raise ValueError(
+                "Projection-budget batch size changed across blocks"
+            )
+
+        scale = torch.sqrt(
+            (reference_fraction / raw_fraction.clamp_min(self.eps))
+            .clamp(max=1.0)
+        )
+        scale = torch.where(
+            raw_fraction > self.eps, scale, torch.ones_like(scale)
+        ).detach()
+        view_shape = (source.shape[0],) + (1,) * (source.ndim - 1)
+        scale_view = scale.view(view_shape)
+        scaled_projection = source - scale_view * removed
+        # Preserve the original P0 tensor exactly whenever no cap is needed;
+        # this avoids an unnecessary subtract/add round trip in low precision.
+        budgeted = torch.where(
+            scale_view == 1.0, projected, scaled_projection
+        )
+        applied_removed_energy = (
+            weight * (source - budgeted)
+        ).square().sum(dim=reduction_dims)
+        applied_fraction = applied_removed_energy / (
+            source_energy + self.eps
+        )
+        diagnostics = {
+            "raw_removed_fraction": raw_fraction.detach(),
+            "reference_removed_fraction": (
+                reference_fraction.detach()
+            ),
+            "applied_removed_fraction": applied_fraction.detach(),
+            "projection_scale": scale,
+            "reference_initialized": reference_initialized,
+        }
+        return budgeted.to(source_residual.dtype), diagnostics

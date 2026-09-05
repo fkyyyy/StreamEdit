@@ -1465,6 +1465,18 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        "--counterfactual_source_bg_output",
+        action="store_true",
+        default=False,
+        help=(
+            "Keep native StreamGVE source-background K/Q and attention "
+            "denominator, but replace its output contribution on the "
+            "automatic foreground queries with an RMS-matched target-value "
+            "counterfactual. Requires dynamic_sog routing and cannot be "
+            "combined with source-background suppression or K/V dropping."
+        ),
+    )
+    parser.add_argument(
         "--projected_source_residual",
         action="store_true",
         default=False,
@@ -1474,6 +1486,64 @@ if __name__ == '__main__':
             "Applied on the original native velocity formula without "
             "changing attention or KV."
         ),
+    )
+    parser.add_argument(
+        "--projected_source_residual_energy_budget",
+        action="store_true",
+        default=False,
+        help=(
+            "Limit each later block's antagonistic-residual removal to "
+            "the corresponding denoising-step fraction measured in the "
+            "first generated block. Requires --projected_source_residual; "
+            "does not change attention, KV, or spatial routing."
+        ),
+    )
+    parser.add_argument(
+        "--projected_source_residual_norm_preserving",
+        action="store_true",
+        default=False,
+        help=(
+            "Restore the application-weighted norm removed by source-"
+            "residual projection using a positive per-sample, per-"
+            "timestep scalar. Requires --projected_source_residual and "
+            "is mutually exclusive with its energy-budget variant."
+        ),
+    )
+    parser.add_argument(
+        "--drop_source_bg_kv",
+        action="store_true",
+        default=False,
+        help=(
+            "Drop the late source-background key/value segment as a "
+            "paired unit. Target-current and target-history K/V remain "
+            "available; unlike --suppress_source_bg_value this never "
+            "pairs source keys with target values."
+        ),
+    )
+    parser.add_argument(
+        "--source_bg_attention_diagnostics",
+        action="store_true",
+        default=False,
+        help=(
+            "Write per-block, per-timestep, per-layer diagnostics for the "
+            "late source-background attention segment without changing "
+            "the generated attention output."
+        ),
+    )
+    parser.add_argument(
+        "--source_bg_attention_diagnostic_query_samples",
+        type=int,
+        default=4,
+        help=(
+            "Number of deterministic query samples drawn separately from "
+            "foreground and background when estimating attention mass."
+        ),
+    )
+    parser.add_argument(
+        "--source_bg_attention_diagnostic_path",
+        type=str,
+        default=None,
+        help="JSONL destination for source-background attention diagnostics.",
     )
     parser.add_argument("--mask_white_threshold", type=int, default=245)
     parser.add_argument(
@@ -2721,7 +2791,72 @@ if __name__ == '__main__':
             )
         )
 
+    if args.suppress_source_bg_value and args.drop_source_bg_kv:
+        parser.error(
+            "--suppress_source_bg_value and --drop_source_bg_kv are "
+            "mutually exclusive"
+        )
+    if args.counterfactual_source_bg_output and (
+        args.suppress_source_bg_value or args.drop_source_bg_kv
+    ):
+        parser.error(
+            "--counterfactual_source_bg_output requires the native "
+            "source-background K/V pair"
+        )
+    if (
+        args.counterfactual_source_bg_output
+        and args.routing_mode != "dynamic_sog"
+    ):
+        parser.error(
+            "--counterfactual_source_bg_output requires "
+            "--routing_mode dynamic_sog"
+        )
+    if (
+        args.projected_source_residual_energy_budget
+        and not args.projected_source_residual
+    ):
+        parser.error(
+            "--projected_source_residual_energy_budget requires "
+            "--projected_source_residual"
+        )
+    if (
+        args.projected_source_residual_norm_preserving
+        and not args.projected_source_residual
+    ):
+        parser.error(
+            "--projected_source_residual_norm_preserving requires "
+            "--projected_source_residual"
+        )
+    if (
+        args.projected_source_residual_energy_budget
+        and args.projected_source_residual_norm_preserving
+    ):
+        parser.error(
+            "--projected_source_residual_energy_budget and "
+            "--projected_source_residual_norm_preserving are mutually "
+            "exclusive"
+        )
+    if args.source_bg_attention_diagnostics:
+        if args.source_bg_attention_diagnostic_query_samples <= 0:
+            parser.error(
+                "--source_bg_attention_diagnostic_query_samples must be "
+                "positive"
+            )
+        if args.source_bg_attention_diagnostic_path is None:
+            parser.error(
+                "--source_bg_attention_diagnostic_path is required with "
+                "--source_bg_attention_diagnostics"
+            )
     pipeline, low_memory, device, local_rank = load_pipe(args)
+    if (
+        args.source_bg_attention_diagnostics
+        and dist.is_initialized()
+        and dist.get_world_size() > 1
+    ):
+        parser.error(
+            "Source-background attention diagnostics currently require "
+            "single-process inference"
+        )
 
     # Create output directory (only on main process to avoid race conditions)
     if local_rank == 0:
@@ -3422,7 +3557,28 @@ if __name__ == '__main__':
         first_block_identity_anchor=args.first_block_identity_anchor,
         identity_anchor_scale=args.identity_anchor_scale,
         suppress_source_bg_value=args.suppress_source_bg_value,
+        counterfactual_source_bg_output=(
+            args.counterfactual_source_bg_output
+        ),
         projected_source_residual=args.projected_source_residual,
+        projected_source_residual_energy_budget=(
+            args.projected_source_residual_energy_budget
+        ),
+        projected_source_residual_norm_preserving=(
+            args.projected_source_residual_norm_preserving
+        ),
+        drop_source_bg_kv=args.drop_source_bg_kv,
+        source_bg_attention_diagnostics=(
+            args.source_bg_attention_diagnostics
+        ),
+        source_bg_attention_diagnostic_query_samples=(
+            args.source_bg_attention_diagnostic_query_samples
+        ),
+        source_bg_attention_diagnostic_path=(
+            str(Path(args.source_bg_attention_diagnostic_path).resolve())
+            if args.source_bg_attention_diagnostic_path is not None
+            else None
+        ),
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,
         posterior_flow_mode=args.posterior_flow_mode,

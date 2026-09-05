@@ -6,12 +6,16 @@ from wan.modules.attention import (
     blend_target_owned_tensor,
     blend_factorized_with_native_fallback,
     blend_source_addressed_residual,
+    build_counterfactual_segment_values,
     closed_loop_counterfactual_memory_attention,
+    counterfactual_replace_attention_segment,
+    diagnose_attention_segment,
     build_factorized_history_read_mask,
     build_target_owned_source_background_mask,
     fuse_aligned_memory,
     fuse_factorized_aligned_memory,
     project_source_addressed_target_value,
+    route_source_background_kv,
     resolve_target_identity_correction_strength,
     immutable_canonical_anchor_attention_delta,
     source_addressed_anchor_attention_delta,
@@ -975,12 +979,10 @@ class CausalWanSelfAttention(nn.Module):
                             native_background = ~kv_cache[
                                 "current_src_fg_mask"
                             ][b_idx]
-                            native_key_list.append(
-                                src_current_key[b_idx][native_background]
-                            )
                             suppress_source_bg = shared_dict.get(
                                 "suppress_source_bg_value", False
                             )
+                            routed_target_value = trg_current_value[b_idx]
                             if suppress_source_bg:
                                 native_fg = kv_cache[
                                     "current_src_fg_mask"
@@ -994,18 +996,25 @@ class CausalWanSelfAttention(nn.Module):
                                     ),
                                     kernel_size=5, stride=1, padding=2,
                                 ).reshape(-1).bool()
-                                suppress_at = near_fg[native_background]
-                                native_value_list.append(
-                                    torch.where(
-                                        suppress_at.unsqueeze(-1).unsqueeze(-1),
-                                        trg_current_value[b_idx][native_background],
-                                        src_current_value[b_idx][native_background],
-                                    )
+                                routed_target_value = torch.where(
+                                    near_fg.unsqueeze(-1).unsqueeze(-1),
+                                    trg_current_value[b_idx],
+                                    src_current_value[b_idx],
                                 )
-                            else:
-                                native_value_list.append(
-                                    src_current_value[b_idx][native_background]
-                                )
+                            source_bg_pair = route_source_background_kv(
+                                src_current_key[b_idx],
+                                src_current_value[b_idx],
+                                routed_target_value,
+                                native_background,
+                                suppress_value=suppress_source_bg,
+                                drop_pair=shared_dict.get(
+                                    "drop_source_bg_kv", False
+                                ),
+                            )
+                            if source_bg_pair is not None:
+                                source_bg_key, source_bg_value = source_bg_pair
+                                native_key_list.append(source_bg_key)
+                                native_value_list.append(source_bg_value)
                         native_key_list.append(
                             trg_current_key[b_idx] * blender_rate
                             + src_current_key[b_idx]
@@ -2257,16 +2266,19 @@ class CausalWanSelfAttention(nn.Module):
                                 "current_src_fg_mask"
                             ][b_idx]
                             current_background_mask = ~current_edit_mask
-                            legacy_key_list.append(
-                                src_current_key[b_idx][
-                                    current_background_mask
-                                ]
+                            source_bg_pair = route_source_background_kv(
+                                src_current_key[b_idx],
+                                src_current_value[b_idx],
+                                trg_current_value[b_idx],
+                                current_background_mask,
+                                drop_pair=shared_dict.get(
+                                    "drop_source_bg_kv", False
+                                ),
                             )
-                            legacy_value_list.append(
-                                src_current_value[b_idx][
-                                    current_background_mask
-                                ]
-                            )
+                            if source_bg_pair is not None:
+                                source_bg_key, source_bg_value = source_bg_pair
+                                legacy_key_list.append(source_bg_key)
+                                legacy_value_list.append(source_bg_value)
                         legacy_key_list.append(legacy_current_key)
                         legacy_value_list.append(
                             trg_current_value[b_idx]
@@ -2331,16 +2343,19 @@ class CausalWanSelfAttention(nn.Module):
                                     owned,
                                 )
                             )
-                            owned_key_list.append(
-                                src_current_key[b_idx][
-                                    owned_background_mask
-                                ]
+                            source_bg_pair = route_source_background_kv(
+                                src_current_key[b_idx],
+                                src_current_value[b_idx],
+                                trg_current_value[b_idx],
+                                owned_background_mask,
+                                drop_pair=shared_dict.get(
+                                    "drop_source_bg_kv", False
+                                ),
                             )
-                            owned_value_list.append(
-                                src_current_value[b_idx][
-                                    owned_background_mask
-                                ]
-                            )
+                            if source_bg_pair is not None:
+                                source_bg_key, source_bg_value = source_bg_pair
+                                owned_key_list.append(source_bg_key)
+                                owned_value_list.append(source_bg_value)
                         owned_key_list.append(owned_current_key)
                         owned_value_list.append(trg_current_value[b_idx])
                         owned_query = blend_target_owned_tensor(
@@ -2397,12 +2412,37 @@ class CausalWanSelfAttention(nn.Module):
                     #✨ current source condition
                     b_src_current_fg_mask = kv_cache["current_src_fg_mask"][b_idx]              # [Lq, ]
                     b_src_current_bg_mask = ~b_src_current_fg_mask                              # [Lq, ]
+                    source_bg_segment = None
+                    source_bg_value_rms = None
+                    target_bg_value_rms = None
                     # t^inj=0.5
                     if kv_cache['shared_dict']['current_timestep_index'] > kv_cache['shared_dict']['total_timestep'] // 2:
-                        b_src_current_bg_key = src_current_key[b_idx][b_src_current_bg_mask]        # [L_bg, Nh, Dk]
                         suppress_source_bg_value = shared_dict.get(
                             "suppress_source_bg_value", False
                         )
+                        if shared_dict.get(
+                            "source_bg_attention_diagnostics_enabled",
+                            False,
+                        ):
+                            source_bg_value_rms = (
+                                src_current_value[b_idx][
+                                    b_src_current_bg_mask
+                                ]
+                                .float()
+                                .square()
+                                .mean()
+                                .sqrt()
+                            )
+                            target_bg_value_rms = (
+                                trg_current_value[b_idx][
+                                    b_src_current_bg_mask
+                                ]
+                                .float()
+                                .square()
+                                .mean()
+                                .sqrt()
+                            )
+                        routed_target_value = trg_current_value[b_idx]
                         if suppress_source_bg_value:
                             fg_flat = b_src_current_fg_mask  # [Lq] bool
                             gh = grid_sizes[0][1].item()
@@ -2412,16 +2452,36 @@ class CausalWanSelfAttention(nn.Module):
                                 fg_flat.float().reshape(nf, 1, gh, gw),
                                 kernel_size=5, stride=1, padding=2,
                             ).reshape(-1).bool()
-                            suppress_at = near_fg[b_src_current_bg_mask]
-                            b_src_current_bg_value = torch.where(
-                                suppress_at.unsqueeze(-1).unsqueeze(-1),
-                                trg_current_value[b_idx][b_src_current_bg_mask],
-                                src_current_value[b_idx][b_src_current_bg_mask],
+                            routed_target_value = torch.where(
+                                near_fg.unsqueeze(-1).unsqueeze(-1),
+                                trg_current_value[b_idx],
+                                src_current_value[b_idx],
                             )
-                        else:
-                            b_src_current_bg_value = src_current_value[b_idx][b_src_current_bg_mask]
-                        b_key_list.append(b_src_current_bg_key)
-                        b_value_list.append(b_src_current_bg_value)
+                        source_bg_pair = route_source_background_kv(
+                            src_current_key[b_idx],
+                            src_current_value[b_idx],
+                            routed_target_value,
+                            b_src_current_bg_mask,
+                            suppress_value=suppress_source_bg_value,
+                            drop_pair=shared_dict.get(
+                                "drop_source_bg_kv", False
+                            ),
+                        )
+                        if source_bg_pair is not None:
+                            (
+                                b_src_current_bg_key,
+                                b_src_current_bg_value,
+                            ) = source_bg_pair
+                            source_bg_segment_start = sum(
+                                item.shape[0] for item in b_key_list
+                            )
+                            source_bg_segment = (
+                                source_bg_segment_start,
+                                source_bg_segment_start
+                                + b_src_current_bg_key.shape[0],
+                            )
+                            b_key_list.append(b_src_current_bg_key)
+                            b_value_list.append(b_src_current_bg_value)
 
                     #✨ masked-blended current target condition
                     b_trg_current_key = trg_current_key[b_idx]                                  # [Lq, Nh, Dk]
@@ -2463,6 +2523,152 @@ class CausalWanSelfAttention(nn.Module):
                         b_trg_key.unsqueeze(0),
                         b_trg_value.unsqueeze(0),
                     )
+                    if (
+                        source_bg_segment is not None
+                        and source_bg_segment[0] < source_bg_segment[1]
+                        and shared_dict.get(
+                            "counterfactual_source_bg_output", False
+                        )
+                        and b_src_current_fg_mask.any()
+                    ):
+                        segment_start, segment_end = source_bg_segment
+                        target_bg_value = trg_current_value[b_idx][
+                            b_src_current_bg_mask
+                        ]
+                        # Both rows use the complete native key sequence, so
+                        # their source/target segment contributions share the
+                        # exact query-conditioned softmax denominator.
+                        counterfactual_value = (
+                            build_counterfactual_segment_values(
+                                native_value=b_trg_value,
+                                target_segment_value=target_bg_value,
+                                segment_start=segment_start,
+                                segment_end=segment_end,
+                            )
+                        )
+                        foreground_query = b_query[
+                            b_src_current_fg_mask
+                        ]
+                        counterfactual_output = attention(
+                            foreground_query.unsqueeze(0).expand(
+                                2, -1, -1, -1
+                            ),
+                            b_trg_key.unsqueeze(0).expand(
+                                2, -1, -1, -1
+                            ),
+                            counterfactual_value,
+                        )
+                        corrected_foreground, counterfactual_diag = (
+                            counterfactual_replace_attention_segment(
+                                native_output=b_target_output[
+                                    :, b_src_current_fg_mask
+                                ],
+                                source_contribution=(
+                                    counterfactual_output[0:1]
+                                ),
+                                target_contribution=(
+                                    counterfactual_output[1:2]
+                                ),
+                                foreground_mask=torch.ones(
+                                    (1, foreground_query.shape[0]),
+                                    dtype=torch.bool,
+                                    device=b_query.device,
+                                ),
+                            )
+                        )
+                        b_target_output = b_target_output.clone()
+                        b_target_output[
+                            :, b_src_current_fg_mask
+                        ] = corrected_foreground
+                        counterfactual_diag[
+                            "foreground_fraction"
+                        ] = (
+                            b_src_current_fg_mask.float().mean().detach()
+                        )
+                        shared_dict.setdefault(
+                            "counterfactual_source_bg_output_diagnostics",
+                            [],
+                        ).append(counterfactual_diag)
+                    if (
+                        source_bg_segment is not None
+                        and source_bg_segment[0] < source_bg_segment[1]
+                        and shared_dict.get(
+                            "source_bg_attention_diagnostics_enabled",
+                            False,
+                        )
+                    ):
+                        segment_mass = diagnose_attention_segment(
+                            b_query,
+                            b_trg_key,
+                            segment_start=source_bg_segment[0],
+                            segment_end=source_bg_segment[1],
+                            foreground_mask=b_src_current_fg_mask,
+                            max_query_samples=int(
+                                shared_dict.get(
+                                    "source_bg_attention_diagnostic_query_samples",
+                                    8,
+                                )
+                            ),
+                        )
+                        target_output_f32 = b_target_output.float().squeeze(0)
+                        source_bg_value_f32 = src_current_value[b_idx][
+                            b_src_current_bg_mask
+                        ].float()
+                        target_bg_value_f32 = trg_current_value[b_idx][
+                            b_src_current_bg_mask
+                        ].float()
+
+                        def masked_rms(value, mask):
+                            selected = value[mask]
+                            if selected.numel() == 0:
+                                return value.new_zeros(())
+                            return selected.square().mean().sqrt()
+
+                        shared_dict.setdefault(
+                            "source_bg_attention_diagnostics", {}
+                        ).setdefault(layer_index, []).append({
+                            "batch_index": int(b_idx),
+                            "source_value_rms": source_bg_value_rms.detach(),
+                            "target_value_rms": target_bg_value_rms.detach(),
+                            "source_value_rms_per_head": (
+                                source_bg_value_f32.square()
+                                .mean(dim=(0, 2)).sqrt().detach()
+                            ),
+                            "target_value_rms_per_head": (
+                                target_bg_value_f32.square()
+                                .mean(dim=(0, 2)).sqrt().detach()
+                            ),
+                            "source_bg_mass_all": segment_mass["all"].detach(),
+                            "source_bg_mass_fg_query": segment_mass["foreground"].detach(),
+                            "source_bg_mass_bg_query": segment_mass["background"].detach(),
+                            "source_bg_mass_all_per_head": (
+                                segment_mass["all_per_head"].detach()
+                            ),
+                            "source_bg_mass_fg_per_head": (
+                                segment_mass["foreground_per_head"].detach()
+                            ),
+                            "source_bg_mass_bg_per_head": (
+                                segment_mass["background_per_head"].detach()
+                            ),
+                            "output_rms_all": target_output_f32.square().mean().sqrt().detach(),
+                            "output_rms_per_head": (
+                                target_output_f32.square()
+                                .mean(dim=(0, 2)).sqrt().detach()
+                            ),
+                            "output_rms_fg_query": masked_rms(
+                                target_output_f32, b_src_current_fg_mask
+                            ).detach(),
+                            "output_rms_bg_query": masked_rms(
+                                target_output_f32, b_src_current_bg_mask
+                            ).detach(),
+                            "foreground_fraction": segment_mass["foreground_fraction"].detach(),
+                            "foreground_samples": segment_mass["foreground_samples"],
+                            "background_samples": segment_mass["background_samples"],
+                            "source_bg_tokens": int(
+                                source_bg_segment[1] - source_bg_segment[0]
+                            ),
+                            "total_kv_tokens": int(b_trg_key.shape[0]),
+                        })
                     contact_graph_mode = shared_dict.get(
                         "contact_graph_mode",
                         "no_graph",

@@ -22,8 +22,10 @@ from .contact_graph import (
 )
 from .belief_kv import build_belief_kv_weights
 from .appearance_leakage import (
+    CausalResidualEnergyBudget,
     build_target_change_core,
     remove_antagonistic_source_residual,
+    restore_projected_residual_norm,
 )
 from .control_belief import CausalControlBeliefBuilder
 from .causal_ownership import (
@@ -312,7 +314,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
         first_block_identity_anchor: bool = False,
         identity_anchor_scale: float = 1.5,
         suppress_source_bg_value: bool = False,
+        counterfactual_source_bg_output: bool = False,
         projected_source_residual: bool = False,
+        projected_source_residual_energy_budget: bool = False,
+        projected_source_residual_norm_preserving: bool = False,
+        drop_source_bg_kv: bool = False,
+        source_bg_attention_diagnostics: bool = False,
+        source_bg_attention_diagnostic_query_samples: int = 4,
+        source_bg_attention_diagnostic_path: Optional[str] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
         posterior_flow_mode: str = "soft",
@@ -382,6 +391,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
         _role_native_kv_history: Optional[
             RoleConditionedNativeKVHistory
         ] = None,
+        _projected_residual_energy_budget: Optional[
+            CausalResidualEnergyBudget
+        ] = None,
     ) -> torch.Tensor:
         expected_role_shape = (
             src_video.shape[0], src_video.shape[1],
@@ -448,6 +460,78 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "source_flow_background_veto_min_confidence must lie in "
                 "[0, 1]"
             )
+        if suppress_source_bg_value and drop_source_bg_kv:
+            raise ValueError(
+                "suppress_source_bg_value and drop_source_bg_kv are "
+                "mutually exclusive"
+            )
+        if counterfactual_source_bg_output and (
+            suppress_source_bg_value or drop_source_bg_kv
+        ):
+            raise ValueError(
+                "counterfactual_source_bg_output requires the native "
+                "source-background K/V pair"
+            )
+        if (
+            counterfactual_source_bg_output
+            and routing_mode != "dynamic_sog"
+        ):
+            raise ValueError(
+                "counterfactual_source_bg_output requires dynamic_sog "
+                "routing"
+            )
+        if (
+            projected_source_residual_energy_budget
+            and not projected_source_residual
+        ):
+            raise ValueError(
+                "projected_source_residual_energy_budget requires "
+                "projected_source_residual"
+            )
+        if (
+            projected_source_residual_norm_preserving
+            and not projected_source_residual
+        ):
+            raise ValueError(
+                "projected_source_residual_norm_preserving requires "
+                "projected_source_residual"
+            )
+        if (
+            projected_source_residual_energy_budget
+            and projected_source_residual_norm_preserving
+        ):
+            raise ValueError(
+                "projected residual energy budget and norm preservation "
+                "are mutually exclusive"
+            )
+        rollout_projected_residual_budget = (
+            _projected_residual_energy_budget
+        )
+        if (
+            projected_source_residual_energy_budget
+            and rollout_projected_residual_budget is None
+        ):
+            rollout_projected_residual_budget = (
+                CausalResidualEnergyBudget()
+            )
+        if source_bg_attention_diagnostics:
+            if source_bg_attention_diagnostic_query_samples <= 0:
+                raise ValueError(
+                    "source_bg_attention_diagnostic_query_samples must be "
+                    "positive"
+                )
+            if source_bg_attention_diagnostic_path is None:
+                raise ValueError(
+                    "source_bg_attention_diagnostic_path is required when "
+                    "diagnostics are enabled"
+                )
+            diagnostic_parent = os.path.dirname(
+                source_bg_attention_diagnostic_path
+            )
+            if diagnostic_parent:
+                os.makedirs(diagnostic_parent, exist_ok=True)
+            if os.path.exists(source_bg_attention_diagnostic_path):
+                os.remove(source_bg_attention_diagnostic_path)
         if rollout_chunk_size < 0:
             # for testing local attn
             return self.inference(
@@ -815,8 +899,30 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 first_block_identity_anchor=first_block_identity_anchor,
                 identity_anchor_scale=identity_anchor_scale,
                 suppress_source_bg_value=suppress_source_bg_value,
+                counterfactual_source_bg_output=(
+                    counterfactual_source_bg_output
+                ),
                 projected_source_residual=projected_source_residual,
+                projected_source_residual_energy_budget=(
+                    projected_source_residual_energy_budget
+                ),
+                projected_source_residual_norm_preserving=(
+                    projected_source_residual_norm_preserving
+                ),
+                drop_source_bg_kv=drop_source_bg_kv,
+                source_bg_attention_diagnostics=(
+                    source_bg_attention_diagnostics
+                ),
+                source_bg_attention_diagnostic_query_samples=(
+                    source_bg_attention_diagnostic_query_samples
+                ),
+                source_bg_attention_diagnostic_path=(
+                    source_bg_attention_diagnostic_path
+                ),
                 global_frame_indices=list(range(src_video.shape[1])),
+                _projected_residual_energy_budget=(
+                    rollout_projected_residual_budget
+                ),
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
                 posterior_flow_mode=posterior_flow_mode,
@@ -2435,11 +2541,37 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     soft_region_modulation=soft_region_modulation,
                     soft_region_blend_strength=soft_region_blend_strength,
                     first_block_identity_anchor=first_block_identity_anchor,
-                identity_anchor_scale=identity_anchor_scale,
-                suppress_source_bg_value=suppress_source_bg_value,
-                projected_source_residual=projected_source_residual,
+                    identity_anchor_scale=identity_anchor_scale,
+                    suppress_source_bg_value=suppress_source_bg_value,
+                    counterfactual_source_bg_output=(
+                        counterfactual_source_bg_output
+                    ),
+                    projected_source_residual=projected_source_residual,
+                    projected_source_residual_energy_budget=(
+                        projected_source_residual_energy_budget
+                    ),
+                    projected_source_residual_norm_preserving=(
+                        projected_source_residual_norm_preserving
+                    ),
+                    drop_source_bg_kv=drop_source_bg_kv,
+                    source_bg_attention_diagnostics=(
+                        source_bg_attention_diagnostics
+                    ),
+                    source_bg_attention_diagnostic_query_samples=(
+                        source_bg_attention_diagnostic_query_samples
+                    ),
+                    source_bg_attention_diagnostic_path=(
+                        source_bg_attention_diagnostic_path
+                    ),
                     global_frame_indices=(
                         rollout_global_frame_indices[:proposal_frame_count]
+                    ),
+                    # A proposal rollout is discarded.  Do not let it
+                    # initialize the causal budget used by the real replay.
+                    _projected_residual_energy_budget=(
+                        CausalResidualEnergyBudget()
+                        if projected_source_residual_energy_budget
+                        else None
                     ),
                     role_boundary_radius=role_boundary_radius,
                     contact_target_weight=contact_target_weight,
@@ -2960,8 +3092,30 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 first_block_identity_anchor=first_block_identity_anchor,
                 identity_anchor_scale=identity_anchor_scale,
                 suppress_source_bg_value=suppress_source_bg_value,
+                counterfactual_source_bg_output=(
+                    counterfactual_source_bg_output
+                ),
                 projected_source_residual=projected_source_residual,
+                projected_source_residual_energy_budget=(
+                    projected_source_residual_energy_budget
+                ),
+                projected_source_residual_norm_preserving=(
+                    projected_source_residual_norm_preserving
+                ),
+                drop_source_bg_kv=drop_source_bg_kv,
+                source_bg_attention_diagnostics=(
+                    source_bg_attention_diagnostics
+                ),
+                source_bg_attention_diagnostic_query_samples=(
+                    source_bg_attention_diagnostic_query_samples
+                ),
+                source_bg_attention_diagnostic_path=(
+                    source_bg_attention_diagnostic_path
+                ),
                 global_frame_indices=rollout_global_frame_indices,
+                _projected_residual_energy_budget=(
+                    rollout_projected_residual_budget
+                ),
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
                 posterior_flow_mode=posterior_flow_mode,
@@ -3243,7 +3397,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
         first_block_identity_anchor: bool = False,
         identity_anchor_scale: float = 1.5,
         suppress_source_bg_value: bool = False,
+        counterfactual_source_bg_output: bool = False,
         projected_source_residual: bool = False,
+        projected_source_residual_energy_budget: bool = False,
+        projected_source_residual_norm_preserving: bool = False,
+        drop_source_bg_kv: bool = False,
+        source_bg_attention_diagnostics: bool = False,
+        source_bg_attention_diagnostic_query_samples: int = 4,
+        source_bg_attention_diagnostic_path: Optional[str] = None,
         global_frame_indices: Optional[List[int]] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
@@ -3314,9 +3475,57 @@ class EditCausalInferencePipeline(torch.nn.Module):
         _role_native_kv_history: Optional[
             RoleConditionedNativeKVHistory
         ] = None,
+        _projected_residual_energy_budget: Optional[
+            CausalResidualEnergyBudget
+        ] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
         independent_first_frame = independent_first_frame or self.independent_first_frame
+        if (
+            projected_source_residual_energy_budget
+            and not projected_source_residual
+        ):
+            raise ValueError(
+                "projected_source_residual_energy_budget requires "
+                "projected_source_residual"
+            )
+        if (
+            projected_source_residual_norm_preserving
+            and not projected_source_residual
+        ):
+            raise ValueError(
+                "projected_source_residual_norm_preserving requires "
+                "projected_source_residual"
+            )
+        if (
+            projected_source_residual_energy_budget
+            and projected_source_residual_norm_preserving
+        ):
+            raise ValueError(
+                "projected residual energy budget and norm preservation "
+                "are mutually exclusive"
+            )
+        if counterfactual_source_bg_output and (
+            suppress_source_bg_value or drop_source_bg_kv
+        ):
+            raise ValueError(
+                "counterfactual_source_bg_output requires the native "
+                "source-background K/V pair"
+            )
+        if (
+            counterfactual_source_bg_output
+            and routing_mode != "dynamic_sog"
+        ):
+            raise ValueError(
+                "counterfactual_source_bg_output requires dynamic_sog "
+                "routing"
+            )
+        projected_residual_budget = _projected_residual_energy_budget
+        if (
+            projected_source_residual_energy_budget
+            and projected_residual_budget is None
+        ):
+            projected_residual_budget = CausalResidualEnergyBudget()
 
         batch_size, num_frames, num_channels, height, width = src_video.shape
         if motion_geometry_owner:
@@ -5548,10 +5757,44 @@ class EditCausalInferencePipeline(torch.nn.Module):
             
             # obtain currently inprocessed kv_cache for dual branch
             shared_dict_dual = dict()
+            if counterfactual_source_bg_output:
+                shared_dict_dual.update({
+                    "counterfactual_source_bg_output": True,
+                    "counterfactual_source_bg_output_diagnostics": [],
+                })
             if suppress_source_bg_value:
                 shared_dict_dual[
                     "suppress_source_bg_value"
                 ] = True
+            if drop_source_bg_kv:
+                shared_dict_dual["drop_source_bg_kv"] = True
+                print(
+                    "SOURCE_BG_ROUTE "
+                    f"block={current_start_frame // self.num_frame_per_block} "
+                    "mode=drop_pair "
+                    "source_key_target_value_mismatch=disabled"
+                )
+            if source_bg_attention_diagnostics:
+                if source_bg_attention_diagnostic_query_samples <= 0:
+                    raise ValueError(
+                        "source_bg_attention_diagnostic_query_samples "
+                        "must be positive"
+                    )
+                if source_bg_attention_diagnostic_path is None:
+                    raise ValueError(
+                        "source_bg_attention_diagnostic_path is required "
+                        "when diagnostics are enabled"
+                    )
+                shared_dict_dual.update({
+                    "source_bg_attention_diagnostics_enabled": True,
+                    "source_bg_attention_diagnostic_query_samples": int(
+                        source_bg_attention_diagnostic_query_samples
+                    ),
+                    "source_bg_attention_diagnostics": {},
+                    "source_bg_attention_diagnostic_path": (
+                        source_bg_attention_diagnostic_path
+                    ),
+                })
             if persistent_identity_anchor_kv is not None:
                 shared_dict_dual[
                     "identity_anchor_kv"
@@ -7430,6 +7673,153 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     crossattn_cache=crossattn_cache_dual,
                     current_start=current_start_frame * self.frame_seq_length
                 )
+                if counterfactual_source_bg_output:
+                    counterfactual_rows = shared_dict_dual.get(
+                        "counterfactual_source_bg_output_diagnostics", []
+                    )
+                    if counterfactual_rows:
+                        def counterfactual_mean(name):
+                            return torch.stack([
+                                row[name].float()
+                                for row in counterfactual_rows
+                            ]).mean().item()
+
+                        print(
+                            "COUNTERFACTUAL_SOURCE_BG_OUTPUT "
+                            f"block={current_start_frame // self.num_frame_per_block} "
+                            f"step={index} "
+                            f"t={current_timestep / 1000:.4f} "
+                            f"rows={len(counterfactual_rows)} "
+                            "fg="
+                            f"{counterfactual_mean('foreground_fraction'):.4f} "
+                            "active="
+                            f"{counterfactual_mean('active_fraction'):.4f} "
+                            "src_rms="
+                            f"{counterfactual_mean('source_contribution_rms'):.6f} "
+                            "trg_raw_rms="
+                            f"{counterfactual_mean('target_contribution_rms_raw'):.6f} "
+                            "trg_matched_rms="
+                            f"{counterfactual_mean('target_contribution_rms_matched'):.6f} "
+                            "scale="
+                            f"{counterfactual_mean('replacement_scale'):.4f} "
+                            "scale_max="
+                            f"{counterfactual_mean('replacement_scale_max'):.4f} "
+                            "capped="
+                            f"{counterfactual_mean('scale_capped_fraction'):.4f} "
+                            "degenerate="
+                            f"{counterfactual_mean('degenerate_target_fraction'):.4f} "
+                            "correction_rms="
+                            f"{counterfactual_mean('correction_rms'):.6f}"
+                        )
+                    shared_dict_dual[
+                        "counterfactual_source_bg_output_diagnostics"
+                    ] = []
+                if source_bg_attention_diagnostics:
+                    block_index = (
+                        current_start_frame // self.num_frame_per_block
+                    )
+                    attention_diagnostics = shared_dict_dual.get(
+                        "source_bg_attention_diagnostics", {}
+                    )
+                    diagnostic_items = []
+                    for layer_index, layer_rows in sorted(
+                        attention_diagnostics.items()
+                    ):
+                        for item in layer_rows:
+                            diagnostic_items.append((layer_index, item))
+                    if diagnostic_items:
+                        import json
+
+                        scalar_names = (
+                            "source_value_rms",
+                            "target_value_rms",
+                            "source_bg_mass_all",
+                            "source_bg_mass_fg_query",
+                            "source_bg_mass_bg_query",
+                            "output_rms_all",
+                            "output_rms_fg_query",
+                            "output_rms_bg_query",
+                            "foreground_fraction",
+                        )
+                        vector_names = (
+                            "source_value_rms_per_head",
+                            "target_value_rms_per_head",
+                            "source_bg_mass_all_per_head",
+                            "source_bg_mass_fg_per_head",
+                            "source_bg_mass_bg_per_head",
+                            "output_rms_per_head",
+                        )
+                        packed_rows = []
+                        for _, item in diagnostic_items:
+                            packed_rows.append(torch.cat([
+                                *[item[name].float().reshape(1) for name in scalar_names],
+                                *[item[name].float().flatten() for name in vector_names],
+                            ]))
+                        packed_cpu = torch.stack(packed_rows).cpu().tolist()
+                        rows = []
+                        for (layer_index, item), packed in zip(
+                            diagnostic_items, packed_cpu
+                        ):
+                            offset = 0
+                            row = {
+                                "block": block_index,
+                                "timestep_index": index,
+                                "timestep": float(current_timestep / 1000),
+                                "layer": int(layer_index),
+                                "batch_index": int(item["batch_index"]),
+                            }
+                            for name in scalar_names:
+                                row[name] = float(packed[offset])
+                                offset += 1
+                            for name in vector_names:
+                                vector_width = int(item[name].numel())
+                                row[name] = [
+                                    float(value)
+                                    for value in packed[
+                                        offset:offset + vector_width
+                                    ]
+                                ]
+                                offset += vector_width
+                            for name in (
+                                "foreground_samples",
+                                "background_samples",
+                                "source_bg_tokens",
+                                "total_kv_tokens",
+                            ):
+                                row[name] = int(item[name])
+                            rows.append(row)
+                        output_path = shared_dict_dual[
+                            "source_bg_attention_diagnostic_path"
+                        ]
+                        with open(output_path, "a", encoding="utf-8") as file:
+                            for row in rows:
+                                file.write(json.dumps(row) + "\n")
+                        source_value_rms = sum(
+                            row["source_value_rms"] for row in rows
+                        ) / len(rows)
+                        target_value_rms = sum(
+                            row["target_value_rms"] for row in rows
+                        ) / len(rows)
+                        source_bg_mass = sum(
+                            row["source_bg_mass_all"] for row in rows
+                        ) / len(rows)
+                        output_rms = sum(
+                            row["output_rms_all"] for row in rows
+                        ) / len(rows)
+                        print(
+                            "SOURCE_BG_ATTN "
+                            f"block={block_index} step={index} "
+                            f"t={current_timestep / 1000:.4f} "
+                            f"layers={len(attention_diagnostics)} "
+                            f"rows={len(rows)} "
+                            f"src_v_rms={source_value_rms:.6f} "
+                            f"trg_v_rms={target_value_rms:.6f} "
+                            f"src_bg_mass={source_bg_mass:.6f} "
+                            f"out_rms={output_rms:.6f}"
+                        )
+                    shared_dict_dual[
+                        "source_bg_attention_diagnostics"
+                    ] = {}
                 if factorized_native_target_history and index == 0:
                     history_diagnostics = shared_dict_dual.get(
                         "native_target_history_diagnostics", {}
@@ -10119,6 +10509,25 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 target_change_core=valid_core,
                             )
                         )
+                        budget_diag = None
+                        norm_diag = None
+                        if projected_source_residual_norm_preserving:
+                            safe_residual, norm_diag = (
+                                restore_projected_residual_norm(
+                                    source_residual=source_residual,
+                                    projected_residual=safe_residual,
+                                    application_weight=bg_mask,
+                                )
+                            )
+                        if projected_source_residual_energy_budget:
+                            safe_residual, budget_diag = (
+                                projected_residual_budget.apply(
+                                    source_residual=source_residual,
+                                    projected_residual=safe_residual,
+                                    application_weight=bg_mask,
+                                    denoising_step_index=index,
+                                )
+                            )
                         v_t = v_trg + bg_mask * safe_residual
                         if index == 0:
                             removed_frac = (
@@ -10139,6 +10548,38 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 f"removed_frac={removed_frac:.4f} "
                                 f"core_coverage={valid_core.float().mean().item():.4f}"
                             )
+                            if budget_diag is not None:
+                                print(
+                                    "PROJECTED_RESIDUAL_BUDGET "
+                                    f"block={current_start_frame // self.num_frame_per_block} "
+                                    f"raw_frac={budget_diag['raw_removed_fraction'].mean().item():.4f} "
+                                    f"reference_frac={budget_diag['reference_removed_fraction'].mean().item():.4f} "
+                                    f"applied_frac={budget_diag['applied_removed_fraction'].mean().item():.4f} "
+                                    f"scale={budget_diag['projection_scale'].mean().item():.4f} "
+                                    "reference_initialized="
+                                    f"{int(budget_diag['reference_initialized'])}"
+                                )
+                            if norm_diag is not None:
+                                source_energy = norm_diag[
+                                    "source_energy"
+                                ]
+                                projected_energy = norm_diag[
+                                    "projected_energy"
+                                ]
+                                applied_energy = norm_diag[
+                                    "applied_energy"
+                                ]
+                                print(
+                                    "PROJECTED_RESIDUAL_NORM "
+                                    f"block={current_start_frame // self.num_frame_per_block} "
+                                    f"source_energy={source_energy.mean().item():.6f} "
+                                    f"projected_energy={projected_energy.mean().item():.6f} "
+                                    f"applied_energy={applied_energy.mean().item():.6f} "
+                                    f"scale={norm_diag['norm_scale'].mean().item():.4f} "
+                                    f"scale_max={norm_diag['norm_scale'].max().item():.4f} "
+                                    f"capped={norm_diag['scale_capped'].float().mean().item():.4f} "
+                                    f"degenerate={norm_diag['degenerate'].float().mean().item():.4f}"
+                                )
                     else:
                         v_t = v_trg + bg_mask * source_residual
                 denoised_pred = noisy_pred_input - t_i * v_t
