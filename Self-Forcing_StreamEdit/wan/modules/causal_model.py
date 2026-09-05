@@ -2421,6 +2421,14 @@ class CausalWanSelfAttention(nn.Module):
 
                     #✨ current source condition
                     b_src_current_fg_mask = kv_cache["current_src_fg_mask"][b_idx]              # [Lq, ]
+                    # S1+M2: role object posterior as owner gate
+                    b_role_object_posterior = (
+                        kv_cache.get("current_role_object_posterior")
+                        if kv_cache.get("current_role_object_posterior") is not None
+                        else None
+                    )
+                    if b_role_object_posterior is not None:
+                        b_role_object_posterior = b_role_object_posterior[b_idx]  # [Lq, ]
                     b_src_current_bg_mask = ~b_src_current_fg_mask                              # [Lq, ]
                     source_bg_segment = None
                     source_bg_value_rms = None
@@ -2622,7 +2630,9 @@ class CausalWanSelfAttention(nn.Module):
                                         ].to(device=b_target_output.device)
                                     ),
                                     owner_gate=(
-                                        b_src_current_fg_mask[None].float()
+                                        b_role_object_posterior[None].float()
+                                        if b_role_object_posterior is not None
+                                        else b_src_current_fg_mask[None].float()
                                     ),
                                     topk=int(
                                         shared_dict[
@@ -2680,7 +2690,9 @@ class CausalWanSelfAttention(nn.Module):
                                     ].to(device=b_target_output.device)
                                 ),
                                 owner_gate=(
-                                    b_src_current_fg_mask[None].float()
+                                    b_role_object_posterior[None].float()
+                                    if b_role_object_posterior is not None
+                                    else b_src_current_fg_mask[None].float()
                                 ),
                                 topk=int(
                                     shared_dict["immutable_delta_v_topk"]

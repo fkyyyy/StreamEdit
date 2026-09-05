@@ -6391,6 +6391,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             )
             current_roles = None
             role_edit_tokens = None
+            role_object_posterior_tokens = None
             contact_graphs = None
             hand_role_debug = None
             hand_role_inference = None
@@ -6570,6 +6571,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         hand_role_inference.token_edit_confidence
                         >= hand_posterior_threshold
                     )
+                # S1 novelty: flatten object posterior for M2 owner gate
+                role_object_posterior_tokens = (
+                    hand_role_debug["object_posterior"]
+                    .float()
+                    .reshape(batch_size, -1)
+                )
                 if causal_ownership_enabled:
                     owner_shape = hand_role_debug[
                         "object_posterior"
@@ -7990,6 +7997,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 current_causal_owner_mask=(
                     current_memory_query_weight
                 ),
+                current_role_object_posterior=role_object_posterior_tokens,
             )
             src_fg_mask_map = self._mask_reshape(
                 effective_src_fg_mask,
@@ -9420,6 +9428,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 current_causal_owner_mask=(
                                     current_memory_query_weight
                                 ),
+                                current_role_object_posterior=role_object_posterior_tokens,
                             )
                     print(
                         "HAND_ROLE_FIELD "
@@ -9651,6 +9660,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             current_causal_owner_mask=(
                                 current_memory_query_weight
                             ),
+                            current_role_object_posterior=role_object_posterior_tokens,
                         )
                     if edit_commitment_enabled:
                         hand_role_debug.update({
@@ -10073,6 +10083,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             current_causal_owner_mask=(
                                 current_memory_query_weight
                             ),
+                            current_role_object_posterior=role_object_posterior_tokens,
                         )
                     if (
                         identity_first_latent_bootstrap
@@ -11553,6 +11564,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         current_causal_owner_mask=(
                             current_memory_query_weight
                         ),
+                        current_role_object_posterior=role_object_posterior_tokens,
                     )
 
             # Step 3.2: record the model's output
@@ -13553,7 +13565,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             })
 
     def _inject_masks_to_kv_cache(
-        self, kv_cache, 
+        self, kv_cache,
         trg_fg_mask_cache=None, current_src_fg_mask=None,
         belief_kv_weight_cache=None,
         factorized_operator_cache=None,
@@ -13562,17 +13574,24 @@ class EditCausalInferencePipeline(torch.nn.Module):
         current_target_owned_mask=None,
         current_identity_read_mask=None,
         current_causal_owner_mask=None,
+        current_role_object_posterior=None,
     ):
         '''
         ✨
         trg_fg_mask: [B, kv_cache_size], previous chunks' foreground mask.
         current_src_fg_mask: [B, lq], current chunk's foreground mask.
+        current_role_object_posterior: [B, lq], role inference object posterior (S1 novelty).
         '''
         for b_idx in range(self.num_transformer_blocks):
             kv_cache[b_idx].update({
                 "trg_fg_mask": trg_fg_mask_cache['trg_fg_mask'],
                 "current_src_fg_mask": current_src_fg_mask,
+                "current_role_object_posterior": current_role_object_posterior,
             })
+            if current_role_object_posterior is not None:
+                kv_cache[b_idx]["current_role_object_posterior"] = (
+                    current_role_object_posterior
+                )
             if belief_kv_weight_cache is not None:
                 kv_cache[b_idx].update({
                     "cached_preserve_kv_action": (
