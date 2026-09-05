@@ -1,0 +1,201 @@
+{
+  "video_frames": 81,
+  "offline_mask_frames": 127,
+  "fixed_crop_xyxy": [
+    331,
+    212,
+    573,
+    480
+  ],
+  "block_boundaries": [
+    9,
+    21,
+    33,
+    45,
+    57,
+    69
+  ],
+  "periods": {
+    "early": {
+      "frames": [
+        0,
+        20
+      ],
+      "object_luma_median_mean": 41.80315217517671,
+      "brown_shell_luma_median_mean": 41.607647123790926,
+      "brown_shell_fraction_mean": 0.8726335100281815,
+      "cool_spot_fraction_mean": 0.05330311935283992,
+      "background_luma_median_mean": 88.29090663364956,
+      "brown_to_background_ratio_mean": 0.47112354210444857
+    },
+    "middle": {
+      "frames": [
+        32,
+        52
+      ],
+      "object_luma_median_mean": 46.18580018906366,
+      "brown_shell_luma_median_mean": 43.804704666137695,
+      "brown_shell_fraction_mean": 0.7126523320267426,
+      "cool_spot_fraction_mean": 0.10836807118989421,
+      "background_luma_median_mean": 84.43627457391648,
+      "brown_to_background_ratio_mean": 0.5192115221704755
+    },
+    "late": {
+      "frames": [
+        60,
+        80
+      ],
+      "object_luma_median_mean": 44.30122339157831,
+      "brown_shell_luma_median_mean": 37.96562340146019,
+      "brown_shell_fraction_mean": 0.45874862325722954,
+      "cool_spot_fraction_mean": 0.23967733048407475,
+      "background_luma_median_mean": 85.42005666097005,
+      "brown_to_background_ratio_mean": 0.44460001304036095
+    }
+  },
+  "brown_shell_luma_late_minus_early": -3.642023722330734,
+  "brown_shell_luma_relative_change": -0.08753255649123826,
+  "cool_spot_late_minus_early": 0.1863742111312348,
+  "cool_spot_detection_threshold": 0.07330311935283992,
+  "cool_spot_first_detected_frame": 45,
+  "boundary_jumps": {
+    "9": {
+      "brown_shell_luma_delta": 1.145599365234375,
+      "cool_spot_fraction_delta": 0.0003365854231062726,
+      "brown_luma_post4_minus_pre4": 0.6345529556274414
+    },
+    "21": {
+      "brown_shell_luma_delta": 0.7192001342773438,
+      "cool_spot_fraction_delta": -0.00010496037778066902,
+      "brown_luma_post4_minus_pre4": -0.7472496032714844
+    },
+    "33": {
+      "brown_shell_luma_delta": 10.004003524780273,
+      "cool_spot_fraction_delta": -0.001134132978353554,
+      "brown_luma_post4_minus_pre4": 9.3267502784729
+    },
+    "45": {
+      "brown_shell_luma_delta": 4.282005310058594,
+      "cool_spot_fraction_delta": 0.06946560746324656,
+      "brown_luma_post4_minus_pre4": 4.284101486206055
+    },
+    "57": {
+      "brown_shell_luma_delta": 1.4263992309570312,
+      "cool_spot_fraction_delta": 0.055787143272253176,
+      "brown_luma_post4_minus_pre4": -1.2704505920410156
+    },
+    "69": {
+      "brown_shell_luma_delta": 5.128997802734375,
+      "cool_spot_fraction_delta": 0.09203090721445267,
+      "brown_luma_post4_minus_pre4": -0.9757499694824219
+    }
+  },
+  "causal_blocks": {
+    "0": {
+      "frames": [
+        0,
+        8
+      ],
+      "object_luma_median_mean": 43.412821451822914,
+      "brown_shell_luma_median_mean": 43.31759897867838,
+      "brown_shell_fraction_mean": 0.8839235873901061,
+      "cool_spot_fraction_mean": 0.04788886286714886,
+      "background_luma_median_mean": 88.48033650716145,
+      "brown_to_background_ratio_mean": 0.4894961416721344,
+      "brown_shell_luma_first": 40.88960266113281,
+      "brown_shell_luma_last": 53.24140167236328,
+      "brown_shell_luma_within_block_delta": 12.351799011230469
+    },
+    "1": {
+      "frames": [
+        9,
+        20
+      ],
+      "object_luma_median_mean": 40.595900217692055,
+      "brown_shell_luma_median_mean": 40.32518323262533,
+      "brown_shell_fraction_mean": 0.8641659520067381,
+      "cool_spot_fraction_mean": 0.05736381171710823,
+      "background_luma_median_mean": 88.14883422851562,
+      "brown_to_background_ratio_mean": 0.45734409242868423,
+      "brown_shell_luma_first": 54.387001037597656,
+      "brown_shell_luma_last": 31.974998474121094,
+      "brown_shell_luma_within_block_delta": -22.412002563476562
+    },
+    "2": {
+      "frames": [
+        21,
+        32
+      ],
+      "object_luma_median_mean": 32.98648373285929,
+      "brown_shell_luma_median_mean": 32.78440046310425,
+      "brown_shell_fraction_mean": 0.8421269955647294,
+      "cool_spot_fraction_mean": 0.06388061072418065,
+      "background_luma_median_mean": 86.72350947062175,
+      "brown_to_background_ratio_mean": 0.3779972766836484,
+      "brown_shell_luma_first": 32.69419860839844,
+      "brown_shell_luma_last": 27.76759910583496,
+      "brown_shell_luma_within_block_delta": -4.926599502563477
+    },
+    "3": {
+      "frames": [
+        33,
+        44
+      ],
+      "object_luma_median_mean": 41.63940016428629,
+      "brown_shell_luma_median_mean": 41.82803281148275,
+      "brown_shell_fraction_mean": 0.7632717775593371,
+      "cool_spot_fraction_mean": 0.05792214917608177,
+      "background_luma_median_mean": 84.67986424763997,
+      "brown_to_background_ratio_mean": 0.49399230380853015,
+      "brown_shell_luma_first": 37.771602630615234,
+      "brown_shell_luma_last": 40.92399597167969,
+      "brown_shell_luma_within_block_delta": 3.152393341064453
+    },
+    "4": {
+      "frames": [
+        45,
+        56
+      ],
+      "object_luma_median_mean": 52.456583976745605,
+      "brown_shell_luma_median_mean": 46.78278382619222,
+      "brown_shell_fraction_mean": 0.6114141533692162,
+      "cool_spot_fraction_mean": 0.1833967199214301,
+      "background_luma_median_mean": 84.00089899698894,
+      "brown_to_background_ratio_mean": 0.5570016826192538,
+      "brown_shell_luma_first": 45.20600128173828,
+      "brown_shell_luma_last": 39.85580062866211,
+      "brown_shell_luma_within_block_delta": -5.350200653076172
+    },
+    "5": {
+      "frames": [
+        57,
+        68
+      ],
+      "object_luma_median_mean": 48.886241594950356,
+      "brown_shell_luma_median_mean": 39.90106614430746,
+      "brown_shell_fraction_mean": 0.4615332789641211,
+      "cool_spot_fraction_mean": 0.27562376059284316,
+      "background_luma_median_mean": 84.66984748840332,
+      "brown_to_background_ratio_mean": 0.4713652531305949,
+      "brown_shell_luma_first": 41.28219985961914,
+      "brown_shell_luma_last": 32.196800231933594,
+      "brown_shell_luma_within_block_delta": -9.085399627685547
+    },
+    "6": {
+      "frames": [
+        69,
+        80
+      ],
+      "object_luma_median_mean": 41.058732668558754,
+      "brown_shell_luma_median_mean": 36.92580795288086,
+      "brown_shell_fraction_mean": 0.4560140917504319,
+      "cool_spot_fraction_mean": 0.21196415325120344,
+      "background_luma_median_mean": 85.8685843149821,
+      "brown_to_background_ratio_mean": 0.4300268317262332,
+      "brown_shell_luma_first": 37.32579803466797,
+      "brown_shell_luma_last": 37.461299896240234,
+      "brown_shell_luma_within_block_delta": 0.13550186157226562
+    }
+  },
+  "interpretation_note": "phone mask used offline only; brown and cool classes are color diagnostics, not semantic segmentation"
+}

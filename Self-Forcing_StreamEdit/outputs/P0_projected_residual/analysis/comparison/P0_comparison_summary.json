@@ -1,0 +1,92 @@
+{
+  "offline_phone_mask_only": true,
+  "common_edit_support_threshold_from": "L0",
+  "edit_support_thresholds": {
+    "L0": 0.0572660468518734,
+    "F0R": 0.0572660468518734,
+    "P0": 0.0572660468518734
+  },
+  "methods": {
+    "L0": {
+      "mean_step_px": 1.082809405054455,
+      "median_step_px": 0.8407607745764565,
+      "p90_step_px": 2.26425306540166,
+      "boundary_step_px": 1.1550427019837977,
+      "nonboundary_step_px": 1.0769526512493734,
+      "boundary_to_nonboundary_ratio": 1.072510198701709,
+      "mean_temporal_iou": 0.9578125471403084,
+      "mean_angle_step_deg": 1.3512837664346027,
+      "largest_step_frames": [
+        80,
+        44,
+        26,
+        33,
+        68,
+        31,
+        50,
+        43
+      ],
+      "luma_vs_geometry_step_spearman_r": -0.02714502546357831,
+      "luma_vs_geometry_step_p": 0.8110937041118714,
+      "cool_spot_vs_geometry_step_spearman_r": -0.14655414908579467,
+      "cool_spot_vs_geometry_step_p": 0.19456013880868844,
+      "early_luma_mean": 40.46789968581427,
+      "late_luma_mean": 40.9630241394043,
+      "late_cool_spot_mean": 0.2960937633832466
+    },
+    "F0R": {
+      "mean_step_px": 1.4730227014728843,
+      "median_step_px": 1.077000402120805,
+      "p90_step_px": 3.098102156393625,
+      "boundary_step_px": 1.2774066237180484,
+      "nonboundary_step_px": 1.4888834645340872,
+      "boundary_to_nonboundary_ratio": 0.8579627983965717,
+      "mean_temporal_iou": 0.9560029084383157,
+      "mean_angle_step_deg": 1.5885835068220386,
+      "largest_step_frames": [
+        31,
+        1,
+        50,
+        22,
+        68,
+        26,
+        80,
+        30
+      ],
+      "luma_vs_geometry_step_spearman_r": -0.011010789203690328,
+      "luma_vs_geometry_step_p": 0.9227768825050089,
+      "cool_spot_vs_geometry_step_spearman_r": -0.005813408345053915,
+      "cool_spot_vs_geometry_step_p": 0.9591830660424236,
+      "early_luma_mean": 26.27678044637044,
+      "late_luma_mean": 25.93259084792364,
+      "late_cool_spot_mean": 0.01464546689280262
+    },
+    "P0": {
+      "mean_step_px": 1.1731332541281847,
+      "median_step_px": 1.039236597800518,
+      "p90_step_px": 2.3986570962624048,
+      "boundary_step_px": 1.34792956754389,
+      "nonboundary_step_px": 1.1589605800674518,
+      "boundary_to_nonboundary_ratio": 1.1630504011322285,
+      "mean_temporal_iou": 0.9585515021963742,
+      "mean_angle_step_deg": 1.4478727806266094,
+      "largest_step_frames": [
+        31,
+        50,
+        26,
+        80,
+        51,
+        33,
+        68,
+        42
+      ],
+      "luma_vs_geometry_step_spearman_r": -0.024121097756495753,
+      "luma_vs_geometry_step_p": 0.8318097953757161,
+      "cool_spot_vs_geometry_step_spearman_r": 0.00902484763244257,
+      "cool_spot_vs_geometry_step_p": 0.9366732159175898,
+      "early_luma_mean": 41.00005631219773,
+      "late_luma_mean": 37.07540911719913,
+      "late_cool_spot_mean": 0.22724391373753874
+    }
+  }
+}
