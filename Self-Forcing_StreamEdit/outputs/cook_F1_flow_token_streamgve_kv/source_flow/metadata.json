@@ -1,0 +1,41 @@
+{
+  "format_version": 1,
+  "video": "/opt/tiger/CausalForcing/StreamEdit/cook.mp4",
+  "video_sha256": "14ce932c8c431c3b06e2137b28876c390aa8baddba54f7ca8974e2121ae4947a",
+  "checkpoint": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/checkpoints/optical_flow/raft_large_C_T_SKHT_V2-ff5fadd5.pth",
+  "checkpoint_sha256": "ff5fadd56d26b40647388883af1547351ea17868b765c05b27231e72dd16a322",
+  "model": "torchvision_raft_large_C_T_SKHT_V2",
+  "frame_count": 81,
+  "pair_count": 80,
+  "fps": 15.0,
+  "original_size": [
+    1440,
+    1920
+  ],
+  "resized_size": [
+    480,
+    832
+  ],
+  "resize_mode": "exact_bilinear_matching_inference",
+  "flow_convention": "pixel_dx_dy_defined_on_origin_frame",
+  "tensor_file": "raft_large_bidirectional_flow.pt",
+  "tensor_dtype": "float16_flow_confidence_error_bool_occlusion",
+  "forward_flow_shape": [
+    80,
+    2,
+    480,
+    832
+  ],
+  "fb_alpha": 0.01,
+  "fb_beta": 0.5,
+  "mean_flow_magnitude_px": 2.053037643432617,
+  "p95_flow_magnitude_px": 6.223671913146973,
+  "mean_forward_confidence": 0.9421449899673462,
+  "forward_occlusion_fraction": 0.031919319182634354,
+  "input_contract": {
+    "clean_source_rgb": true,
+    "external_hand_mask": false,
+    "external_object_mask": false,
+    "generated_video": false
+  }
+}

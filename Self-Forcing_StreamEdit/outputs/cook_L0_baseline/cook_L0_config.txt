@@ -1,0 +1,14 @@
+experiment=cook_L0_baseline
+edit=metal_spatula_to_wooden_spatula
+code_entry=current_StreamEdit_inference_edit_streamedit.py
+routing=default_dynamic_sog
+hand_mask=disabled
+flow=disabled
+factorized=disabled
+soft_modulation=disabled
+suppress=disabled
+anchor=disabled
+M1=disabled
+M2=disabled
+data_path=/opt/tiger/CausalForcing/StreamEdit/cook.mp4
+command= python /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/inference_edit_streamedit.py --data_path /opt/tiger/CausalForcing/StreamEdit/cook.mp4 --save_path /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/outputs/cook_L0_baseline/cook-L0-baseline.mp4 --src_prompt First-person\ POV\ shot\ from\ above\,\ wide-angle\ lens.\ A\ person\ is\ standing\ at\ a\ kitchen\ counter\,\ cooking\ on\ an\ induction\ stovetop.\ The\ right\ hand\ holds\ a\ metal\ spatula\,\ actively\ stirring\ and\ flipping\ diced\ ingredients\ in\ a\ large\ dark\ non-stick\ frying\ pan.\ The\ left\ hand\ grips\ the\ pan\ handle\ to\ steady\ it.\ Diced\ potatoes\,\ onions\,\ and\ small\ meat\ cubes\ are\ being\ stir-fried\ in\ the\ pan.\ A\ bowl\ of\ beaten\ eggs\ sits\ to\ the\ lower\ left.\ The\ granite\ countertop\ is\ cluttered\ with\ wine\ bottles\,\ a\ stainless\ steel\ kettle\,\ a\ white\ colander\,\ glass\ jars\,\ condiment\ bottles\,\ and\ a\ small\ yellow\ cup.\ A\ second\ dark\ pan\ sits\ on\ the\ adjacent\ burner.\ Warm\ indoor\ lighting\,\ realistic\ 4k\ video\ style\,\ slight\ overhead\ fish-eye\ effect. --trg_prompt First-person\ POV\ shot\ from\ above\,\ wide-angle\ lens.\ A\ person\ is\ standing\ at\ a\ kitchen\ counter\,\ cooking\ on\ an\ induction\ stovetop.\ The\ right\ hand\ holds\ a\ wooden\ spatula\ with\ a\ flat\,\ wide\ paddle\ head\ made\ of\ smooth\ light-colored\ natural\ wood\ with\ visible\ grain\,\ actively\ stirring\ and\ flipping\ diced\ ingredients\ in\ a\ large\ dark\ non-stick\ frying\ pan.\ The\ left\ hand\ grips\ the\ pan\ handle\ to\ steady\ it.\ Diced\ potatoes\,\ onions\,\ and\ small\ meat\ cubes\ are\ being\ stir-fried\ in\ the\ pan.\ A\ bowl\ of\ beaten\ eggs\ sits\ to\ the\ lower\ left.\ The\ granite\ countertop\ is\ cluttered\ with\ wine\ bottles\,\ a\ stainless\ steel\ kettle\,\ a\ white\ colander\,\ glass\ jars\,\ condiment\ bottles\,\ and\ a\ small\ yellow\ cup.\ A\ second\ dark\ pan\ sits\ on\ the\ adjacent\ burner.\ Warm\ indoor\ lighting\,\ realistic\ 4k\ video\ style\,\ slight\ overhead\ fish-eye\ effect. --src_word metal\ spatula --trg_word wooden\ spatula --fg_boost_factor 4 --blend_power 2 --step 15 --seed 0 --rollout_chunk_size 21 --rollout_overlap_block_num 1
