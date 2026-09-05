@@ -1,0 +1,185 @@
+/usr/local/lib/python3.11/dist-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (1.26.20) or chardet (7.4.3)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+Free VRAM 78.9140625 GB
+KV inference with 3 frames per block
+81 960 1280
+MASK_TEMPORAL_ALIGNMENT mode=causal_first_frame_then_stride pixel_frames=81 latent_frames=21 temporal_stride=4
+[[23]] [[23, 24, 25]]
+  0%|          | 0/7 [00:00<?, ?it/s]
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:05,  2.73it/s][A
+ 13%|█▎        | 2/15 [00:00<00:04,  2.85it/s][A
+ 20%|██        | 3/15 [00:01<00:04,  2.89it/s][A
+ 27%|██▋       | 4/15 [00:01<00:03,  2.91it/s][A
+ 33%|███▎      | 5/15 [00:01<00:03,  2.92it/s][A
+ 40%|████      | 6/15 [00:02<00:03,  2.92it/s][A
+ 47%|████▋     | 7/15 [00:02<00:02,  2.92it/s][A
+ 53%|█████▎    | 8/15 [00:02<00:02,  2.90it/s][A
+ 60%|██████    | 9/15 [00:03<00:02,  2.69it/s][A
+ 67%|██████▋   | 10/15 [00:03<00:01,  2.57it/s][A
+ 73%|███████▎  | 11/15 [00:04<00:01,  2.49it/s][A
+ 80%|████████  | 12/15 [00:04<00:01,  2.44it/s][A
+ 87%|████████▋ | 13/15 [00:04<00:00,  2.41it/s][A
+ 93%|█████████▎| 14/15 [00:05<00:00,  2.38it/s][A
+100%|██████████| 15/15 [00:05<00:00,  2.37it/s][A
+                                               [A 14%|█▍        | 1/7 [00:06<00:37,  6.18s/it]PROJECTED_RESIDUAL block=0 removed_frac=0.0256 core_coverage=1.0000
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=0 step=8 t=0.4660 rows=30 fg=0.1303 active=1.0000 src_rms=0.101026 trg_raw_rms=0.100439 trg_matched_rms=0.101026 scale=1.0235 scale_max=1.5916 capped=0.0000 degenerate=0.0000 correction_rms=0.054140
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=0 step=9 t=0.4000 rows=30 fg=0.1303 active=1.0000 src_rms=0.100059 trg_raw_rms=0.096367 trg_matched_rms=0.100059 scale=1.0472 scale_max=1.4481 capped=0.0000 degenerate=0.0000 correction_rms=0.044931
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=0 step=10 t=0.3330 rows=30 fg=0.1303 active=1.0000 src_rms=0.097763 trg_raw_rms=0.094292 trg_matched_rms=0.097763 scale=1.0448 scale_max=1.4352 capped=0.0000 degenerate=0.0000 correction_rms=0.040029
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=0 step=11 t=0.2660 rows=30 fg=0.1303 active=1.0000 src_rms=0.095740 trg_raw_rms=0.093321 trg_matched_rms=0.095740 scale=1.0345 scale_max=1.4081 capped=0.0000 degenerate=0.0000 correction_rms=0.037870
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=0 step=12 t=0.2000 rows=30 fg=0.1303 active=1.0000 src_rms=0.092557 trg_raw_rms=0.089755 trg_matched_rms=0.092557 scale=1.0395 scale_max=1.3487 capped=0.0000 degenerate=0.0000 correction_rms=0.032401
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=0 step=13 t=0.1330 rows=30 fg=0.1303 active=1.0000 src_rms=0.092243 trg_raw_rms=0.089569 trg_matched_rms=0.092243 scale=1.0389 scale_max=1.3518 capped=0.0000 degenerate=0.0000 correction_rms=0.033026
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=0 step=14 t=0.0660 rows=30 fg=0.1303 active=1.0000 src_rms=0.094198 trg_raw_rms=0.091869 trg_matched_rms=0.094198 scale=1.0333 scale_max=1.3747 capped=0.0000 degenerate=0.0000 correction_rms=0.033103
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:05,  2.43it/s][A
+ 13%|█▎        | 2/15 [00:00<00:05,  2.43it/s][A
+ 20%|██        | 3/15 [00:01<00:04,  2.43it/s][A
+ 27%|██▋       | 4/15 [00:01<00:04,  2.44it/s][A
+ 33%|███▎      | 5/15 [00:02<00:04,  2.44it/s][A
+ 40%|████      | 6/15 [00:02<00:03,  2.44it/s][A
+ 47%|████▋     | 7/15 [00:02<00:03,  2.44it/s][A
+ 53%|█████▎    | 8/15 [00:03<00:02,  2.42it/s][A
+ 60%|██████    | 9/15 [00:03<00:02,  2.27it/s][A
+ 67%|██████▋   | 10/15 [00:04<00:02,  2.18it/s][A
+ 73%|███████▎  | 11/15 [00:04<00:01,  2.12it/s][A
+ 80%|████████  | 12/15 [00:05<00:01,  2.09it/s][A
+ 87%|████████▋ | 13/15 [00:05<00:00,  2.06it/s][A
+ 93%|█████████▎| 14/15 [00:06<00:00,  2.04it/s][A
+100%|██████████| 15/15 [00:06<00:00,  2.03it/s][A
+                                               [A 29%|██▊       | 2/7 [00:13<00:33,  6.79s/it]PROJECTED_RESIDUAL block=1 removed_frac=0.0549 core_coverage=1.0000
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=1 step=8 t=0.4660 rows=30 fg=0.0906 active=1.0000 src_rms=0.081379 trg_raw_rms=0.080065 trg_matched_rms=0.081379 scale=0.9987 scale_max=1.3727 capped=0.0000 degenerate=0.0000 correction_rms=0.045737
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=1 step=9 t=0.4000 rows=30 fg=0.0906 active=1.0000 src_rms=0.080810 trg_raw_rms=0.079277 trg_matched_rms=0.080810 scale=1.0055 scale_max=1.3836 capped=0.0000 degenerate=0.0000 correction_rms=0.042193
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=1 step=10 t=0.3330 rows=30 fg=0.0906 active=1.0000 src_rms=0.079450 trg_raw_rms=0.077537 trg_matched_rms=0.079450 scale=1.0215 scale_max=1.3610 capped=0.0000 degenerate=0.0000 correction_rms=0.039453
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=1 step=11 t=0.2660 rows=30 fg=0.0906 active=1.0000 src_rms=0.078234 trg_raw_rms=0.076521 trg_matched_rms=0.078234 scale=1.0182 scale_max=1.3092 capped=0.0000 degenerate=0.0000 correction_rms=0.038136
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=1 step=12 t=0.2000 rows=30 fg=0.0906 active=1.0000 src_rms=0.076857 trg_raw_rms=0.075418 trg_matched_rms=0.076857 scale=1.0149 scale_max=1.2958 capped=0.0000 degenerate=0.0000 correction_rms=0.037118
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=1 step=13 t=0.1330 rows=30 fg=0.0906 active=1.0000 src_rms=0.077058 trg_raw_rms=0.075826 trg_matched_rms=0.077058 scale=1.0111 scale_max=1.2909 capped=0.0000 degenerate=0.0000 correction_rms=0.036376
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=1 step=14 t=0.0660 rows=30 fg=0.0906 active=1.0000 src_rms=0.078033 trg_raw_rms=0.077233 trg_matched_rms=0.078033 scale=0.9998 scale_max=1.3111 capped=0.0000 degenerate=0.0000 correction_rms=0.035244
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:06,  2.09it/s][A
+ 13%|█▎        | 2/15 [00:00<00:06,  2.10it/s][A
+ 20%|██        | 3/15 [00:01<00:05,  2.10it/s][A
+ 27%|██▋       | 4/15 [00:01<00:05,  2.10it/s][A
+ 33%|███▎      | 5/15 [00:02<00:04,  2.10it/s][A
+ 40%|████      | 6/15 [00:02<00:04,  2.10it/s][A
+ 47%|████▋     | 7/15 [00:03<00:03,  2.10it/s][A
+ 53%|█████▎    | 8/15 [00:03<00:03,  2.09it/s][A
+ 60%|██████    | 9/15 [00:04<00:03,  1.96it/s][A
+ 67%|██████▋   | 10/15 [00:04<00:02,  1.89it/s][A
+ 73%|███████▎  | 11/15 [00:05<00:02,  1.84it/s][A
+ 80%|████████  | 12/15 [00:06<00:01,  1.81it/s][A
+ 87%|████████▋ | 13/15 [00:06<00:01,  1.79it/s][A
+ 93%|█████████▎| 14/15 [00:07<00:00,  1.77it/s][A
+100%|██████████| 15/15 [00:07<00:00,  1.76it/s][A
+                                               [A 43%|████▎     | 3/7 [00:21<00:29,  7.49s/it]PROJECTED_RESIDUAL block=2 removed_frac=0.0703 core_coverage=1.0000
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=2 step=8 t=0.4660 rows=30 fg=0.0904 active=1.0000 src_rms=0.088869 trg_raw_rms=0.088096 trg_matched_rms=0.088869 scale=0.9935 scale_max=1.3768 capped=0.0000 degenerate=0.0000 correction_rms=0.048955
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=2 step=9 t=0.4000 rows=30 fg=0.0904 active=1.0000 src_rms=0.088079 trg_raw_rms=0.086918 trg_matched_rms=0.088079 scale=1.0065 scale_max=1.3218 capped=0.0000 degenerate=0.0000 correction_rms=0.045822
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=2 step=10 t=0.3330 rows=30 fg=0.0904 active=1.0000 src_rms=0.086250 trg_raw_rms=0.085285 trg_matched_rms=0.086250 scale=1.0049 scale_max=1.3961 capped=0.0000 degenerate=0.0000 correction_rms=0.043819
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=2 step=11 t=0.2660 rows=30 fg=0.0904 active=1.0000 src_rms=0.083916 trg_raw_rms=0.083242 trg_matched_rms=0.083916 scale=0.9980 scale_max=1.3080 capped=0.0000 degenerate=0.0000 correction_rms=0.042146
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=2 step=12 t=0.2000 rows=30 fg=0.0904 active=1.0000 src_rms=0.082726 trg_raw_rms=0.082267 trg_matched_rms=0.082726 scale=0.9963 scale_max=1.3958 capped=0.0000 degenerate=0.0000 correction_rms=0.041190
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=2 step=13 t=0.1330 rows=30 fg=0.0904 active=1.0000 src_rms=0.082057 trg_raw_rms=0.081571 trg_matched_rms=0.082057 scale=1.0050 scale_max=1.3090 capped=0.0000 degenerate=0.0000 correction_rms=0.039969
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=2 step=14 t=0.0660 rows=30 fg=0.0904 active=1.0000 src_rms=0.083382 trg_raw_rms=0.082940 trg_matched_rms=0.083382 scale=1.0033 scale_max=1.3462 capped=0.0000 degenerate=0.0000 correction_rms=0.039698
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:07,  1.83it/s][A
+ 13%|█▎        | 2/15 [00:01<00:07,  1.84it/s][A
+ 20%|██        | 3/15 [00:01<00:06,  1.84it/s][A
+ 27%|██▋       | 4/15 [00:02<00:05,  1.84it/s][A
+ 33%|███▎      | 5/15 [00:02<00:05,  1.84it/s][A
+ 40%|████      | 6/15 [00:03<00:04,  1.84it/s][A
+ 47%|████▋     | 7/15 [00:03<00:04,  1.84it/s][A
+ 53%|█████▎    | 8/15 [00:04<00:03,  1.83it/s][A
+ 60%|██████    | 9/15 [00:05<00:03,  1.73it/s][A
+ 67%|██████▋   | 10/15 [00:05<00:03,  1.66it/s][A
+ 73%|███████▎  | 11/15 [00:06<00:02,  1.62it/s][A
+ 80%|████████  | 12/15 [00:06<00:01,  1.60it/s][A
+ 87%|████████▋ | 13/15 [00:07<00:01,  1.58it/s][A
+ 93%|█████████▎| 14/15 [00:08<00:00,  1.57it/s][A
+100%|██████████| 15/15 [00:08<00:00,  1.56it/s][A
+                                               [A 57%|█████▋    | 4/7 [00:31<00:24,  8.27s/it]PROJECTED_RESIDUAL block=3 removed_frac=0.0909 core_coverage=1.0000
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=3 step=8 t=0.4660 rows=30 fg=0.0733 active=1.0000 src_rms=0.092048 trg_raw_rms=0.089131 trg_matched_rms=0.092048 scale=1.0347 scale_max=1.3257 capped=0.0000 degenerate=0.0000 correction_rms=0.055985
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=3 step=9 t=0.4000 rows=30 fg=0.0733 active=1.0000 src_rms=0.090183 trg_raw_rms=0.087895 trg_matched_rms=0.090183 scale=1.0252 scale_max=1.3590 capped=0.0000 degenerate=0.0000 correction_rms=0.052368
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=3 step=10 t=0.3330 rows=30 fg=0.0733 active=1.0000 src_rms=0.086908 trg_raw_rms=0.084956 trg_matched_rms=0.086908 scale=1.0271 scale_max=1.3034 capped=0.0000 degenerate=0.0000 correction_rms=0.049182
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=3 step=11 t=0.2660 rows=30 fg=0.0733 active=1.0000 src_rms=0.085420 trg_raw_rms=0.083303 trg_matched_rms=0.085420 scale=1.0257 scale_max=1.3971 capped=0.0000 degenerate=0.0000 correction_rms=0.048922
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=3 step=12 t=0.2000 rows=30 fg=0.0733 active=1.0000 src_rms=0.083362 trg_raw_rms=0.081647 trg_matched_rms=0.083362 scale=1.0218 scale_max=1.3535 capped=0.0000 degenerate=0.0000 correction_rms=0.046782
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=3 step=13 t=0.1330 rows=30 fg=0.0733 active=1.0000 src_rms=0.083857 trg_raw_rms=0.082249 trg_matched_rms=0.083857 scale=1.0215 scale_max=1.3196 capped=0.0000 degenerate=0.0000 correction_rms=0.046990
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=3 step=14 t=0.0660 rows=30 fg=0.0733 active=1.0000 src_rms=0.084357 trg_raw_rms=0.083083 trg_matched_rms=0.084357 scale=1.0152 scale_max=1.3142 capped=0.0000 degenerate=0.0000 correction_rms=0.046265
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:08,  1.63it/s][A
+ 13%|█▎        | 2/15 [00:01<00:07,  1.64it/s][A
+ 20%|██        | 3/15 [00:01<00:07,  1.64it/s][A
+ 27%|██▋       | 4/15 [00:02<00:06,  1.63it/s][A
+ 33%|███▎      | 5/15 [00:03<00:06,  1.63it/s][A
+ 40%|████      | 6/15 [00:03<00:05,  1.64it/s][A
+ 47%|████▋     | 7/15 [00:04<00:04,  1.64it/s][A
+ 53%|█████▎    | 8/15 [00:04<00:04,  1.63it/s][A
+ 60%|██████    | 9/15 [00:05<00:03,  1.54it/s][A
+ 67%|██████▋   | 10/15 [00:06<00:03,  1.49it/s][A
+ 73%|███████▎  | 11/15 [00:07<00:02,  1.45it/s][A
+ 80%|████████  | 12/15 [00:07<00:02,  1.43it/s][A
+ 87%|████████▋ | 13/15 [00:08<00:01,  1.41it/s][A
+ 93%|█████████▎| 14/15 [00:09<00:00,  1.40it/s][A
+100%|██████████| 15/15 [00:09<00:00,  1.39it/s][A
+                                               [A 71%|███████▏  | 5/7 [00:41<00:18,  9.11s/it]PROJECTED_RESIDUAL block=4 removed_frac=0.0936 core_coverage=1.0000
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=4 step=8 t=0.4660 rows=30 fg=0.0735 active=1.0000 src_rms=0.092643 trg_raw_rms=0.090612 trg_matched_rms=0.092643 scale=1.0209 scale_max=1.2936 capped=0.0000 degenerate=0.0000 correction_rms=0.053645
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=4 step=9 t=0.4000 rows=30 fg=0.0735 active=1.0000 src_rms=0.092288 trg_raw_rms=0.090152 trg_matched_rms=0.092288 scale=1.0275 scale_max=1.3125 capped=0.0000 degenerate=0.0000 correction_rms=0.052136
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=4 step=10 t=0.3330 rows=30 fg=0.0735 active=1.0000 src_rms=0.089742 trg_raw_rms=0.087937 trg_matched_rms=0.089742 scale=1.0202 scale_max=1.3014 capped=0.0000 degenerate=0.0000 correction_rms=0.050531
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=4 step=11 t=0.2660 rows=30 fg=0.0735 active=1.0000 src_rms=0.087625 trg_raw_rms=0.085896 trg_matched_rms=0.087625 scale=1.0239 scale_max=1.3477 capped=0.0000 degenerate=0.0000 correction_rms=0.048977
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=4 step=12 t=0.2000 rows=30 fg=0.0735 active=1.0000 src_rms=0.085308 trg_raw_rms=0.083941 trg_matched_rms=0.085308 scale=1.0201 scale_max=1.3315 capped=0.0000 degenerate=0.0000 correction_rms=0.047091
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=4 step=13 t=0.1330 rows=30 fg=0.0735 active=1.0000 src_rms=0.085630 trg_raw_rms=0.084580 trg_matched_rms=0.085630 scale=1.0163 scale_max=1.2929 capped=0.0000 degenerate=0.0000 correction_rms=0.047656
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=4 step=14 t=0.0660 rows=30 fg=0.0735 active=1.0000 src_rms=0.086081 trg_raw_rms=0.085224 trg_matched_rms=0.086081 scale=1.0126 scale_max=1.3013 capped=0.0000 degenerate=0.0000 correction_rms=0.046736
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:09,  1.46it/s][A
+ 13%|█▎        | 2/15 [00:01<00:08,  1.47it/s][A
+ 20%|██        | 3/15 [00:02<00:08,  1.47it/s][A
+ 27%|██▋       | 4/15 [00:02<00:07,  1.47it/s][A
+ 33%|███▎      | 5/15 [00:03<00:06,  1.47it/s][A
+ 40%|████      | 6/15 [00:04<00:06,  1.47it/s][A
+ 47%|████▋     | 7/15 [00:04<00:05,  1.47it/s][A
+ 53%|█████▎    | 8/15 [00:05<00:04,  1.46it/s][A
+ 60%|██████    | 9/15 [00:06<00:04,  1.39it/s][A
+ 67%|██████▋   | 10/15 [00:07<00:03,  1.34it/s][A
+ 73%|███████▎  | 11/15 [00:07<00:03,  1.31it/s][A
+ 80%|████████  | 12/15 [00:08<00:02,  1.29it/s][A
+ 87%|████████▋ | 13/15 [00:09<00:01,  1.27it/s][A
+ 93%|█████████▎| 14/15 [00:10<00:00,  1.26it/s][A
+100%|██████████| 15/15 [00:11<00:00,  1.26it/s][A
+                                               [A 86%|████████▌ | 6/7 [00:53<00:10, 10.02s/it]PROJECTED_RESIDUAL block=5 removed_frac=0.0828 core_coverage=1.0000
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=5 step=8 t=0.4660 rows=30 fg=0.0739 active=1.0000 src_rms=0.086124 trg_raw_rms=0.082836 trg_matched_rms=0.086124 scale=1.0270 scale_max=1.3608 capped=0.0000 degenerate=0.0000 correction_rms=0.054150
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=5 step=9 t=0.4000 rows=30 fg=0.0739 active=1.0000 src_rms=0.085497 trg_raw_rms=0.082039 trg_matched_rms=0.085497 scale=1.0327 scale_max=1.3299 capped=0.0000 degenerate=0.0000 correction_rms=0.052555
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=5 step=10 t=0.3330 rows=30 fg=0.0739 active=1.0000 src_rms=0.083297 trg_raw_rms=0.080303 trg_matched_rms=0.083297 scale=1.0303 scale_max=1.3525 capped=0.0000 degenerate=0.0000 correction_rms=0.050629
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=5 step=11 t=0.2660 rows=30 fg=0.0739 active=1.0000 src_rms=0.081440 trg_raw_rms=0.078643 trg_matched_rms=0.081440 scale=1.0235 scale_max=1.3400 capped=0.0000 degenerate=0.0000 correction_rms=0.048912
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=5 step=12 t=0.2000 rows=30 fg=0.0739 active=1.0000 src_rms=0.079458 trg_raw_rms=0.076854 trg_matched_rms=0.079458 scale=1.0284 scale_max=1.3444 capped=0.0000 degenerate=0.0000 correction_rms=0.047849
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=5 step=13 t=0.1330 rows=30 fg=0.0739 active=1.0000 src_rms=0.078877 trg_raw_rms=0.076532 trg_matched_rms=0.078876 scale=1.0232 scale_max=1.3298 capped=0.0000 degenerate=0.0000 correction_rms=0.046960
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=5 step=14 t=0.0660 rows=30 fg=0.0739 active=1.0000 src_rms=0.080008 trg_raw_rms=0.077942 trg_matched_rms=0.080008 scale=1.0162 scale_max=1.3756 capped=0.0000 degenerate=0.0000 correction_rms=0.046746
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:10,  1.33it/s][A
+ 13%|█▎        | 2/15 [00:01<00:09,  1.33it/s][A
+ 20%|██        | 3/15 [00:02<00:09,  1.33it/s][A
+ 27%|██▋       | 4/15 [00:03<00:08,  1.33it/s][A
+ 33%|███▎      | 5/15 [00:03<00:07,  1.33it/s][A
+ 40%|████      | 6/15 [00:04<00:06,  1.33it/s][A
+ 47%|████▋     | 7/15 [00:05<00:06,  1.33it/s][A
+ 53%|█████▎    | 8/15 [00:06<00:05,  1.33it/s][A
+ 60%|██████    | 9/15 [00:06<00:04,  1.26it/s][A
+ 67%|██████▋   | 10/15 [00:07<00:04,  1.22it/s][A
+ 73%|███████▎  | 11/15 [00:08<00:03,  1.19it/s][A
+ 80%|████████  | 12/15 [00:09<00:02,  1.17it/s][A
+ 87%|████████▋ | 13/15 [00:10<00:01,  1.16it/s][A
+ 93%|█████████▎| 14/15 [00:11<00:00,  1.15it/s][A
+100%|██████████| 15/15 [00:12<00:00,  1.15it/s][A
+                                               [A100%|██████████| 7/7 [01:06<00:00, 10.97s/it]100%|██████████| 7/7 [01:06<00:00,  9.50s/it]
+/usr/local/lib/python3.11/dist-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+PROJECTED_RESIDUAL block=6 removed_frac=0.0988 core_coverage=1.0000
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=6 step=8 t=0.4660 rows=30 fg=0.0705 active=1.0000 src_rms=0.087517 trg_raw_rms=0.083632 trg_matched_rms=0.087517 scale=1.0341 scale_max=1.3951 capped=0.0000 degenerate=0.0000 correction_rms=0.051793
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=6 step=9 t=0.4000 rows=30 fg=0.0705 active=1.0000 src_rms=0.086972 trg_raw_rms=0.082892 trg_matched_rms=0.086972 scale=1.0411 scale_max=1.4375 capped=0.0000 degenerate=0.0000 correction_rms=0.049891
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=6 step=10 t=0.3330 rows=30 fg=0.0705 active=1.0000 src_rms=0.084810 trg_raw_rms=0.081045 trg_matched_rms=0.084810 scale=1.0409 scale_max=1.4064 capped=0.0000 degenerate=0.0000 correction_rms=0.048131
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=6 step=11 t=0.2660 rows=30 fg=0.0705 active=1.0000 src_rms=0.083128 trg_raw_rms=0.079390 trg_matched_rms=0.083128 scale=1.0421 scale_max=1.4443 capped=0.0000 degenerate=0.0000 correction_rms=0.047047
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=6 step=12 t=0.2000 rows=30 fg=0.0705 active=1.0000 src_rms=0.080773 trg_raw_rms=0.077359 trg_matched_rms=0.080773 scale=1.0408 scale_max=1.4220 capped=0.0000 degenerate=0.0000 correction_rms=0.044826
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=6 step=13 t=0.1330 rows=30 fg=0.0705 active=1.0000 src_rms=0.080719 trg_raw_rms=0.077589 trg_matched_rms=0.080719 scale=1.0390 scale_max=1.4218 capped=0.0000 degenerate=0.0000 correction_rms=0.044464
+COUNTERFACTUAL_SOURCE_BG_OUTPUT block=6 step=14 t=0.0660 rows=30 fg=0.0705 active=1.0000 src_rms=0.081336 trg_raw_rms=0.078352 trg_matched_rms=0.081336 scale=1.0363 scale_max=1.4249 capped=0.0000 degenerate=0.0000 correction_rms=0.043600
