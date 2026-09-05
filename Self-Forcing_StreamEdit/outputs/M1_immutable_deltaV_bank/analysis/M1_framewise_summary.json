@@ -1,0 +1,374 @@
+{
+  "crop_xyxy": [
+    331,
+    212,
+    573,
+    480
+  ],
+  "boundaries": [
+    9,
+    21,
+    33,
+    45,
+    57,
+    69
+  ],
+  "appearance": {
+    "L0": {
+      "early": {
+        "frames": [
+          0,
+          20
+        ],
+        "brown_luma": 41.02366620018368,
+        "brown_fraction": 0.8419683279438898,
+        "cool_fraction": 0.058630430206925696,
+        "object_luma": 41.063389914376394
+      },
+      "middle": {
+        "frames": [
+          32,
+          52
+        ],
+        "brown_luma": 49.24309467134022,
+        "brown_fraction": 0.5921941434509961,
+        "cool_fraction": 0.19378585414596822,
+        "object_luma": 53.82055173601423
+      },
+      "late": {
+        "frames": [
+          60,
+          80
+        ],
+        "brown_luma": 41.628180912562776,
+        "brown_fraction": 0.39838998316725255,
+        "cool_fraction": 0.30067844126246734,
+        "object_luma": 48.887542724609375
+      }
+    },
+    "965a": {
+      "early": {
+        "frames": [
+          0,
+          20
+        ],
+        "brown_luma": 41.016790117536274,
+        "brown_fraction": 0.8419446912723393,
+        "cool_fraction": 0.0586193907529896,
+        "object_luma": 41.06701859973726
+      },
+      "middle": {
+        "frames": [
+          32,
+          52
+        ],
+        "brown_luma": 49.27991376604353,
+        "brown_fraction": 0.5933276785977877,
+        "cool_fraction": 0.19380673363367856,
+        "object_luma": 53.7994810740153
+      },
+      "late": {
+        "frames": [
+          60,
+          80
+        ],
+        "brown_luma": 41.67124775477818,
+        "brown_fraction": 0.3984044587385793,
+        "cool_fraction": 0.30080211911227217,
+        "object_luma": 48.88278052920387
+      }
+    },
+    "M1": {
+      "early": {
+        "frames": [
+          0,
+          20
+        ],
+        "brown_luma": 40.34784698486328,
+        "brown_fraction": 0.8425698136118775,
+        "cool_fraction": 0.05851711816049395,
+        "object_luma": 40.40744690668015
+      },
+      "middle": {
+        "frames": [
+          32,
+          52
+        ],
+        "brown_luma": 48.61391358148484,
+        "brown_fraction": 0.590289611694107,
+        "cool_fraction": 0.1939375686014433,
+        "object_luma": 53.15751520792643
+      },
+      "late": {
+        "frames": [
+          60,
+          80
+        ],
+        "brown_luma": 40.50703757149832,
+        "brown_fraction": 0.39210348236695286,
+        "cool_fraction": 0.3005380200753084,
+        "object_luma": 47.71934182303293
+      }
+    }
+  },
+  "motion": {
+    "L0": {
+      "boundary_temporal_l1": 0.03578232570240895,
+      "nonboundary_temporal_l1": 0.028868663300936286,
+      "boundary_excess_over_source": -0.003131191556652387,
+      "nonboundary_excess_over_source": -0.0035061122018944573,
+      "boundary_diff_centroid_step_px": 2.9257505867930855,
+      "nonboundary_diff_centroid_step_px": 1.9631220640430305,
+      "boundary_brown_centroid_step_px": 2.4454015678274,
+      "nonboundary_brown_centroid_step_px": 2.0243365135487297,
+      "diff_x_accel_mean": 1.014187921688689,
+      "brown_x_accel_mean": 1.4331684618436167,
+      "top_diff_offset_step_frames": [
+        68,
+        69,
+        31,
+        70,
+        44,
+        26,
+        49,
+        1
+      ],
+      "top_brown_offset_step_frames": [
+        31,
+        66,
+        44,
+        51,
+        64,
+        49,
+        26,
+        32
+      ],
+      "top_diff_offset_x_accel_frames": [
+        32,
+        68,
+        45,
+        31,
+        44,
+        69,
+        65,
+        27
+      ],
+      "top_brown_offset_x_accel_frames": [
+        32,
+        66,
+        70,
+        45,
+        65,
+        44,
+        58,
+        57
+      ]
+    },
+    "965a": {
+      "boundary_temporal_l1": 0.03577370227624973,
+      "nonboundary_temporal_l1": 0.028895957194067335,
+      "boundary_excess_over_source": -0.0031398149828116098,
+      "nonboundary_excess_over_source": -0.0034788183087634075,
+      "boundary_diff_centroid_step_px": 2.9175299342217524,
+      "nonboundary_diff_centroid_step_px": 1.9611407485914532,
+      "boundary_brown_centroid_step_px": 2.6769467849940978,
+      "nonboundary_brown_centroid_step_px": 2.0414008201332807,
+      "diff_x_accel_mean": 1.0102557615321823,
+      "brown_x_accel_mean": 1.3267680151341663,
+      "top_diff_offset_step_frames": [
+        68,
+        69,
+        31,
+        70,
+        44,
+        26,
+        49,
+        1
+      ],
+      "top_brown_offset_step_frames": [
+        31,
+        66,
+        44,
+        51,
+        64,
+        49,
+        26,
+        32
+      ],
+      "top_diff_offset_x_accel_frames": [
+        32,
+        68,
+        45,
+        31,
+        44,
+        65,
+        27,
+        69
+      ],
+      "top_brown_offset_x_accel_frames": [
+        32,
+        66,
+        70,
+        45,
+        65,
+        44,
+        55,
+        71
+      ]
+    },
+    "M1": {
+      "boundary_temporal_l1": 0.036014861116806664,
+      "nonboundary_temporal_l1": 0.028875242188774252,
+      "boundary_excess_over_source": -0.0028986561422546706,
+      "nonboundary_excess_over_source": -0.003499533314056493,
+      "boundary_diff_centroid_step_px": 2.9986278069839085,
+      "nonboundary_diff_centroid_step_px": 1.983880262646985,
+      "boundary_brown_centroid_step_px": 2.5989442120688655,
+      "nonboundary_brown_centroid_step_px": 2.1061243004289203,
+      "diff_x_accel_mean": 1.0001170905812884,
+      "brown_x_accel_mean": 1.3772755176580689,
+      "top_diff_offset_step_frames": [
+        68,
+        69,
+        31,
+        70,
+        44,
+        26,
+        49,
+        67
+      ],
+      "top_brown_offset_step_frames": [
+        31,
+        66,
+        44,
+        51,
+        26,
+        32,
+        49,
+        45
+      ],
+      "top_diff_offset_x_accel_frames": [
+        32,
+        68,
+        45,
+        31,
+        44,
+        27,
+        65,
+        67
+      ],
+      "top_brown_offset_x_accel_frames": [
+        32,
+        66,
+        67,
+        45,
+        70,
+        44,
+        55,
+        57
+      ]
+    }
+  },
+  "pairwise": {
+    "M1-L0": {
+      "full_mae_mean": 1.6109836925694971,
+      "roi_mae_mean": 2.6105844768477073,
+      "full_psnr_mean": 40.35256896044886,
+      "roi_mae_early": 2.0350735301063176,
+      "roi_mae_late": 2.8474039804367792,
+      "top_roi_mae_frames": [
+        56,
+        55,
+        57,
+        54,
+        66,
+        59,
+        58,
+        65,
+        53,
+        60
+      ],
+      "boundary_delta_centroid_step_px": 8.35676374597042,
+      "nonboundary_delta_centroid_step_px": 5.653840335619466,
+      "top_delta_centroid_step_frames": [
+        1,
+        2,
+        31,
+        44,
+        33,
+        5,
+        62,
+        67,
+        32,
+        21
+      ]
+    },
+    "M1-965a": {
+      "full_mae_mean": 1.6123262717400069,
+      "roi_mae_mean": 2.613783459604522,
+      "full_psnr_mean": 40.344184484967464,
+      "roi_mae_early": 2.0375097819737027,
+      "roi_mae_late": 2.860408828372047,
+      "top_roi_mae_frames": [
+        56,
+        55,
+        57,
+        54,
+        66,
+        58,
+        65,
+        59,
+        60,
+        53
+      ],
+      "boundary_delta_centroid_step_px": 8.589745312751562,
+      "nonboundary_delta_centroid_step_px": 5.510410058470096,
+      "top_delta_centroid_step_frames": [
+        1,
+        31,
+        2,
+        44,
+        33,
+        5,
+        62,
+        67,
+        69,
+        32
+      ]
+    },
+    "L0-965a": {
+      "full_mae_mean": 1.0237427093486784,
+      "roi_mae_mean": 1.3783133024878709,
+      "full_psnr_mean": 57.991881436094914,
+      "roi_mae_early": 0.06911485908286912,
+      "roi_mae_late": 1.886437489872887,
+      "top_roi_mae_frames": [
+        42,
+        80,
+        79,
+        49,
+        53,
+        50,
+        39,
+        51,
+        62,
+        61
+      ],
+      "boundary_delta_centroid_step_px": 9.68515564067729,
+      "nonboundary_delta_centroid_step_px": 4.592713963925757,
+      "top_delta_centroid_step_frames": [
+        21,
+        18,
+        24,
+        23,
+        17,
+        20,
+        25,
+        32,
+        44,
+        52
+      ]
+    }
+  },
+  "metric_caveat": "phone mask is offline-only; color masks and centroids are diagnostic proxies, not semantic segmentation"
+}
