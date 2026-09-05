@@ -642,7 +642,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 ),
                 "projected_source_residual": projected_source_residual,
                 "drop_source_bg_kv": drop_source_bg_kv,
-                "soft_region_modulation": soft_region_modulation,
+                # soft_region_modulation removed from incompatible - S1+M1/M2 is valid
                 "factorized_target_identity": factorized_target_identity,
                 "factorized_immutable_target_memory": (
                     factorized_immutable_target_memory
@@ -665,21 +665,20 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     "M1 is a strict L0 single-variable experiment; disable: "
                     + ", ".join(enabled_incompatible)
                 )
-            if any(
-                value is not None
-                for value in (
-                    oracle_source_owner_mask,
-                    oracle_source_owner_full_mask,
-                    oracle_object_mask,
-                    oracle_hand_mask,
-                    hand_only_mask,
-                    hand_occupancy_mask,
-                    hand_persistent_mask,
-                    source_flow_cache,
-                )
-            ):
+            # M1+S1 combination: allow hand masks for role inference
+            # but forbid oracle masks and flow (they bypass the learning signal)
+            oracle_or_flow_inputs = (
+                oracle_source_owner_mask,
+                oracle_source_owner_full_mask,
+                oracle_object_mask,
+                oracle_hand_mask,
+                source_flow_cache,
+            )
+            if any(value is not None for value in oracle_or_flow_inputs):
                 raise ValueError(
-                    "M1 forbids external masks and optical-flow inputs"
+                    "M1 forbids oracle masks and optical-flow inputs. "
+                    "Hand masks (hand_only/occupancy/persistent) are allowed "
+                    "for S1 role inference."
                 )
         rollout_immutable_delta_v_bank = _immutable_delta_v_bank
         if immutable_delta_v_bank and rollout_immutable_delta_v_bank is None:
@@ -3820,21 +3819,20 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     "M1 must be run as a strict L0 single-variable "
                     "experiment"
                 )
-            if any(
-                value is not None
-                for value in (
-                    oracle_source_owner_mask,
-                    oracle_source_owner_full_mask,
-                    oracle_object_mask,
-                    oracle_hand_mask,
-                    hand_only_mask,
-                    hand_occupancy_mask,
-                    hand_persistent_mask,
-                    source_flow_cache,
-                )
-            ):
+            # M1+S1 combination: allow hand masks for role inference
+            # but forbid oracle masks and flow (they bypass the learning signal)
+            oracle_or_flow_inputs = (
+                oracle_source_owner_mask,
+                oracle_source_owner_full_mask,
+                oracle_object_mask,
+                oracle_hand_mask,
+                source_flow_cache,
+            )
+            if any(value is not None for value in oracle_or_flow_inputs):
                 raise ValueError(
-                    "M1 forbids external masks and optical-flow inputs"
+                    "M1 forbids oracle masks and optical-flow inputs. "
+                    "Hand masks (hand_only/occupancy/persistent) are allowed "
+                    "for S1 role inference."
                 )
         immutable_delta_v_state = _immutable_delta_v_bank
         if immutable_delta_v_bank and immutable_delta_v_state is None:
@@ -6720,6 +6718,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             hand_role_debug["object_posterior"]
                             >= hand_role_debug["posterior_threshold"]
                         ).reshape(batch_size, -1)
+                        # Update role_object_posterior_tokens after refinement
+                        role_object_posterior_tokens = (
+                            hand_role_debug["object_posterior"]
+                            .float()
+                            .reshape(batch_size, -1)
+                        )
                         if not source_flow_verified_region:
                             role_edit_tokens = (
                                 role_edit_tokens

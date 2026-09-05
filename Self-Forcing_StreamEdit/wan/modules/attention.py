@@ -403,8 +403,25 @@ def immutable_delta_v_memory_attention(
     correction_rms = (
         output.float() - native
     ).square().mean(dim=(2, 3)).sqrt()
+
+    # Owner gate statistics with threshold-based coverage
+    owner_any = owner > 0.0
+    owner_confident = owner >= 0.5
+    owner_high = owner >= 0.8
+
+    # Partition queries by owner gate strength
+    high_owner_mask = owner >= 0.8
+    mid_owner_mask = (owner >= 0.3) & (owner < 0.8)
+    low_owner_mask = (owner > 0.0) & (owner < 0.3)
+
+    def partition_mean(value, mask):
+        count = mask.float().sum().clamp_min(1.0)
+        return (value * mask.float()).sum() / count
+
     diagnostics = {
-        "owner_gated_coverage": (owner > 0.0).float().mean().detach(),
+        "owner_gated_coverage": owner_any.float().mean().detach(),
+        "owner_confident_coverage": owner_confident.float().mean().detach(),
+        "owner_high_coverage": owner_high.float().mean().detach(),
         "matched_query_fraction": admitted.float().mean().detach(),
         "retrieval_similarity": admitted_mean(
             torch.where(
@@ -426,6 +443,20 @@ def immutable_delta_v_memory_attention(
         "cap_fraction": admitted_mean(
             (clip_scale < 1.0).float()
         ).detach(),
+        # Partition-specific correction statistics
+        "high_owner_correction_rms": (
+            partition_mean(correction_rms, high_owner_mask).detach()
+            if high_owner_mask.any() else torch.tensor(0.0)
+        ),
+        "mid_owner_correction_rms": (
+            partition_mean(correction_rms, mid_owner_mask).detach()
+            if mid_owner_mask.any() else torch.tensor(0.0)
+        ),
+        "low_owner_correction_rms": (
+            partition_mean(correction_rms, low_owner_mask).detach()
+            if low_owner_mask.any() else torch.tensor(0.0)
+        ),
+        "mean_owner_value": owner.mean().detach(),
     }
     return output, diagnostics
 
@@ -704,8 +735,25 @@ def closed_loop_delta_v_memory_attention(
     desired_current_cosine = torch.nn.functional.cosine_similarity(
         desired.flatten(2), current_delta.flatten(2), dim=-1, eps=float(eps)
     )
+
+    # Owner gate statistics with threshold-based coverage
+    owner_any = owner > 0.0
+    owner_confident = owner >= 0.5
+    owner_high = owner >= 0.8
+
+    # Partition queries by owner gate strength
+    high_owner_mask = owner >= 0.8
+    mid_owner_mask = (owner >= 0.3) & (owner < 0.8)
+    low_owner_mask = (owner > 0.0) & (owner < 0.3)
+
+    def partition_mean(value, mask):
+        count = mask.float().sum().clamp_min(1.0)
+        return (value * mask.float()).sum() / count
+
     return output, {
-        "owner_gated_coverage": (owner > 0.0).float().mean().detach(),
+        "owner_gated_coverage": owner_any.float().mean().detach(),
+        "owner_confident_coverage": owner_confident.float().mean().detach(),
+        "owner_high_coverage": owner_high.float().mean().detach(),
         "matched_query_fraction": admitted.float().mean().detach(),
         "desired_retrieval_similarity": admitted_mean(
             finite_desired_similarity
@@ -755,6 +803,20 @@ def closed_loop_delta_v_memory_attention(
         "cap_fraction": admitted_mean(
             (clip_scale < 1.0).float()
         ).detach(),
+        # Partition-specific correction statistics
+        "high_owner_correction_rms": (
+            partition_mean(correction_rms, high_owner_mask).detach()
+            if high_owner_mask.any() else torch.tensor(0.0)
+        ),
+        "mid_owner_correction_rms": (
+            partition_mean(correction_rms, mid_owner_mask).detach()
+            if mid_owner_mask.any() else torch.tensor(0.0)
+        ),
+        "low_owner_correction_rms": (
+            partition_mean(correction_rms, low_owner_mask).detach()
+            if low_owner_mask.any() else torch.tensor(0.0)
+        ),
+        "mean_owner_value": owner.mean().detach(),
     }
 
 
