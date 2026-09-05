@@ -10507,6 +10507,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             "orthogonal_geometry_action": torch.zeros_like(bg_mask),
                             "owner_complement_source_action": torch.zeros_like(bg_mask),
                             "owner_complement_abstain_action": torch.zeros_like(bg_mask),
+                            "owner_source_residual_blocked_action": torch.zeros_like(bg_mask),
+                            "owner_native_complement_action": torch.zeros_like(bg_mask),
                         }
                         if factorized_native_target_history:
                             factorized_flow_debug[
