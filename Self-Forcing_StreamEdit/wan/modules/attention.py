@@ -52,6 +52,7 @@ __all__ = [
     'build_counterfactual_segment_values',
     'counterfactual_replace_attention_segment',
     'immutable_delta_v_memory_attention',
+    'closed_loop_delta_v_memory_attention',
 ]
 
 
@@ -427,6 +428,334 @@ def immutable_delta_v_memory_attention(
         ).detach(),
     }
     return output, diagnostics
+
+
+def closed_loop_delta_v_memory_attention(
+    native_output,
+    current_source_query,
+    current_source_key,
+    current_source_value,
+    current_target_value,
+    canonical_source_key,
+    canonical_delta_value,
+    canonical_support,
+    owner_gate,
+    *,
+    topk=8,
+    min_similarity=0.35,
+    strength=0.20,
+    max_error_ratio=1.0,
+    eps=1e-8,
+):
+    """Correct only the missing part of a frozen target-source delta.
+
+    A current clean-source query independently retrieves (1) the desired
+    target-minus-source response from the immutable first-block bank and
+    (2) the current target-minus-source response through current clean-source
+    keys.  Their difference is a source-coordinate closed-loop error.  Native
+    attention, its softmax denominator, and all native KV payloads remain
+    untouched.
+
+    Queries outside the automatic source owner, below the source-address
+    similarity threshold, or already at the desired delta are copied exactly
+    from ``native_output``.
+    """
+    current_tensors = {
+        "native_output": native_output,
+        "current_source_query": current_source_query,
+        "current_source_key": current_source_key,
+        "current_source_value": current_source_value,
+        "current_target_value": current_target_value,
+    }
+    if any(value.ndim != 4 for value in current_tensors.values()):
+        raise ValueError(
+            "M2 current tensors must have shape [B,L,H,D]"
+        )
+    if len({value.shape for value in current_tensors.values()}) != 1:
+        raise ValueError(
+            "M2 native output and current Q/K/V tensors must align"
+        )
+    if (
+        canonical_source_key.ndim != 4
+        or canonical_delta_value.ndim != 4
+        or canonical_source_key.shape != canonical_delta_value.shape
+    ):
+        raise ValueError(
+            "M2 canonical source keys and delta values must align"
+        )
+    if (
+        canonical_source_key.shape[0] != native_output.shape[0]
+        or canonical_source_key.shape[2:] != native_output.shape[2:]
+    ):
+        raise ValueError(
+            "M2 canonical memory must align with batch and attention heads"
+        )
+    if canonical_support.shape != canonical_source_key.shape[:2]:
+        raise ValueError(
+            "M2 canonical support must align with memory tokens"
+        )
+    if owner_gate.shape != native_output.shape[:2]:
+        raise ValueError(
+            "M2 owner gate must align with current queries"
+        )
+    if int(topk) <= 0:
+        raise ValueError("M2 topk must be positive")
+    if not -1.0 < float(min_similarity) < 1.0:
+        raise ValueError(
+            "M2 minimum similarity must lie in (-1, 1)"
+        )
+    if not 0.0 <= float(strength) <= 1.0:
+        raise ValueError("M2 strength must lie in [0, 1]")
+    if float(max_error_ratio) <= 0.0:
+        raise ValueError("M2 maximum error ratio must be positive")
+    if float(eps) <= 0.0:
+        raise ValueError("M2 epsilon must be positive")
+
+    batch, query_count, heads, head_dim = native_output.shape
+    memory_count = canonical_source_key.shape[1]
+    if memory_count <= 0:
+        raise ValueError("M2 bank must contain at least one token")
+
+    query_address = torch.nn.functional.normalize(
+        current_source_query.detach().float().flatten(2),
+        dim=-1,
+        eps=float(eps),
+    )
+    owner = owner_gate.detach().float().clamp(0.0, 1.0)
+    source_query = current_source_query.detach().float()
+    query_chunk_size = 64
+
+    def retrieve_response(address_key, response_value, support):
+        key = address_key.detach().float()
+        value = response_value.detach().float()
+        key_address = torch.nn.functional.normalize(
+            key.flatten(2), dim=-1, eps=float(eps)
+        )
+        valid_key = support.detach().bool()
+        candidate_count = min(int(topk), key.shape[1])
+        response = native_output.new_zeros(
+            native_output.shape, dtype=torch.float32
+        )
+        best_similarity = owner.new_full(owner.shape, -torch.inf)
+        assignment_entropy = owner.new_zeros(owner.shape)
+        assignment_peak = owner.new_zeros(owner.shape)
+        assignment_margin = owner.new_zeros(owner.shape)
+        matched = torch.zeros_like(owner, dtype=torch.bool)
+
+        for batch_index in range(batch):
+            active_query = torch.nonzero(
+                owner[batch_index] > 0.0, as_tuple=False
+            ).flatten()
+            for query_left in range(
+                0, active_query.numel(), query_chunk_size
+            ):
+                query_index = active_query[
+                    query_left:query_left + query_chunk_size
+                ]
+                similarity = torch.einsum(
+                    "qd,kd->qk",
+                    query_address[batch_index, query_index],
+                    key_address[batch_index],
+                ).masked_fill(
+                    ~valid_key[batch_index][None, :], -torch.inf
+                )
+                selected_similarity, selected_index = similarity.topk(
+                    candidate_count, dim=-1
+                )
+                selected_valid = (
+                    torch.isfinite(selected_similarity)
+                    & (selected_similarity >= float(min_similarity))
+                )
+                query_best = selected_similarity[:, 0]
+                query_matched = (
+                    torch.isfinite(query_best)
+                    & (query_best >= float(min_similarity))
+                )
+                best_similarity[batch_index, query_index] = query_best
+                matched[batch_index, query_index] = query_matched
+                if not bool(query_matched.any()):
+                    continue
+
+                selected_key = key[batch_index][selected_index]
+                selected_value = value[batch_index][selected_index]
+                logits = torch.einsum(
+                    "qhd,qkhd->qhk",
+                    source_query[batch_index, query_index],
+                    selected_key,
+                ) * (head_dim ** -0.5)
+                valid_per_head = selected_valid[:, None, :].expand(
+                    -1, heads, -1
+                )
+                safe_logits = torch.where(
+                    valid_per_head,
+                    logits,
+                    torch.full_like(logits, -1e4),
+                )
+                weight = torch.softmax(safe_logits, dim=-1)
+                weight = weight * valid_per_head.float()
+                weight = weight / weight.sum(
+                    dim=-1, keepdim=True
+                ).clamp_min(float(eps))
+                response[batch_index, query_index] = torch.einsum(
+                    "qhk,qkhd->qhd", weight, selected_value
+                )
+
+                weight_safe = weight.clamp_min(1e-12)
+                entropy = -(weight * weight_safe.log()).sum(dim=-1)
+                valid_count = selected_valid.float().sum(
+                    dim=-1
+                ).clamp_min(2.0)
+                assignment_entropy[batch_index, query_index] = (
+                    entropy / valid_count.log()[:, None]
+                ).mean(dim=-1)
+                assignment_peak[batch_index, query_index] = (
+                    weight.amax(dim=-1).mean(dim=-1)
+                )
+                if candidate_count > 1:
+                    second = selected_similarity[:, 1]
+                    assignment_margin[batch_index, query_index] = (
+                        query_best
+                        - torch.where(
+                            torch.isfinite(second), second, query_best
+                        )
+                    )
+
+        return (
+            response, matched, best_similarity, assignment_margin,
+            assignment_entropy, assignment_peak,
+        )
+
+    desired, desired_matched, desired_similarity, desired_margin, (
+        desired_entropy
+    ), desired_peak = retrieve_response(
+        canonical_source_key,
+        canonical_delta_value,
+        canonical_support,
+    )
+    current_value_delta = (
+        current_target_value.detach().float()
+        - current_source_value.detach().float()
+    )
+    # Compare like with like: the frozen response is object-owner-only, so
+    # the current response must also be retrieved only from current owner
+    # keys.  The owner controls support; it does not alter native attention.
+    current_support = owner > 0.0
+    current_delta, current_matched, current_similarity, current_margin, (
+        current_entropy
+    ), current_peak = retrieve_response(
+        current_source_key, current_value_delta, current_support
+    )
+    admitted = desired_matched & current_matched
+    error = desired - current_delta
+    desired_rms = desired.square().mean(dim=(2, 3)).sqrt()
+    current_rms = current_delta.square().mean(dim=(2, 3)).sqrt()
+    error_rms = error.square().mean(dim=(2, 3)).sqrt()
+    reference_rms = torch.maximum(desired_rms, current_rms)
+    error_cap = reference_rms * float(max_error_ratio)
+    clip_scale = torch.minimum(
+        torch.ones_like(error_rms),
+        error_cap / error_rms.clamp_min(float(eps)),
+    ).detach()
+    clipped_error = error * clip_scale[:, :, None, None]
+    joint_similarity = torch.minimum(
+        desired_similarity, current_similarity
+    )
+    address_confidence = (
+        (joint_similarity - float(min_similarity))
+        / max(1.0 - float(min_similarity), float(eps))
+    ).clamp(0.0, 1.0)
+    gate = (
+        owner * address_confidence * float(strength)
+    ).detach() * admitted.float()
+    active = admitted & (error_rms > float(eps))
+    corrected = (
+        native_output.float()
+        + gate[:, :, None, None] * clipped_error
+    )
+    output = torch.where(
+        active[:, :, None, None],
+        corrected.to(native_output.dtype),
+        native_output,
+    )
+
+    admitted_count = admitted.float().sum().clamp_min(1.0)
+
+    def admitted_mean(value):
+        return (value * admitted.float()).sum() / admitted_count
+
+    finite_desired_similarity = torch.where(
+        torch.isfinite(desired_similarity),
+        desired_similarity,
+        torch.full_like(desired_similarity, -1.0),
+    )
+    finite_current_similarity = torch.where(
+        torch.isfinite(current_similarity),
+        current_similarity,
+        torch.full_like(current_similarity, -1.0),
+    )
+
+    native_rms = native_output.float().square().mean(dim=(2, 3)).sqrt()
+    correction_rms = (
+        output.float() - native_output.float()
+    ).square().mean(dim=(2, 3)).sqrt()
+    residual_error_rms = (
+        error - gate[:, :, None, None] * clipped_error
+    ).square().mean(dim=(2, 3)).sqrt()
+    desired_current_cosine = torch.nn.functional.cosine_similarity(
+        desired.flatten(2), current_delta.flatten(2), dim=-1, eps=float(eps)
+    )
+    return output, {
+        "owner_gated_coverage": (owner > 0.0).float().mean().detach(),
+        "matched_query_fraction": admitted.float().mean().detach(),
+        "desired_retrieval_similarity": admitted_mean(
+            finite_desired_similarity
+        ).detach(),
+        "current_retrieval_similarity": admitted_mean(
+            finite_current_similarity
+        ).detach(),
+        "desired_assignment_margin": admitted_mean(
+            desired_margin
+        ).detach(),
+        "current_assignment_margin": admitted_mean(
+            current_margin
+        ).detach(),
+        "desired_assignment_entropy": admitted_mean(
+            desired_entropy
+        ).detach(),
+        "current_assignment_entropy": admitted_mean(
+            current_entropy
+        ).detach(),
+        "desired_assignment_peak": admitted_mean(
+            desired_peak
+        ).detach(),
+        "current_assignment_peak": admitted_mean(
+            current_peak
+        ).detach(),
+        "desired_delta_rms": admitted_mean(desired_rms).detach(),
+        "current_delta_rms": admitted_mean(current_rms).detach(),
+        "raw_error_rms": admitted_mean(error_rms).detach(),
+        "clipped_error_rms": admitted_mean(
+            clipped_error.square().mean(dim=(2, 3)).sqrt()
+        ).detach(),
+        "native_output_rms": admitted_mean(native_rms).detach(),
+        "error_to_native_rms": admitted_mean(
+            clipped_error.square().mean(dim=(2, 3)).sqrt()
+            / native_rms.clamp_min(float(eps))
+        ).detach(),
+        "applied_correction_rms": admitted_mean(
+            correction_rms
+        ).detach(),
+        "residual_error_rms": admitted_mean(
+            residual_error_rms
+        ).detach(),
+        "desired_current_cosine": admitted_mean(
+            desired_current_cosine
+        ).detach(),
+        "mean_gate": admitted_mean(gate).detach(),
+        "cap_fraction": admitted_mean(
+            (clip_scale < 1.0).float()
+        ).detach(),
+    }
 
 
 def _evenly_spaced_mask_indices(mask, max_samples):

@@ -329,6 +329,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
         immutable_delta_v_min_similarity: float = 0.35,
         immutable_delta_v_strength: float = 0.20,
         immutable_delta_v_max_rms_ratio: float = 1.0,
+        closed_loop_delta_v_error: bool = False,
+        closed_loop_delta_v_max_error_ratio: float = 1.0,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
         posterior_flow_mode: str = "soft",
@@ -541,6 +543,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
             if os.path.exists(source_bg_attention_diagnostic_path):
                 os.remove(source_bg_attention_diagnostic_path)
         immutable_delta_v_layers = tuple(immutable_delta_v_layers)
+        if closed_loop_delta_v_error and not immutable_delta_v_bank:
+            raise ValueError(
+                "M2 closed-loop delta-V error requires the immutable "
+                "delta-V bank"
+            )
         if immutable_delta_v_bank:
             if routing_mode != "dynamic_sog":
                 raise ValueError(
@@ -570,6 +577,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
             if immutable_delta_v_max_rms_ratio <= 0.0:
                 raise ValueError(
                     "M1 maximum RMS ratio must be positive"
+                )
+            if closed_loop_delta_v_max_error_ratio <= 0.0:
+                raise ValueError(
+                    "M2 maximum error ratio must be positive"
                 )
             incompatible = {
                 "first_block_identity_anchor": first_block_identity_anchor,
@@ -1019,6 +1030,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 immutable_delta_v_strength=immutable_delta_v_strength,
                 immutable_delta_v_max_rms_ratio=(
                     immutable_delta_v_max_rms_ratio
+                ),
+                closed_loop_delta_v_error=closed_loop_delta_v_error,
+                closed_loop_delta_v_max_error_ratio=(
+                    closed_loop_delta_v_max_error_ratio
                 ),
                 global_frame_indices=list(range(src_video.shape[1])),
                 _projected_residual_energy_budget=(
@@ -3224,6 +3239,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 immutable_delta_v_max_rms_ratio=(
                     immutable_delta_v_max_rms_ratio
                 ),
+                closed_loop_delta_v_error=closed_loop_delta_v_error,
+                closed_loop_delta_v_max_error_ratio=(
+                    closed_loop_delta_v_max_error_ratio
+                ),
                 global_frame_indices=rollout_global_frame_indices,
                 _projected_residual_energy_budget=(
                     rollout_projected_residual_budget
@@ -3524,6 +3543,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
         immutable_delta_v_min_similarity: float = 0.35,
         immutable_delta_v_strength: float = 0.20,
         immutable_delta_v_max_rms_ratio: float = 1.0,
+        closed_loop_delta_v_error: bool = False,
+        closed_loop_delta_v_max_error_ratio: float = 1.0,
         global_frame_indices: Optional[List[int]] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
@@ -3641,6 +3662,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "routing"
             )
         immutable_delta_v_layers = tuple(immutable_delta_v_layers)
+        if closed_loop_delta_v_error and not immutable_delta_v_bank:
+            raise ValueError(
+                "M2 closed-loop delta-V error requires the immutable "
+                "delta-V bank"
+            )
         if immutable_delta_v_bank:
             if routing_mode != "dynamic_sog":
                 raise ValueError(
@@ -3670,6 +3696,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
             if immutable_delta_v_max_rms_ratio <= 0.0:
                 raise ValueError(
                     "M1 maximum RMS ratio must be positive"
+                )
+            if closed_loop_delta_v_max_error_ratio <= 0.0:
+                raise ValueError(
+                    "M2 maximum error ratio must be positive"
                 )
             if any(
                 (
@@ -5611,15 +5641,23 @@ class EditCausalInferencePipeline(torch.nn.Module):
             )
         print(tok_src, tok_trg)
         if immutable_delta_v_bank:
+            memory_mode = (
+                "M2_closed_loop_error"
+                if closed_loop_delta_v_error
+                else "M1_open_loop_delta"
+            )
             print(
                 "IMMUTABLE_DELTA_V_CONFIG "
+                f"mode={memory_mode} "
                 f"layers={immutable_delta_v_layers} "
                 f"topk={immutable_delta_v_topk} "
                 f"min_similarity={immutable_delta_v_min_similarity:.3f} "
                 f"strength={immutable_delta_v_strength:.3f} "
                 f"max_rms_ratio={immutable_delta_v_max_rms_ratio:.3f} "
-                "address=current_clean_source_pre_rope_q "
+                "address=current_clean_source_pre_rope_qk "
                 "payload=first_block_clean_target_v_minus_source_v "
+                f"max_error_ratio="
+                f"{closed_loop_delta_v_max_error_ratio:.3f} "
                 "owner=automatic_sog write=once native_attention=unchanged"
             )
 
@@ -7736,6 +7774,15 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     "immutable_delta_v_source_query": (
                         immutable_delta_v_source_queries
                     ),
+                    "immutable_delta_v_source_key": (
+                        immutable_delta_v_source_keys
+                    ),
+                    "closed_loop_delta_v_error": bool(
+                        closed_loop_delta_v_error
+                    ),
+                    "closed_loop_delta_v_max_error_ratio": float(
+                        closed_loop_delta_v_max_error_ratio
+                    ),
                     "immutable_delta_v_topk": int(
                         immutable_delta_v_topk
                     ),
@@ -7948,8 +7995,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 row[name].float() for row in memory_rows
                             ]).mean().item()
 
-                        print(
-                            "IMMUTABLE_DELTA_V_READ "
+                        common = (
                             f"block={current_start_frame // self.num_frame_per_block} "
                             f"step={index} "
                             f"t={current_timestep / 1000:.4f} "
@@ -7958,19 +8004,47 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             f"{memory_mean('owner_gated_coverage'):.4f} "
                             "matched="
                             f"{memory_mean('matched_query_fraction'):.4f} "
-                            "similarity="
-                            f"{memory_mean('retrieval_similarity'):.4f} "
-                            "memory_rms="
-                            f"{memory_mean('memory_residual_rms'):.6f} "
-                            "native_rms="
-                            f"{memory_mean('native_output_rms'):.6f} "
-                            "memory_to_native="
-                            f"{memory_mean('memory_to_native_rms'):.4f} "
-                            "correction_rms="
-                            f"{memory_mean('applied_correction_rms'):.6f} "
-                            f"gate={memory_mean('mean_gate'):.4f} "
-                            f"capped={memory_mean('cap_fraction'):.4f}"
                         )
+                        if closed_loop_delta_v_error:
+                            print(
+                                "CLOSED_LOOP_DELTA_V_READ "
+                                + common
+                                + "desired_similarity="
+                                f"{memory_mean('desired_retrieval_similarity'):.4f} "
+                                + "current_similarity="
+                                f"{memory_mean('current_retrieval_similarity'):.4f} "
+                                + "desired_rms="
+                                f"{memory_mean('desired_delta_rms'):.6f} "
+                                + "current_rms="
+                                f"{memory_mean('current_delta_rms'):.6f} "
+                                + "error_rms="
+                                f"{memory_mean('raw_error_rms'):.6f} "
+                                + "error_to_native="
+                                f"{memory_mean('error_to_native_rms'):.4f} "
+                                + "cosine="
+                                f"{memory_mean('desired_current_cosine'):.4f} "
+                                + "correction_rms="
+                                f"{memory_mean('applied_correction_rms'):.6f} "
+                                + f"gate={memory_mean('mean_gate'):.4f} "
+                                + f"capped={memory_mean('cap_fraction'):.4f}"
+                            )
+                        else:
+                            print(
+                                "IMMUTABLE_DELTA_V_READ "
+                                + common
+                                + "similarity="
+                                f"{memory_mean('retrieval_similarity'):.4f} "
+                                + "memory_rms="
+                                f"{memory_mean('memory_residual_rms'):.6f} "
+                                + "native_rms="
+                                f"{memory_mean('native_output_rms'):.6f} "
+                                + "memory_to_native="
+                                f"{memory_mean('memory_to_native_rms'):.4f} "
+                                + "correction_rms="
+                                f"{memory_mean('applied_correction_rms'):.6f} "
+                                + f"gate={memory_mean('mean_gate'):.4f} "
+                                + f"capped={memory_mean('cap_fraction'):.4f}"
+                            )
                 if counterfactual_source_bg_output:
                     counterfactual_rows = shared_dict_dual.get(
                         "counterfactual_source_bg_output_diagnostics", []

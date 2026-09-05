@@ -1586,6 +1586,24 @@ if __name__ == '__main__':
         default=1.0,
         help="Maximum retrieved-residual RMS relative to native output RMS.",
     )
+    parser.add_argument(
+        "--closed_loop_delta_v_error",
+        action="store_true",
+        default=False,
+        help=(
+            "M2: replace M1 open-loop delta-V addition with bounded "
+            "desired-minus-current delta-V error correction."
+        ),
+    )
+    parser.add_argument(
+        "--closed_loop_delta_v_max_error_ratio",
+        type=float,
+        default=1.0,
+        help=(
+            "Maximum M2 closed-loop error RMS relative to the larger of "
+            "the desired and current response RMS."
+        ),
+    )
     parser.add_argument("--mask_white_threshold", type=int, default=245)
     parser.add_argument(
         "--hand_mask_mode",
@@ -2888,6 +2906,11 @@ if __name__ == '__main__':
                 "--source_bg_attention_diagnostic_path is required with "
                 "--source_bg_attention_diagnostics"
             )
+    if args.closed_loop_delta_v_error and not args.immutable_delta_v_bank:
+        parser.error(
+            "--closed_loop_delta_v_error requires "
+            "--immutable_delta_v_bank"
+        )
     if args.immutable_delta_v_bank:
         if args.routing_mode != "dynamic_sog":
             parser.error(
@@ -2919,6 +2942,10 @@ if __name__ == '__main__':
         if args.immutable_delta_v_max_rms_ratio <= 0.0:
             parser.error(
                 "--immutable_delta_v_max_rms_ratio must be positive"
+            )
+        if args.closed_loop_delta_v_max_error_ratio <= 0.0:
+            parser.error(
+                "--closed_loop_delta_v_max_error_ratio must be positive"
             )
         incompatible = {
             "--first_block_identity_anchor": (
@@ -3702,6 +3729,10 @@ if __name__ == '__main__':
         immutable_delta_v_strength=args.immutable_delta_v_strength,
         immutable_delta_v_max_rms_ratio=(
             args.immutable_delta_v_max_rms_ratio
+        ),
+        closed_loop_delta_v_error=args.closed_loop_delta_v_error,
+        closed_loop_delta_v_max_error_ratio=(
+            args.closed_loop_delta_v_max_error_ratio
         ),
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,

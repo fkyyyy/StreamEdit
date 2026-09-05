@@ -12,6 +12,7 @@ from wan.modules.attention import (
     diagnose_attention_segment,
     build_factorized_history_read_mask,
     build_target_owned_source_background_mask,
+    closed_loop_delta_v_memory_attention,
     fuse_aligned_memory,
     fuse_factorized_aligned_memory,
     project_source_addressed_target_value,
@@ -2542,6 +2543,9 @@ class CausalWanSelfAttention(nn.Module):
                         source_query_by_layer = shared_dict.get(
                             "immutable_delta_v_source_query", {}
                         )
+                        source_key_by_layer = shared_dict.get(
+                            "immutable_delta_v_source_key", {}
+                        )
                         current_source_query = source_query_by_layer.get(
                             layer_index
                         )
@@ -2550,9 +2554,101 @@ class CausalWanSelfAttention(nn.Module):
                                 "M1 is missing the current clean-source "
                                 f"query at layer {layer_index}"
                             )
+                        current_source_key = source_key_by_layer.get(
+                            layer_index
+                        )
+                        if (
+                            shared_dict.get(
+                                "closed_loop_delta_v_error", False
+                            )
+                            and current_source_key is None
+                        ):
+                            raise RuntimeError(
+                                "M2 is missing the current clean-source "
+                                f"key at layer {layer_index}"
+                            )
                         memory_state = immutable_delta_v_bank[layer_index]
-                        corrected, memory_diagnostics = (
-                            immutable_delta_v_memory_attention(
+                        if shared_dict.get(
+                            "closed_loop_delta_v_error", False
+                        ):
+                            corrected, memory_diagnostics = (
+                                closed_loop_delta_v_memory_attention(
+                                    native_output=b_target_output,
+                                    current_source_query=(
+                                        current_source_query[
+                                            b_idx:b_idx + 1
+                                        ].to(
+                                            device=b_target_output.device,
+                                            dtype=b_target_output.dtype,
+                                        )
+                                    ),
+                                    current_source_key=(
+                                        current_source_key[
+                                            b_idx:b_idx + 1
+                                        ].to(
+                                            device=b_target_output.device,
+                                            dtype=b_target_output.dtype,
+                                        )
+                                    ),
+                                    current_source_value=(
+                                        src_current_value[
+                                            b_idx:b_idx + 1
+                                        ]
+                                    ),
+                                    current_target_value=(
+                                        trg_current_value[
+                                            b_idx:b_idx + 1
+                                        ]
+                                    ),
+                                    canonical_source_key=(
+                                        memory_state["source_key"][
+                                            b_idx:b_idx + 1
+                                        ].to(
+                                            device=b_target_output.device,
+                                            dtype=b_target_output.dtype,
+                                        )
+                                    ),
+                                    canonical_delta_value=(
+                                        memory_state["delta_value"][
+                                            b_idx:b_idx + 1
+                                        ].to(
+                                            device=b_target_output.device,
+                                            dtype=b_target_output.dtype,
+                                        )
+                                    ),
+                                    canonical_support=(
+                                        memory_state["support"][
+                                            b_idx:b_idx + 1
+                                        ].to(device=b_target_output.device)
+                                    ),
+                                    owner_gate=(
+                                        b_src_current_fg_mask[None].float()
+                                    ),
+                                    topk=int(
+                                        shared_dict[
+                                            "immutable_delta_v_topk"
+                                        ]
+                                    ),
+                                    min_similarity=float(
+                                        shared_dict[
+                                            "immutable_delta_v_min_similarity"
+                                        ]
+                                    ),
+                                    strength=float(
+                                        shared_dict[
+                                            "immutable_delta_v_strength"
+                                        ]
+                                    ),
+                                    max_error_ratio=float(
+                                        shared_dict[
+                                            "closed_loop_delta_v_max_error_ratio"
+                                        ]
+                                    ),
+                                )
+                            )
+                        else:
+                            corrected, memory_diagnostics = (
+                                immutable_delta_v_memory_attention(
                                 native_output=b_target_output,
                                 current_source_query=(
                                     current_source_query[
@@ -2602,8 +2698,8 @@ class CausalWanSelfAttention(nn.Module):
                                         "immutable_delta_v_max_rms_ratio"
                                     ]
                                 ),
+                                )
                             )
-                        )
                         b_target_output = corrected
                         memory_diagnostics["layer"] = torch.tensor(
                             float(layer_index),
