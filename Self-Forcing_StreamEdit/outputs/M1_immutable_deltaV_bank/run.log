@@ -1,0 +1,222 @@
+/usr/local/lib/python3.11/dist-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (1.26.20) or chardet (7.4.3)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+Free VRAM 78.9140625 GB
+KV inference with 3 frames per block
+81 960 1280
+MASK_TEMPORAL_ALIGNMENT mode=causal_first_frame_then_stride pixel_frames=81 latent_frames=21 temporal_stride=4
+[[23]] [[23, 24, 25]]
+IMMUTABLE_DELTA_V_CONFIG layers=(8, 12, 16, 20) topk=8 min_similarity=0.350 strength=0.200 max_rms_ratio=1.000 address=current_clean_source_pre_rope_q payload=first_block_clean_target_v_minus_source_v owner=automatic_sog write=once native_attention=unchanged
+  0%|          | 0/7 [00:00<?, ?it/s]IMMUTABLE_DELTA_V_READ block=0 state=bootstrap native_exact=1
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:05,  2.76it/s][A
+ 13%|█▎        | 2/15 [00:00<00:04,  2.85it/s][A
+ 20%|██        | 3/15 [00:01<00:04,  2.88it/s][A
+ 27%|██▋       | 4/15 [00:01<00:03,  2.89it/s][A
+ 33%|███▎      | 5/15 [00:01<00:03,  2.90it/s][A
+ 40%|████      | 6/15 [00:02<00:03,  2.91it/s][A
+ 47%|████▋     | 7/15 [00:02<00:02,  2.92it/s][A
+ 53%|█████▎    | 8/15 [00:02<00:02,  2.87it/s][A
+ 60%|██████    | 9/15 [00:03<00:02,  2.82it/s][A
+ 67%|██████▋   | 10/15 [00:03<00:01,  2.79it/s][A
+ 73%|███████▎  | 11/15 [00:03<00:01,  2.77it/s][A
+ 80%|████████  | 12/15 [00:04<00:01,  2.76it/s][A
+ 87%|████████▋ | 13/15 [00:04<00:00,  2.75it/s][A
+ 93%|█████████▎| 14/15 [00:04<00:00,  2.74it/s][A
+100%|██████████| 15/15 [00:05<00:00,  2.73it/s][A
+                                               [A 14%|█▍        | 1/7 [00:05<00:34,  5.76s/it]IMMUTABLE_DELTA_V_FREEZE block=0 write_once=1 native_kv_unchanged=1 layers=4 support=0.1162 support_tokens=544.0 bank_slots=544 delta_v_rms=0.793251
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:06,  2.14it/s][A
+ 13%|█▎        | 2/15 [00:00<00:05,  2.27it/s][A
+ 20%|██        | 3/15 [00:01<00:05,  2.32it/s][A
+ 27%|██▋       | 4/15 [00:01<00:04,  2.34it/s][A
+ 33%|███▎      | 5/15 [00:02<00:04,  2.35it/s][A
+ 40%|████      | 6/15 [00:02<00:03,  2.36it/s][A
+ 47%|████▋     | 7/15 [00:02<00:03,  2.37it/s][A
+ 53%|█████▎    | 8/15 [00:03<00:02,  2.35it/s][A
+ 60%|██████    | 9/15 [00:03<00:02,  2.31it/s][A
+ 67%|██████▋   | 10/15 [00:04<00:02,  2.29it/s][A
+ 73%|███████▎  | 11/15 [00:04<00:01,  2.27it/s][A
+ 80%|████████  | 12/15 [00:05<00:01,  2.27it/s][A
+ 87%|████████▋ | 13/15 [00:05<00:00,  2.26it/s][A
+ 93%|█████████▎| 14/15 [00:06<00:00,  2.26it/s][A
+100%|██████████| 15/15 [00:06<00:00,  2.25it/s][A
+                                               [A 29%|██▊       | 2/7 [00:12<00:32,  6.47s/it]IMMUTABLE_DELTA_V_READ block=1 step=0 t=1.0000 rows=4 owner_coverage=0.0765 matched=0.0765 similarity=0.6266 memory_rms=0.510743 native_rms=0.493314 memory_to_native=0.8473 correction_rms=0.034735 gate=0.0851 capped=0.5496
+IMMUTABLE_DELTA_V_READ block=1 step=1 t=0.9330 rows=4 owner_coverage=0.0765 matched=0.0765 similarity=0.6266 memory_rms=0.510743 native_rms=0.507459 memory_to_native=0.8426 correction_rms=0.035441 gate=0.0851 capped=0.5405
+IMMUTABLE_DELTA_V_READ block=1 step=2 t=0.8660 rows=4 owner_coverage=0.0765 matched=0.0765 similarity=0.6266 memory_rms=0.510743 native_rms=0.504090 memory_to_native=0.8426 correction_rms=0.035053 gate=0.0851 capped=0.5419
+IMMUTABLE_DELTA_V_READ block=1 step=3 t=0.8000 rows=4 owner_coverage=0.0765 matched=0.0765 similarity=0.6266 memory_rms=0.510743 native_rms=0.511531 memory_to_native=0.8368 correction_rms=0.035261 gate=0.0851 capped=0.5216
+IMMUTABLE_DELTA_V_READ block=1 step=4 t=0.7330 rows=4 owner_coverage=0.0765 matched=0.0765 similarity=0.6266 memory_rms=0.510743 native_rms=0.521117 memory_to_native=0.8324 correction_rms=0.035750 gate=0.0851 capped=0.5077
+IMMUTABLE_DELTA_V_READ block=1 step=5 t=0.6660 rows=4 owner_coverage=0.0765 matched=0.0765 similarity=0.6266 memory_rms=0.510743 native_rms=0.531070 memory_to_native=0.8260 correction_rms=0.036160 gate=0.0851 capped=0.4902
+IMMUTABLE_DELTA_V_READ block=1 step=6 t=0.6000 rows=4 owner_coverage=0.0765 matched=0.0765 similarity=0.6266 memory_rms=0.510743 native_rms=0.538790 memory_to_native=0.8225 correction_rms=0.036599 gate=0.0851 capped=0.4693
+IMMUTABLE_DELTA_V_READ block=1 step=7 t=0.5330 rows=4 owner_coverage=0.0765 matched=0.0765 similarity=0.6266 memory_rms=0.510743 native_rms=0.548824 memory_to_native=0.8175 correction_rms=0.037078 gate=0.0851 capped=0.4623
+IMMUTABLE_DELTA_V_READ block=1 step=8 t=0.4660 rows=4 owner_coverage=0.0863 matched=0.0862 similarity=0.6242 memory_rms=0.519381 native_rms=0.545891 memory_to_native=0.8311 correction_rms=0.037127 gate=0.0844 capped=0.4978
+IMMUTABLE_DELTA_V_READ block=1 step=9 t=0.4000 rows=4 owner_coverage=0.0863 matched=0.0862 similarity=0.6242 memory_rms=0.519381 native_rms=0.554970 memory_to_native=0.8260 correction_rms=0.037498 gate=0.0844 capped=0.4830
+IMMUTABLE_DELTA_V_READ block=1 step=10 t=0.3330 rows=4 owner_coverage=0.0863 matched=0.0862 similarity=0.6242 memory_rms=0.519381 native_rms=0.557518 memory_to_native=0.8248 correction_rms=0.037686 gate=0.0844 capped=0.4762
+IMMUTABLE_DELTA_V_READ block=1 step=11 t=0.2660 rows=4 owner_coverage=0.0863 matched=0.0862 similarity=0.6242 memory_rms=0.519381 native_rms=0.557534 memory_to_native=0.8250 correction_rms=0.037683 gate=0.0844 capped=0.4762
+IMMUTABLE_DELTA_V_READ block=1 step=12 t=0.2000 rows=4 owner_coverage=0.0863 matched=0.0862 similarity=0.6242 memory_rms=0.519381 native_rms=0.555237 memory_to_native=0.8259 correction_rms=0.037570 gate=0.0844 capped=0.4731
+IMMUTABLE_DELTA_V_READ block=1 step=13 t=0.1330 rows=4 owner_coverage=0.0863 matched=0.0862 similarity=0.6242 memory_rms=0.519381 native_rms=0.558293 memory_to_native=0.8241 correction_rms=0.037690 gate=0.0844 capped=0.4718
+IMMUTABLE_DELTA_V_READ block=1 step=14 t=0.0660 rows=4 owner_coverage=0.0863 matched=0.0862 similarity=0.6242 memory_rms=0.519381 native_rms=0.552633 memory_to_native=0.8271 correction_rms=0.037424 gate=0.0844 capped=0.4737
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:06,  2.04it/s][A
+ 13%|█▎        | 2/15 [00:00<00:06,  2.05it/s][A
+ 20%|██        | 3/15 [00:01<00:05,  2.05it/s][A
+ 27%|██▋       | 4/15 [00:01<00:05,  2.05it/s][A
+ 33%|███▎      | 5/15 [00:02<00:04,  2.05it/s][A
+ 40%|████      | 6/15 [00:02<00:04,  2.05it/s][A
+ 47%|████▋     | 7/15 [00:03<00:03,  2.05it/s][A
+ 53%|█████▎    | 8/15 [00:03<00:03,  2.04it/s][A
+ 60%|██████    | 9/15 [00:04<00:02,  2.01it/s][A
+ 67%|██████▋   | 10/15 [00:04<00:02,  1.99it/s][A
+ 73%|███████▎  | 11/15 [00:05<00:02,  1.98it/s][A
+ 80%|████████  | 12/15 [00:05<00:01,  1.97it/s][A
+ 87%|████████▋ | 13/15 [00:06<00:01,  1.96it/s][A
+ 93%|█████████▎| 14/15 [00:06<00:00,  1.96it/s][A
+100%|██████████| 15/15 [00:07<00:00,  1.96it/s][A
+                                               [A 43%|████▎     | 3/7 [00:20<00:28,  7.16s/it]IMMUTABLE_DELTA_V_READ block=2 step=0 t=1.0000 rows=4 owner_coverage=0.0761 matched=0.0761 similarity=0.6245 memory_rms=0.511171 native_rms=0.500962 memory_to_native=0.8340 correction_rms=0.034458 gate=0.0845 capped=0.5211
+IMMUTABLE_DELTA_V_READ block=2 step=1 t=0.9330 rows=4 owner_coverage=0.0761 matched=0.0761 similarity=0.6245 memory_rms=0.511171 native_rms=0.517202 memory_to_native=0.8288 correction_rms=0.035412 gate=0.0845 capped=0.5105
+IMMUTABLE_DELTA_V_READ block=2 step=2 t=0.8660 rows=4 owner_coverage=0.0761 matched=0.0761 similarity=0.6245 memory_rms=0.511171 native_rms=0.520632 memory_to_native=0.8239 correction_rms=0.035213 gate=0.0845 capped=0.5042
+IMMUTABLE_DELTA_V_READ block=2 step=3 t=0.8000 rows=4 owner_coverage=0.0761 matched=0.0761 similarity=0.6245 memory_rms=0.511171 native_rms=0.531124 memory_to_native=0.8165 correction_rms=0.035517 gate=0.0845 capped=0.4860
+IMMUTABLE_DELTA_V_READ block=2 step=4 t=0.7330 rows=4 owner_coverage=0.0761 matched=0.0761 similarity=0.6245 memory_rms=0.511171 native_rms=0.537777 memory_to_native=0.8103 correction_rms=0.035564 gate=0.0845 capped=0.4740
+IMMUTABLE_DELTA_V_READ block=2 step=5 t=0.6660 rows=4 owner_coverage=0.0761 matched=0.0761 similarity=0.6245 memory_rms=0.511171 native_rms=0.544460 memory_to_native=0.8062 correction_rms=0.035858 gate=0.0845 capped=0.4635
+IMMUTABLE_DELTA_V_READ block=2 step=6 t=0.6000 rows=4 owner_coverage=0.0761 matched=0.0761 similarity=0.6245 memory_rms=0.511171 native_rms=0.550638 memory_to_native=0.8021 correction_rms=0.036072 gate=0.0845 capped=0.4445
+IMMUTABLE_DELTA_V_READ block=2 step=7 t=0.5330 rows=4 owner_coverage=0.0761 matched=0.0761 similarity=0.6245 memory_rms=0.511171 native_rms=0.556554 memory_to_native=0.7991 correction_rms=0.036345 gate=0.0845 capped=0.4389
+IMMUTABLE_DELTA_V_READ block=2 step=8 t=0.4660 rows=4 owner_coverage=0.0872 matched=0.0872 similarity=0.6223 memory_rms=0.525390 native_rms=0.553009 memory_to_native=0.8156 correction_rms=0.036582 gate=0.0838 capped=0.4786
+IMMUTABLE_DELTA_V_READ block=2 step=9 t=0.4000 rows=4 owner_coverage=0.0872 matched=0.0872 similarity=0.6223 memory_rms=0.525390 native_rms=0.563018 memory_to_native=0.8116 correction_rms=0.037092 gate=0.0838 capped=0.4681
+IMMUTABLE_DELTA_V_READ block=2 step=10 t=0.3330 rows=4 owner_coverage=0.0872 matched=0.0872 similarity=0.6223 memory_rms=0.525390 native_rms=0.565653 memory_to_native=0.8109 correction_rms=0.037263 gate=0.0838 capped=0.4596
+IMMUTABLE_DELTA_V_READ block=2 step=11 t=0.2660 rows=4 owner_coverage=0.0872 matched=0.0872 similarity=0.6223 memory_rms=0.525390 native_rms=0.565295 memory_to_native=0.8113 correction_rms=0.037282 gate=0.0838 capped=0.4602
+IMMUTABLE_DELTA_V_READ block=2 step=12 t=0.2000 rows=4 owner_coverage=0.0872 matched=0.0872 similarity=0.6223 memory_rms=0.525390 native_rms=0.567077 memory_to_native=0.8106 correction_rms=0.037374 gate=0.0838 capped=0.4632
+IMMUTABLE_DELTA_V_READ block=2 step=13 t=0.1330 rows=4 owner_coverage=0.0872 matched=0.0872 similarity=0.6223 memory_rms=0.525390 native_rms=0.571537 memory_to_native=0.8080 correction_rms=0.037545 gate=0.0838 capped=0.4473
+IMMUTABLE_DELTA_V_READ block=2 step=14 t=0.0660 rows=4 owner_coverage=0.0872 matched=0.0872 similarity=0.6223 memory_rms=0.525390 native_rms=0.566471 memory_to_native=0.8106 correction_rms=0.037327 gate=0.0838 capped=0.4540
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:07,  1.80it/s][A
+ 13%|█▎        | 2/15 [00:01<00:07,  1.80it/s][A
+ 20%|██        | 3/15 [00:01<00:06,  1.80it/s][A
+ 27%|██▋       | 4/15 [00:02<00:06,  1.80it/s][A
+ 33%|███▎      | 5/15 [00:02<00:05,  1.80it/s][A
+ 40%|████      | 6/15 [00:03<00:05,  1.80it/s][A
+ 47%|████▋     | 7/15 [00:03<00:04,  1.80it/s][A
+ 53%|█████▎    | 8/15 [00:04<00:03,  1.78it/s][A
+ 60%|██████    | 9/15 [00:05<00:03,  1.76it/s][A
+ 67%|██████▋   | 10/15 [00:05<00:02,  1.75it/s][A
+ 73%|███████▎  | 11/15 [00:06<00:02,  1.74it/s][A
+ 80%|████████  | 12/15 [00:06<00:01,  1.73it/s][A
+ 87%|████████▋ | 13/15 [00:07<00:01,  1.73it/s][A
+ 93%|█████████▎| 14/15 [00:07<00:00,  1.72it/s][A
+100%|██████████| 15/15 [00:08<00:00,  1.72it/s][A
+                                               [A 57%|█████▋    | 4/7 [00:29<00:23,  7.93s/it]IMMUTABLE_DELTA_V_READ block=3 step=0 t=1.0000 rows=4 owner_coverage=0.0517 matched=0.0517 similarity=0.6208 memory_rms=0.502478 native_rms=0.501055 memory_to_native=0.8406 correction_rms=0.034000 gate=0.0833 capped=0.5083
+IMMUTABLE_DELTA_V_READ block=3 step=1 t=0.9330 rows=4 owner_coverage=0.0517 matched=0.0517 similarity=0.6208 memory_rms=0.502478 native_rms=0.523245 memory_to_native=0.8281 correction_rms=0.035035 gate=0.0833 capped=0.4700
+IMMUTABLE_DELTA_V_READ block=3 step=2 t=0.8660 rows=4 owner_coverage=0.0517 matched=0.0517 similarity=0.6208 memory_rms=0.502478 native_rms=0.516018 memory_to_native=0.8283 correction_rms=0.034392 gate=0.0833 capped=0.4762
+IMMUTABLE_DELTA_V_READ block=3 step=3 t=0.8000 rows=4 owner_coverage=0.0517 matched=0.0517 similarity=0.6208 memory_rms=0.502478 native_rms=0.524242 memory_to_native=0.8217 correction_rms=0.034503 gate=0.0833 capped=0.4618
+IMMUTABLE_DELTA_V_READ block=3 step=4 t=0.7330 rows=4 owner_coverage=0.0517 matched=0.0517 similarity=0.6208 memory_rms=0.502478 native_rms=0.535742 memory_to_native=0.8113 correction_rms=0.034648 gate=0.0833 capped=0.4360
+IMMUTABLE_DELTA_V_READ block=3 step=5 t=0.6660 rows=4 owner_coverage=0.0517 matched=0.0517 similarity=0.6208 memory_rms=0.502478 native_rms=0.543352 memory_to_native=0.8078 correction_rms=0.035021 gate=0.0833 capped=0.4287
+IMMUTABLE_DELTA_V_READ block=3 step=6 t=0.6000 rows=4 owner_coverage=0.0517 matched=0.0517 similarity=0.6208 memory_rms=0.502478 native_rms=0.553092 memory_to_native=0.8019 correction_rms=0.035375 gate=0.0833 capped=0.4112
+IMMUTABLE_DELTA_V_READ block=3 step=7 t=0.5330 rows=4 owner_coverage=0.0517 matched=0.0517 similarity=0.6208 memory_rms=0.502478 native_rms=0.559021 memory_to_native=0.7986 correction_rms=0.035646 gate=0.0833 capped=0.4091
+IMMUTABLE_DELTA_V_READ block=3 step=8 t=0.4660 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6161 memory_rms=0.531651 native_rms=0.549004 memory_to_native=0.8326 correction_rms=0.035858 gate=0.0819 capped=0.4910
+IMMUTABLE_DELTA_V_READ block=3 step=9 t=0.4000 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6161 memory_rms=0.531651 native_rms=0.556841 memory_to_native=0.8290 correction_rms=0.036220 gate=0.0819 capped=0.4865
+IMMUTABLE_DELTA_V_READ block=3 step=10 t=0.3330 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6161 memory_rms=0.531651 native_rms=0.561302 memory_to_native=0.8275 correction_rms=0.036479 gate=0.0819 capped=0.4775
+IMMUTABLE_DELTA_V_READ block=3 step=11 t=0.2660 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6161 memory_rms=0.531651 native_rms=0.560133 memory_to_native=0.8290 correction_rms=0.036520 gate=0.0819 capped=0.4805
+IMMUTABLE_DELTA_V_READ block=3 step=12 t=0.2000 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6161 memory_rms=0.531651 native_rms=0.560048 memory_to_native=0.8296 correction_rms=0.036544 gate=0.0819 capped=0.4835
+IMMUTABLE_DELTA_V_READ block=3 step=13 t=0.1330 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6161 memory_rms=0.531651 native_rms=0.564908 memory_to_native=0.8271 correction_rms=0.036739 gate=0.0819 capped=0.4700
+IMMUTABLE_DELTA_V_READ block=3 step=14 t=0.0660 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6161 memory_rms=0.531651 native_rms=0.559242 memory_to_native=0.8302 correction_rms=0.036497 gate=0.0819 capped=0.4790
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:08,  1.60it/s][A
+ 13%|█▎        | 2/15 [00:01<00:08,  1.60it/s][A
+ 20%|██        | 3/15 [00:01<00:07,  1.61it/s][A
+ 27%|██▋       | 4/15 [00:02<00:06,  1.61it/s][A
+ 33%|███▎      | 5/15 [00:03<00:06,  1.61it/s][A
+ 40%|████      | 6/15 [00:03<00:05,  1.61it/s][A
+ 47%|████▋     | 7/15 [00:04<00:04,  1.61it/s][A
+ 53%|█████▎    | 8/15 [00:04<00:04,  1.60it/s][A
+ 60%|██████    | 9/15 [00:05<00:03,  1.58it/s][A
+ 67%|██████▋   | 10/15 [00:06<00:03,  1.57it/s][A
+ 73%|███████▎  | 11/15 [00:06<00:02,  1.56it/s][A
+ 80%|████████  | 12/15 [00:07<00:01,  1.55it/s][A
+ 87%|████████▋ | 13/15 [00:08<00:01,  1.55it/s][A
+ 93%|█████████▎| 14/15 [00:08<00:00,  1.55it/s][A
+100%|██████████| 15/15 [00:09<00:00,  1.55it/s][A
+                                               [A 71%|███████▏  | 5/7 [00:39<00:17,  8.73s/it]IMMUTABLE_DELTA_V_READ block=4 step=0 t=1.0000 rows=4 owner_coverage=0.0560 matched=0.0560 similarity=0.6200 memory_rms=0.519168 native_rms=0.502846 memory_to_native=0.8585 correction_rms=0.034857 gate=0.0831 capped=0.5439
+IMMUTABLE_DELTA_V_READ block=4 step=1 t=0.9330 rows=4 owner_coverage=0.0560 matched=0.0560 similarity=0.6200 memory_rms=0.519168 native_rms=0.516595 memory_to_native=0.8527 correction_rms=0.035459 gate=0.0831 capped=0.5334
+IMMUTABLE_DELTA_V_READ block=4 step=2 t=0.8660 rows=4 owner_coverage=0.0560 matched=0.0560 similarity=0.6200 memory_rms=0.519168 native_rms=0.518040 memory_to_native=0.8504 correction_rms=0.035424 gate=0.0831 capped=0.5286
+IMMUTABLE_DELTA_V_READ block=4 step=3 t=0.8000 rows=4 owner_coverage=0.0560 matched=0.0560 similarity=0.6200 memory_rms=0.519168 native_rms=0.534425 memory_to_native=0.8401 correction_rms=0.036011 gate=0.0831 capped=0.4952
+IMMUTABLE_DELTA_V_READ block=4 step=4 t=0.7330 rows=4 owner_coverage=0.0560 matched=0.0560 similarity=0.6200 memory_rms=0.519168 native_rms=0.541206 memory_to_native=0.8355 correction_rms=0.036213 gate=0.0831 capped=0.4819
+IMMUTABLE_DELTA_V_READ block=4 step=5 t=0.6660 rows=4 owner_coverage=0.0560 matched=0.0560 similarity=0.6200 memory_rms=0.519168 native_rms=0.549387 memory_to_native=0.8299 correction_rms=0.036436 gate=0.0831 capped=0.4685
+IMMUTABLE_DELTA_V_READ block=4 step=6 t=0.6000 rows=4 owner_coverage=0.0560 matched=0.0560 similarity=0.6200 memory_rms=0.519168 native_rms=0.559984 memory_to_native=0.8241 correction_rms=0.036830 gate=0.0831 capped=0.4523
+IMMUTABLE_DELTA_V_READ block=4 step=7 t=0.5330 rows=4 owner_coverage=0.0560 matched=0.0560 similarity=0.6200 memory_rms=0.519168 native_rms=0.564700 memory_to_native=0.8211 correction_rms=0.037103 gate=0.0831 capped=0.4456
+IMMUTABLE_DELTA_V_READ block=4 step=8 t=0.4660 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6175 memory_rms=0.545057 native_rms=0.565329 memory_to_native=0.8424 correction_rms=0.037752 gate=0.0823 capped=0.5135
+IMMUTABLE_DELTA_V_READ block=4 step=9 t=0.4000 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6175 memory_rms=0.545057 native_rms=0.571133 memory_to_native=0.8409 correction_rms=0.038116 gate=0.0823 capped=0.4970
+IMMUTABLE_DELTA_V_READ block=4 step=10 t=0.3330 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6175 memory_rms=0.545057 native_rms=0.572710 memory_to_native=0.8409 correction_rms=0.038228 gate=0.0823 capped=0.4955
+IMMUTABLE_DELTA_V_READ block=4 step=11 t=0.2660 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6175 memory_rms=0.545057 native_rms=0.572939 memory_to_native=0.8420 correction_rms=0.038309 gate=0.0823 capped=0.4955
+IMMUTABLE_DELTA_V_READ block=4 step=12 t=0.2000 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6175 memory_rms=0.545057 native_rms=0.572486 memory_to_native=0.8423 correction_rms=0.038329 gate=0.0823 capped=0.4970
+IMMUTABLE_DELTA_V_READ block=4 step=13 t=0.1330 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6175 memory_rms=0.545057 native_rms=0.575131 memory_to_native=0.8413 correction_rms=0.038453 gate=0.0823 capped=0.4925
+IMMUTABLE_DELTA_V_READ block=4 step=14 t=0.0660 rows=4 owner_coverage=0.0712 matched=0.0712 similarity=0.6175 memory_rms=0.545057 native_rms=0.568202 memory_to_native=0.8445 correction_rms=0.038112 gate=0.0823 capped=0.5068
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:09,  1.45it/s][A
+ 13%|█▎        | 2/15 [00:01<00:08,  1.45it/s][A
+ 20%|██        | 3/15 [00:02<00:08,  1.44it/s][A
+ 27%|██▋       | 4/15 [00:02<00:07,  1.45it/s][A
+ 33%|███▎      | 5/15 [00:03<00:06,  1.45it/s][A
+ 40%|████      | 6/15 [00:04<00:06,  1.45it/s][A
+ 47%|████▋     | 7/15 [00:04<00:05,  1.45it/s][A
+ 53%|█████▎    | 8/15 [00:05<00:04,  1.44it/s][A
+ 60%|██████    | 9/15 [00:06<00:04,  1.42it/s][A
+ 67%|██████▋   | 10/15 [00:06<00:03,  1.41it/s][A
+ 73%|███████▎  | 11/15 [00:07<00:02,  1.41it/s][A
+ 80%|████████  | 12/15 [00:08<00:02,  1.40it/s][A
+ 87%|████████▋ | 13/15 [00:09<00:01,  1.40it/s][A
+ 93%|█████████▎| 14/15 [00:09<00:00,  1.40it/s][A
+100%|██████████| 15/15 [00:10<00:00,  1.40it/s][A
+                                               [A 86%|████████▌ | 6/7 [00:51<00:09,  9.59s/it]IMMUTABLE_DELTA_V_READ block=5 step=0 t=1.0000 rows=4 owner_coverage=0.0600 matched=0.0600 similarity=0.6209 memory_rms=0.571042 native_rms=0.503315 memory_to_native=0.8953 correction_rms=0.036857 gate=0.0834 capped=0.6441
+IMMUTABLE_DELTA_V_READ block=5 step=1 t=0.9330 rows=4 owner_coverage=0.0600 matched=0.0600 similarity=0.6209 memory_rms=0.571042 native_rms=0.516555 memory_to_native=0.8942 correction_rms=0.037630 gate=0.0834 capped=0.6459
+IMMUTABLE_DELTA_V_READ block=5 step=2 t=0.8660 rows=4 owner_coverage=0.0600 matched=0.0600 similarity=0.6209 memory_rms=0.571042 native_rms=0.525652 memory_to_native=0.8906 correction_rms=0.038022 gate=0.0834 capped=0.6326
+IMMUTABLE_DELTA_V_READ block=5 step=3 t=0.8000 rows=4 owner_coverage=0.0600 matched=0.0600 similarity=0.6209 memory_rms=0.571042 native_rms=0.539395 memory_to_native=0.8858 correction_rms=0.038722 gate=0.0834 capped=0.6041
+IMMUTABLE_DELTA_V_READ block=5 step=4 t=0.7330 rows=4 owner_coverage=0.0600 matched=0.0600 similarity=0.6209 memory_rms=0.571042 native_rms=0.547326 memory_to_native=0.8803 correction_rms=0.039007 gate=0.0834 capped=0.5801
+IMMUTABLE_DELTA_V_READ block=5 step=5 t=0.6660 rows=4 owner_coverage=0.0600 matched=0.0600 similarity=0.6209 memory_rms=0.571042 native_rms=0.552336 memory_to_native=0.8781 correction_rms=0.039210 gate=0.0834 capped=0.5810
+IMMUTABLE_DELTA_V_READ block=5 step=6 t=0.6000 rows=4 owner_coverage=0.0600 matched=0.0600 similarity=0.6209 memory_rms=0.571042 native_rms=0.563732 memory_to_native=0.8724 correction_rms=0.039775 gate=0.0834 capped=0.5569
+IMMUTABLE_DELTA_V_READ block=5 step=7 t=0.5330 rows=4 owner_coverage=0.0600 matched=0.0600 similarity=0.6209 memory_rms=0.571042 native_rms=0.571317 memory_to_native=0.8689 correction_rms=0.040150 gate=0.0834 capped=0.5365
+IMMUTABLE_DELTA_V_READ block=5 step=8 t=0.4660 rows=4 owner_coverage=0.0714 matched=0.0714 similarity=0.6196 memory_rms=0.581275 native_rms=0.566516 memory_to_native=0.8803 correction_rms=0.040125 gate=0.0829 capped=0.5778
+IMMUTABLE_DELTA_V_READ block=5 step=9 t=0.4000 rows=4 owner_coverage=0.0714 matched=0.0714 similarity=0.6196 memory_rms=0.581275 native_rms=0.573761 memory_to_native=0.8770 correction_rms=0.040511 gate=0.0829 capped=0.5606
+IMMUTABLE_DELTA_V_READ block=5 step=10 t=0.3330 rows=4 owner_coverage=0.0714 matched=0.0714 similarity=0.6196 memory_rms=0.581275 native_rms=0.577749 memory_to_native=0.8753 correction_rms=0.040741 gate=0.0829 capped=0.5509
+IMMUTABLE_DELTA_V_READ block=5 step=11 t=0.2660 rows=4 owner_coverage=0.0714 matched=0.0714 similarity=0.6196 memory_rms=0.581275 native_rms=0.579004 memory_to_native=0.8751 correction_rms=0.040833 gate=0.0829 capped=0.5546
+IMMUTABLE_DELTA_V_READ block=5 step=12 t=0.2000 rows=4 owner_coverage=0.0714 matched=0.0714 similarity=0.6196 memory_rms=0.581275 native_rms=0.578751 memory_to_native=0.8760 correction_rms=0.040867 gate=0.0829 capped=0.5524
+IMMUTABLE_DELTA_V_READ block=5 step=13 t=0.1330 rows=4 owner_coverage=0.0714 matched=0.0714 similarity=0.6196 memory_rms=0.581275 native_rms=0.579418 memory_to_native=0.8750 correction_rms=0.040848 gate=0.0829 capped=0.5457
+IMMUTABLE_DELTA_V_READ block=5 step=14 t=0.0660 rows=4 owner_coverage=0.0714 matched=0.0714 similarity=0.6196 memory_rms=0.581275 native_rms=0.572810 memory_to_native=0.8786 correction_rms=0.040525 gate=0.0829 capped=0.5569
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:00<00:10,  1.31it/s][A
+ 13%|█▎        | 2/15 [00:01<00:09,  1.32it/s][A
+ 20%|██        | 3/15 [00:02<00:09,  1.32it/s][A
+ 27%|██▋       | 4/15 [00:03<00:08,  1.32it/s][A
+ 33%|███▎      | 5/15 [00:03<00:07,  1.32it/s][A
+ 40%|████      | 6/15 [00:04<00:06,  1.32it/s][A
+ 47%|████▋     | 7/15 [00:05<00:06,  1.32it/s][A
+ 53%|█████▎    | 8/15 [00:06<00:05,  1.31it/s][A
+ 60%|██████    | 9/15 [00:06<00:04,  1.30it/s][A
+ 67%|██████▋   | 10/15 [00:07<00:03,  1.29it/s][A
+ 73%|███████▎  | 11/15 [00:08<00:03,  1.28it/s][A
+ 80%|████████  | 12/15 [00:09<00:02,  1.28it/s][A
+ 87%|████████▋ | 13/15 [00:10<00:01,  1.28it/s][A
+ 93%|█████████▎| 14/15 [00:10<00:00,  1.28it/s][A
+100%|██████████| 15/15 [00:11<00:00,  1.27it/s][A
+                                               [A100%|██████████| 7/7 [01:03<00:00, 10.49s/it]100%|██████████| 7/7 [01:03<00:00,  9.08s/it]
+/usr/local/lib/python3.11/dist-packages/torchvision/io/_video_deprecation_warning.py:9: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+IMMUTABLE_DELTA_V_READ block=6 step=0 t=1.0000 rows=4 owner_coverage=0.0571 matched=0.0571 similarity=0.6340 memory_rms=0.557925 native_rms=0.497529 memory_to_native=0.8919 correction_rms=0.038251 gate=0.0874 capped=0.6236
+IMMUTABLE_DELTA_V_READ block=6 step=1 t=0.9330 rows=4 owner_coverage=0.0571 matched=0.0571 similarity=0.6340 memory_rms=0.557925 native_rms=0.526951 memory_to_native=0.8817 correction_rms=0.039824 gate=0.0874 capped=0.6030
+IMMUTABLE_DELTA_V_READ block=6 step=2 t=0.8660 rows=4 owner_coverage=0.0571 matched=0.0571 similarity=0.6340 memory_rms=0.557925 native_rms=0.525952 memory_to_native=0.8816 correction_rms=0.039649 gate=0.0874 capped=0.5993
+IMMUTABLE_DELTA_V_READ block=6 step=3 t=0.8000 rows=4 owner_coverage=0.0571 matched=0.0571 similarity=0.6340 memory_rms=0.557925 native_rms=0.535591 memory_to_native=0.8762 correction_rms=0.039991 gate=0.0874 capped=0.5796
+IMMUTABLE_DELTA_V_READ block=6 step=4 t=0.7330 rows=4 owner_coverage=0.0571 matched=0.0571 similarity=0.6340 memory_rms=0.557925 native_rms=0.536790 memory_to_native=0.8737 correction_rms=0.039895 gate=0.0874 capped=0.5787
+IMMUTABLE_DELTA_V_READ block=6 step=5 t=0.6660 rows=4 owner_coverage=0.0571 matched=0.0571 similarity=0.6340 memory_rms=0.557925 native_rms=0.551134 memory_to_native=0.8659 correction_rms=0.040627 gate=0.0874 capped=0.5581
+IMMUTABLE_DELTA_V_READ block=6 step=6 t=0.6000 rows=4 owner_coverage=0.0571 matched=0.0571 similarity=0.6340 memory_rms=0.557925 native_rms=0.557559 memory_to_native=0.8616 correction_rms=0.040929 gate=0.0874 capped=0.5375
+IMMUTABLE_DELTA_V_READ block=6 step=7 t=0.5330 rows=4 owner_coverage=0.0571 matched=0.0571 similarity=0.6340 memory_rms=0.557925 native_rms=0.566755 memory_to_native=0.8569 correction_rms=0.041461 gate=0.0874 capped=0.5178
+IMMUTABLE_DELTA_V_READ block=6 step=8 t=0.4660 rows=4 owner_coverage=0.0679 matched=0.0679 similarity=0.6341 memory_rms=0.582780 native_rms=0.558408 memory_to_native=0.8748 correction_rms=0.041563 gate=0.0874 capped=0.5794
+IMMUTABLE_DELTA_V_READ block=6 step=9 t=0.4000 rows=4 owner_coverage=0.0679 matched=0.0679 similarity=0.6341 memory_rms=0.582780 native_rms=0.562964 memory_to_native=0.8733 correction_rms=0.041904 gate=0.0874 capped=0.5731
+IMMUTABLE_DELTA_V_READ block=6 step=10 t=0.3330 rows=4 owner_coverage=0.0679 matched=0.0679 similarity=0.6341 memory_rms=0.582780 native_rms=0.565801 memory_to_native=0.8730 correction_rms=0.042180 gate=0.0874 capped=0.5590
+IMMUTABLE_DELTA_V_READ block=6 step=11 t=0.2660 rows=4 owner_coverage=0.0679 matched=0.0679 similarity=0.6341 memory_rms=0.582780 native_rms=0.567217 memory_to_native=0.8725 correction_rms=0.042297 gate=0.0874 capped=0.5566
+IMMUTABLE_DELTA_V_READ block=6 step=12 t=0.2000 rows=4 owner_coverage=0.0679 matched=0.0679 similarity=0.6341 memory_rms=0.582780 native_rms=0.567622 memory_to_native=0.8729 correction_rms=0.042332 gate=0.0874 capped=0.5597
+IMMUTABLE_DELTA_V_READ block=6 step=13 t=0.1330 rows=4 owner_coverage=0.0679 matched=0.0679 similarity=0.6341 memory_rms=0.582780 native_rms=0.570961 memory_to_native=0.8711 correction_rms=0.042506 gate=0.0874 capped=0.5542
+IMMUTABLE_DELTA_V_READ block=6 step=14 t=0.0660 rows=4 owner_coverage=0.0679 matched=0.0679 similarity=0.6341 memory_rms=0.582780 native_rms=0.564845 memory_to_native=0.8739 correction_rms=0.042182 gate=0.0874 capped=0.5660

@@ -1545,6 +1545,47 @@ if __name__ == '__main__':
         default=None,
         help="JSONL destination for source-background attention diagnostics.",
     )
+    parser.add_argument(
+        "--immutable_delta_v_bank",
+        action="store_true",
+        default=False,
+        help=(
+            "M1: freeze first-block target-minus-source values and read "
+            "them through an independent clean-source-addressed residual "
+            "channel. Native StreamGVE attention and KV remain unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--immutable_delta_v_layers",
+        type=int,
+        nargs="+",
+        default=[8, 12, 16, 20],
+        help="Transformer layers carrying the frozen M1 delta-V bank.",
+    )
+    parser.add_argument(
+        "--immutable_delta_v_topk",
+        type=int,
+        default=8,
+        help="Number of first-block source addresses retrieved per query.",
+    )
+    parser.add_argument(
+        "--immutable_delta_v_min_similarity",
+        type=float,
+        default=0.35,
+        help="Minimum clean-source cosine similarity for M1 admission.",
+    )
+    parser.add_argument(
+        "--immutable_delta_v_strength",
+        type=float,
+        default=0.20,
+        help="Bounded additive M1 residual strength.",
+    )
+    parser.add_argument(
+        "--immutable_delta_v_max_rms_ratio",
+        type=float,
+        default=1.0,
+        help="Maximum retrieved-residual RMS relative to native output RMS.",
+    )
     parser.add_argument("--mask_white_threshold", type=int, default=245)
     parser.add_argument(
         "--hand_mask_mode",
@@ -2847,6 +2888,79 @@ if __name__ == '__main__':
                 "--source_bg_attention_diagnostic_path is required with "
                 "--source_bg_attention_diagnostics"
             )
+    if args.immutable_delta_v_bank:
+        if args.routing_mode != "dynamic_sog":
+            parser.error(
+                "--immutable_delta_v_bank requires --routing_mode "
+                "dynamic_sog"
+            )
+        if (
+            not args.immutable_delta_v_layers
+            or len(set(args.immutable_delta_v_layers))
+            != len(args.immutable_delta_v_layers)
+            or any(
+                layer < 0 or layer >= 30
+                for layer in args.immutable_delta_v_layers
+            )
+        ):
+            parser.error(
+                "--immutable_delta_v_layers must be unique values in [0, 29]"
+            )
+        if args.immutable_delta_v_topk <= 0:
+            parser.error("--immutable_delta_v_topk must be positive")
+        if not -1.0 < args.immutable_delta_v_min_similarity < 1.0:
+            parser.error(
+                "--immutable_delta_v_min_similarity must be in (-1, 1)"
+            )
+        if not 0.0 <= args.immutable_delta_v_strength <= 1.0:
+            parser.error(
+                "--immutable_delta_v_strength must be in [0, 1]"
+            )
+        if args.immutable_delta_v_max_rms_ratio <= 0.0:
+            parser.error(
+                "--immutable_delta_v_max_rms_ratio must be positive"
+            )
+        incompatible = {
+            "--first_block_identity_anchor": (
+                args.first_block_identity_anchor
+            ),
+            "--suppress_source_bg_value": args.suppress_source_bg_value,
+            "--counterfactual_source_bg_output": (
+                args.counterfactual_source_bg_output
+            ),
+            "--projected_source_residual": args.projected_source_residual,
+            "--drop_source_bg_kv": args.drop_source_bg_kv,
+            "--soft_region_modulation": args.soft_region_modulation,
+            "--factorized_target_identity": args.factorized_target_identity,
+            "--factorized_immutable_target_memory": (
+                args.factorized_immutable_target_memory
+            ),
+            "--factorized_native_target_history": (
+                args.factorized_native_target_history
+            ),
+            "--causal_paired_edit_memory": args.causal_paired_edit_memory,
+            "--role_fixed_native_history": args.role_fixed_native_history,
+            "--first_chunk_identity_replay": (
+                args.first_chunk_identity_replay
+            ),
+            "--paired_memory_first_block_replay": (
+                args.paired_memory_first_block_replay
+            ),
+            "--object_mask_video": args.object_mask_video is not None,
+            "--source_owner_mask_video": (
+                args.source_owner_mask_video is not None
+            ),
+            "--hand_mask_video": args.hand_mask_video is not None,
+            "--source_flow_cache": args.source_flow_cache is not None,
+        }
+        enabled_incompatible = [
+            name for name, enabled in incompatible.items() if enabled
+        ]
+        if enabled_incompatible:
+            parser.error(
+                "--immutable_delta_v_bank is a strict L0 single-variable "
+                "experiment; remove " + ", ".join(enabled_incompatible)
+            )
     pipeline, low_memory, device, local_rank = load_pipe(args)
     if (
         args.source_bg_attention_diagnostics
@@ -3578,6 +3692,16 @@ if __name__ == '__main__':
             str(Path(args.source_bg_attention_diagnostic_path).resolve())
             if args.source_bg_attention_diagnostic_path is not None
             else None
+        ),
+        immutable_delta_v_bank=args.immutable_delta_v_bank,
+        immutable_delta_v_layers=args.immutable_delta_v_layers,
+        immutable_delta_v_topk=args.immutable_delta_v_topk,
+        immutable_delta_v_min_similarity=(
+            args.immutable_delta_v_min_similarity
+        ),
+        immutable_delta_v_strength=args.immutable_delta_v_strength,
+        immutable_delta_v_max_rms_ratio=(
+            args.immutable_delta_v_max_rms_ratio
         ),
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,

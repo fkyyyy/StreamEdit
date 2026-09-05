@@ -51,6 +51,7 @@ from .native_kv_history import (
     RoleConditionedNativeKVHistory,
     validate_recent_entry_hand_only_contract,
 )
+from .immutable_delta_v_bank import ImmutableDeltaVBank
 from .semantic_edit_authority import (
     apply_semantic_transaction_gate,
     build_semantic_edit_authority,
@@ -322,6 +323,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
         source_bg_attention_diagnostics: bool = False,
         source_bg_attention_diagnostic_query_samples: int = 4,
         source_bg_attention_diagnostic_path: Optional[str] = None,
+        immutable_delta_v_bank: bool = False,
+        immutable_delta_v_layers: Iterable = (8, 12, 16, 20),
+        immutable_delta_v_topk: int = 8,
+        immutable_delta_v_min_similarity: float = 0.35,
+        immutable_delta_v_strength: float = 0.20,
+        immutable_delta_v_max_rms_ratio: float = 1.0,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
         posterior_flow_mode: str = "soft",
@@ -394,6 +401,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         _projected_residual_energy_budget: Optional[
             CausalResidualEnergyBudget
         ] = None,
+        _immutable_delta_v_bank: Optional[ImmutableDeltaVBank] = None,
     ) -> torch.Tensor:
         expected_role_shape = (
             src_video.shape[0], src_video.shape[1],
@@ -532,6 +540,89 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 os.makedirs(diagnostic_parent, exist_ok=True)
             if os.path.exists(source_bg_attention_diagnostic_path):
                 os.remove(source_bg_attention_diagnostic_path)
+        immutable_delta_v_layers = tuple(immutable_delta_v_layers)
+        if immutable_delta_v_bank:
+            if routing_mode != "dynamic_sog":
+                raise ValueError(
+                    "M1 immutable delta-V bank requires native dynamic_sog "
+                    "routing"
+                )
+            if (
+                not immutable_delta_v_layers
+                or len(set(immutable_delta_v_layers))
+                != len(immutable_delta_v_layers)
+                or any(
+                    layer < 0 or layer >= self.num_transformer_blocks
+                    for layer in immutable_delta_v_layers
+                )
+            ):
+                raise ValueError(
+                    "M1 layers must be unique valid transformer layers"
+                )
+            if immutable_delta_v_topk <= 0:
+                raise ValueError("M1 topk must be positive")
+            if not -1.0 < immutable_delta_v_min_similarity < 1.0:
+                raise ValueError(
+                    "M1 minimum similarity must lie in (-1, 1)"
+                )
+            if not 0.0 <= immutable_delta_v_strength <= 1.0:
+                raise ValueError("M1 strength must lie in [0, 1]")
+            if immutable_delta_v_max_rms_ratio <= 0.0:
+                raise ValueError(
+                    "M1 maximum RMS ratio must be positive"
+                )
+            incompatible = {
+                "first_block_identity_anchor": first_block_identity_anchor,
+                "suppress_source_bg_value": suppress_source_bg_value,
+                "counterfactual_source_bg_output": (
+                    counterfactual_source_bg_output
+                ),
+                "projected_source_residual": projected_source_residual,
+                "drop_source_bg_kv": drop_source_bg_kv,
+                "soft_region_modulation": soft_region_modulation,
+                "factorized_target_identity": factorized_target_identity,
+                "factorized_immutable_target_memory": (
+                    factorized_immutable_target_memory
+                ),
+                "factorized_native_target_history": (
+                    factorized_native_target_history
+                ),
+                "causal_paired_edit_memory": causal_paired_edit_memory,
+                "role_fixed_native_history": role_fixed_native_history,
+                "first_chunk_identity_replay": first_chunk_identity_replay,
+                "paired_memory_first_block_replay": (
+                    paired_memory_first_block_replay
+                ),
+            }
+            enabled_incompatible = [
+                name for name, enabled in incompatible.items() if enabled
+            ]
+            if enabled_incompatible:
+                raise ValueError(
+                    "M1 is a strict L0 single-variable experiment; disable: "
+                    + ", ".join(enabled_incompatible)
+                )
+            if any(
+                value is not None
+                for value in (
+                    oracle_source_owner_mask,
+                    oracle_source_owner_full_mask,
+                    oracle_object_mask,
+                    oracle_hand_mask,
+                    hand_only_mask,
+                    hand_occupancy_mask,
+                    hand_persistent_mask,
+                    source_flow_cache,
+                )
+            ):
+                raise ValueError(
+                    "M1 forbids external masks and optical-flow inputs"
+                )
+        rollout_immutable_delta_v_bank = _immutable_delta_v_bank
+        if immutable_delta_v_bank and rollout_immutable_delta_v_bank is None:
+            rollout_immutable_delta_v_bank = ImmutableDeltaVBank(
+                immutable_delta_v_layers
+            )
         if rollout_chunk_size < 0:
             # for testing local attn
             return self.inference(
@@ -919,10 +1010,21 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 source_bg_attention_diagnostic_path=(
                     source_bg_attention_diagnostic_path
                 ),
+                immutable_delta_v_bank=immutable_delta_v_bank,
+                immutable_delta_v_layers=immutable_delta_v_layers,
+                immutable_delta_v_topk=immutable_delta_v_topk,
+                immutable_delta_v_min_similarity=(
+                    immutable_delta_v_min_similarity
+                ),
+                immutable_delta_v_strength=immutable_delta_v_strength,
+                immutable_delta_v_max_rms_ratio=(
+                    immutable_delta_v_max_rms_ratio
+                ),
                 global_frame_indices=list(range(src_video.shape[1])),
                 _projected_residual_energy_budget=(
                     rollout_projected_residual_budget
                 ),
+                _immutable_delta_v_bank=rollout_immutable_delta_v_bank,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
                 posterior_flow_mode=posterior_flow_mode,
@@ -3112,10 +3214,21 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 source_bg_attention_diagnostic_path=(
                     source_bg_attention_diagnostic_path
                 ),
+                immutable_delta_v_bank=immutable_delta_v_bank,
+                immutable_delta_v_layers=immutable_delta_v_layers,
+                immutable_delta_v_topk=immutable_delta_v_topk,
+                immutable_delta_v_min_similarity=(
+                    immutable_delta_v_min_similarity
+                ),
+                immutable_delta_v_strength=immutable_delta_v_strength,
+                immutable_delta_v_max_rms_ratio=(
+                    immutable_delta_v_max_rms_ratio
+                ),
                 global_frame_indices=rollout_global_frame_indices,
                 _projected_residual_energy_budget=(
                     rollout_projected_residual_budget
                 ),
+                _immutable_delta_v_bank=rollout_immutable_delta_v_bank,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
                 posterior_flow_mode=posterior_flow_mode,
@@ -3405,6 +3518,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
         source_bg_attention_diagnostics: bool = False,
         source_bg_attention_diagnostic_query_samples: int = 4,
         source_bg_attention_diagnostic_path: Optional[str] = None,
+        immutable_delta_v_bank: bool = False,
+        immutable_delta_v_layers: Iterable = (8, 12, 16, 20),
+        immutable_delta_v_topk: int = 8,
+        immutable_delta_v_min_similarity: float = 0.35,
+        immutable_delta_v_strength: float = 0.20,
+        immutable_delta_v_max_rms_ratio: float = 1.0,
         global_frame_indices: Optional[List[int]] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
@@ -3478,6 +3597,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         _projected_residual_energy_budget: Optional[
             CausalResidualEnergyBudget
         ] = None,
+        _immutable_delta_v_bank: Optional[ImmutableDeltaVBank] = None,
     ) -> torch.Tensor:
         assert not (independent_first_frame and triple_first_frame)
         independent_first_frame = independent_first_frame or self.independent_first_frame
@@ -3519,6 +3639,83 @@ class EditCausalInferencePipeline(torch.nn.Module):
             raise ValueError(
                 "counterfactual_source_bg_output requires dynamic_sog "
                 "routing"
+            )
+        immutable_delta_v_layers = tuple(immutable_delta_v_layers)
+        if immutable_delta_v_bank:
+            if routing_mode != "dynamic_sog":
+                raise ValueError(
+                    "M1 immutable delta-V bank requires native dynamic_sog "
+                    "routing"
+                )
+            if (
+                not immutable_delta_v_layers
+                or len(set(immutable_delta_v_layers))
+                != len(immutable_delta_v_layers)
+                or any(
+                    layer < 0 or layer >= self.num_transformer_blocks
+                    for layer in immutable_delta_v_layers
+                )
+            ):
+                raise ValueError(
+                    "M1 layers must be unique valid transformer layers"
+                )
+            if immutable_delta_v_topk <= 0:
+                raise ValueError("M1 topk must be positive")
+            if not -1.0 < immutable_delta_v_min_similarity < 1.0:
+                raise ValueError(
+                    "M1 minimum similarity must lie in (-1, 1)"
+                )
+            if not 0.0 <= immutable_delta_v_strength <= 1.0:
+                raise ValueError("M1 strength must lie in [0, 1]")
+            if immutable_delta_v_max_rms_ratio <= 0.0:
+                raise ValueError(
+                    "M1 maximum RMS ratio must be positive"
+                )
+            if any(
+                (
+                    first_block_identity_anchor,
+                    suppress_source_bg_value,
+                    counterfactual_source_bg_output,
+                    projected_source_residual,
+                    drop_source_bg_kv,
+                    soft_region_modulation,
+                    factorized_target_identity,
+                    factorized_immutable_target_memory,
+                    factorized_native_target_history,
+                    causal_paired_edit_memory,
+                    role_fixed_native_history,
+                )
+            ):
+                raise ValueError(
+                    "M1 must be run as a strict L0 single-variable "
+                    "experiment"
+                )
+            if any(
+                value is not None
+                for value in (
+                    oracle_source_owner_mask,
+                    oracle_source_owner_full_mask,
+                    oracle_object_mask,
+                    oracle_hand_mask,
+                    hand_only_mask,
+                    hand_occupancy_mask,
+                    hand_persistent_mask,
+                    source_flow_cache,
+                )
+            ):
+                raise ValueError(
+                    "M1 forbids external masks and optical-flow inputs"
+                )
+        immutable_delta_v_state = _immutable_delta_v_bank
+        if immutable_delta_v_bank and immutable_delta_v_state is None:
+            immutable_delta_v_state = ImmutableDeltaVBank(
+                immutable_delta_v_layers
+            )
+        if immutable_delta_v_bank and (
+            immutable_delta_v_state.layers != immutable_delta_v_layers
+        ):
+            raise ValueError(
+                "Injected M1 bank layers do not match this inference run"
             )
         projected_residual_budget = _projected_residual_energy_budget
         if (
@@ -5413,6 +5610,18 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 f"preserve_phrases={target_preserve_phrases}"
             )
         print(tok_src, tok_trg)
+        if immutable_delta_v_bank:
+            print(
+                "IMMUTABLE_DELTA_V_CONFIG "
+                f"layers={immutable_delta_v_layers} "
+                f"topk={immutable_delta_v_topk} "
+                f"min_similarity={immutable_delta_v_min_similarity:.3f} "
+                f"strength={immutable_delta_v_strength:.3f} "
+                f"max_rms_ratio={immutable_delta_v_max_rms_ratio:.3f} "
+                "address=current_clean_source_pre_rope_q "
+                "payload=first_block_clean_target_v_minus_source_v "
+                "owner=automatic_sog write=once native_attention=unchanged"
+            )
 
         # Step 2: Cache context feature
         current_start_frame = 0
@@ -5916,6 +6125,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
 
             #✨ forward clean source video to get source mask, and store into kv_cache
             self._register_crossattn_mask_gatherer(crossattn_cache_src, tok_src, layers=mask_layers, fg_scale=fg_scale)
+            if immutable_delta_v_bank:
+                self._register_full_query_capture(
+                    kv_cache_src, immutable_delta_v_layers
+                )
+                self._register_identity_key_capture(
+                    kv_cache_src, immutable_delta_v_layers
+                )
             if hand_role_enabled:
                 self._register_query_capture(
                     kv_cache_src,
@@ -5984,6 +6200,20 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     identity_memory_layers,
                 )
                 if target_identity_enabled
+                else {}
+            )
+            immutable_delta_v_source_queries = (
+                self._collect_full_queries(
+                    kv_cache_src, immutable_delta_v_layers
+                )
+                if immutable_delta_v_bank
+                else {}
+            )
+            immutable_delta_v_source_keys = (
+                self._collect_identity_keys(
+                    kv_cache_src, immutable_delta_v_layers
+                )
+                if immutable_delta_v_bank
                 else {}
             )
             current_roles = None
@@ -7495,6 +7725,37 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     and target_identity_memory.causal_edit_anchor_reset
                 ),
             })
+            if (
+                immutable_delta_v_bank
+                and immutable_delta_v_state.is_frozen
+            ):
+                shared_dict_dual.update({
+                    "immutable_delta_v_bank": (
+                        immutable_delta_v_state.export()
+                    ),
+                    "immutable_delta_v_source_query": (
+                        immutable_delta_v_source_queries
+                    ),
+                    "immutable_delta_v_topk": int(
+                        immutable_delta_v_topk
+                    ),
+                    "immutable_delta_v_min_similarity": float(
+                        immutable_delta_v_min_similarity
+                    ),
+                    "immutable_delta_v_strength": float(
+                        immutable_delta_v_strength
+                    ),
+                    "immutable_delta_v_max_rms_ratio": float(
+                        immutable_delta_v_max_rms_ratio
+                    ),
+                    "immutable_delta_v_diagnostics": [],
+                })
+            elif immutable_delta_v_bank:
+                print(
+                    "IMMUTABLE_DELTA_V_READ "
+                    f"block={current_start_frame // self.num_frame_per_block} "
+                    "state=bootstrap native_exact=1"
+                )
             effective_src_fg_mask = (
                 role_edit_tokens
                 if (
@@ -7573,6 +7834,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 shared_dict_dual['current_timestep_index'] = index
                 shared_dict_dual['total_timestep'] = len(denoising_step_list)
                 shared_dict_dual['blend_power'] = blend_power
+                if immutable_delta_v_bank and immutable_delta_v_state.is_frozen:
+                    shared_dict_dual[
+                        "immutable_delta_v_diagnostics"
+                    ] = []
                 if target_identity_enabled:
                     shared_dict_dual["target_identity_support"] = {}
                     shared_dict_dual[
@@ -7673,6 +7938,39 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     crossattn_cache=crossattn_cache_dual,
                     current_start=current_start_frame * self.frame_seq_length
                 )
+                if immutable_delta_v_bank and immutable_delta_v_state.is_frozen:
+                    memory_rows = shared_dict_dual.get(
+                        "immutable_delta_v_diagnostics", []
+                    )
+                    if memory_rows:
+                        def memory_mean(name):
+                            return torch.stack([
+                                row[name].float() for row in memory_rows
+                            ]).mean().item()
+
+                        print(
+                            "IMMUTABLE_DELTA_V_READ "
+                            f"block={current_start_frame // self.num_frame_per_block} "
+                            f"step={index} "
+                            f"t={current_timestep / 1000:.4f} "
+                            f"rows={len(memory_rows)} "
+                            "owner_coverage="
+                            f"{memory_mean('owner_gated_coverage'):.4f} "
+                            "matched="
+                            f"{memory_mean('matched_query_fraction'):.4f} "
+                            "similarity="
+                            f"{memory_mean('retrieval_similarity'):.4f} "
+                            "memory_rms="
+                            f"{memory_mean('memory_residual_rms'):.6f} "
+                            "native_rms="
+                            f"{memory_mean('native_output_rms'):.6f} "
+                            "memory_to_native="
+                            f"{memory_mean('memory_to_native_rms'):.4f} "
+                            "correction_rms="
+                            f"{memory_mean('applied_correction_rms'):.6f} "
+                            f"gate={memory_mean('mean_gate'):.4f} "
+                            f"capped={memory_mean('cap_fraction'):.4f}"
+                        )
                 if counterfactual_source_bg_output:
                     counterfactual_rows = shared_dict_dual.get(
                         "counterfactual_source_bg_output_diagnostics", []
@@ -10934,6 +11232,30 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 current_start=current_start_frame * self.frame_seq_length,
             )
             block_index = current_start_frame // self.num_frame_per_block
+            if (
+                immutable_delta_v_bank
+                and not immutable_delta_v_state.is_frozen
+            ):
+                freeze_diagnostics = immutable_delta_v_state.freeze(
+                    source_kv_cache=kv_cache_src,
+                    target_kv_cache=kv_cache_trg,
+                    source_keys=immutable_delta_v_source_keys,
+                    support=src_fg_mask_bin.bool(),
+                )
+                print(
+                    "IMMUTABLE_DELTA_V_FREEZE "
+                    f"block={block_index} "
+                    "write_once=1 native_kv_unchanged=1 "
+                    f"layers={int(freeze_diagnostics['layers'].item())} "
+                    "support="
+                    f"{freeze_diagnostics['support_fraction'].item():.4f} "
+                    "support_tokens="
+                    f"{freeze_diagnostics['support_tokens'].item():.1f} "
+                    "bank_slots="
+                    f"{int(freeze_diagnostics['bank_slots'].item())} "
+                    "delta_v_rms="
+                    f"{freeze_diagnostics['delta_value_rms'].item():.6f}"
+                )
             if first_block_identity_anchor and block_index == 0:
                 anchor_num_tokens = (
                     current_num_frames * self.frame_seq_length
@@ -12952,6 +13274,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
             ] = True
 
     @staticmethod
+    def _register_full_query_capture(kv_cache, layers):
+        for layer_index in layers:
+            kv_cache[layer_index][
+                "capture_current_full_query"
+            ] = True
+
+    @staticmethod
     def _collect_identity_keys(kv_cache, layers):
         keys = {}
         for layer_index in layers:
@@ -12965,6 +13294,21 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 )
             keys[layer_index] = key
         return keys
+
+    @staticmethod
+    def _collect_full_queries(kv_cache, layers):
+        queries = {}
+        for layer_index in layers:
+            query = kv_cache[layer_index].get(
+                "current_full_query"
+            )
+            if query is None:
+                raise RuntimeError(
+                    "Missing captured clean-source full query at layer "
+                    f"{layer_index}"
+                )
+            queries[layer_index] = query
+        return queries
 
     @staticmethod
     def _register_query_capture(kv_cache, layers):

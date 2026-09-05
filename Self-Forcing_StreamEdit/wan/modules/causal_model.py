@@ -18,6 +18,7 @@ from wan.modules.attention import (
     route_source_background_kv,
     resolve_target_identity_correction_strength,
     immutable_canonical_anchor_attention_delta,
+    immutable_delta_v_memory_attention,
     source_addressed_anchor_attention_delta,
     source_addressed_native_history_attention,
     scatter_source_addressed_anchor_delta,
@@ -262,6 +263,14 @@ class CausalWanSelfAttention(nn.Module):
                 q.detach().float().mean(dim=2),
                 dim=-1,
             ).to(dtype=v.dtype)
+        if (
+            isinstance(kv_cache, dict)
+            and kv_cache.pop("capture_current_full_query", False)
+        ):
+            # Keep the complete pre-RoPE multi-head query for source-
+            # addressed external memory.  This is never inserted into the
+            # native attention sequence.
+            kv_cache["current_full_query"] = q.detach()
         if (
             isinstance(kv_cache, dict)
             and kv_cache.pop("capture_current_identity_key", False)
@@ -2523,6 +2532,86 @@ class CausalWanSelfAttention(nn.Module):
                         b_trg_key.unsqueeze(0),
                         b_trg_value.unsqueeze(0),
                     )
+                    immutable_delta_v_bank = shared_dict.get(
+                        "immutable_delta_v_bank"
+                    )
+                    if (
+                        immutable_delta_v_bank is not None
+                        and layer_index in immutable_delta_v_bank
+                    ):
+                        source_query_by_layer = shared_dict.get(
+                            "immutable_delta_v_source_query", {}
+                        )
+                        current_source_query = source_query_by_layer.get(
+                            layer_index
+                        )
+                        if current_source_query is None:
+                            raise RuntimeError(
+                                "M1 is missing the current clean-source "
+                                f"query at layer {layer_index}"
+                            )
+                        memory_state = immutable_delta_v_bank[layer_index]
+                        corrected, memory_diagnostics = (
+                            immutable_delta_v_memory_attention(
+                                native_output=b_target_output,
+                                current_source_query=(
+                                    current_source_query[
+                                        b_idx:b_idx + 1
+                                    ].to(
+                                        device=b_target_output.device,
+                                        dtype=b_target_output.dtype,
+                                    )
+                                ),
+                                canonical_source_key=(
+                                    memory_state["source_key"][
+                                        b_idx:b_idx + 1
+                                    ].to(
+                                        device=b_target_output.device,
+                                        dtype=b_target_output.dtype,
+                                    )
+                                ),
+                                canonical_delta_value=(
+                                    memory_state["delta_value"][
+                                        b_idx:b_idx + 1
+                                    ].to(
+                                        device=b_target_output.device,
+                                        dtype=b_target_output.dtype,
+                                    )
+                                ),
+                                canonical_support=(
+                                    memory_state["support"][
+                                        b_idx:b_idx + 1
+                                    ].to(device=b_target_output.device)
+                                ),
+                                owner_gate=(
+                                    b_src_current_fg_mask[None].float()
+                                ),
+                                topk=int(
+                                    shared_dict["immutable_delta_v_topk"]
+                                ),
+                                min_similarity=float(
+                                    shared_dict[
+                                        "immutable_delta_v_min_similarity"
+                                    ]
+                                ),
+                                strength=float(
+                                    shared_dict["immutable_delta_v_strength"]
+                                ),
+                                max_rms_ratio=float(
+                                    shared_dict[
+                                        "immutable_delta_v_max_rms_ratio"
+                                    ]
+                                ),
+                            )
+                        )
+                        b_target_output = corrected
+                        memory_diagnostics["layer"] = torch.tensor(
+                            float(layer_index),
+                            device=b_target_output.device,
+                        )
+                        shared_dict.setdefault(
+                            "immutable_delta_v_diagnostics", []
+                        ).append(memory_diagnostics)
                     if (
                         source_bg_segment is not None
                         and source_bg_segment[0] < source_bg_segment[1]

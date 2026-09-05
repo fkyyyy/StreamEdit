@@ -51,6 +51,7 @@ __all__ = [
     'route_source_background_kv',
     'build_counterfactual_segment_values',
     'counterfactual_replace_attention_segment',
+    'immutable_delta_v_memory_attention',
 ]
 
 
@@ -222,6 +223,210 @@ def build_counterfactual_segment_values(
     counterfactual[0, start:end] = native_value[start:end]
     counterfactual[1, start:end] = target_segment_value
     return counterfactual
+
+
+def immutable_delta_v_memory_attention(
+    native_output,
+    current_source_query,
+    canonical_source_key,
+    canonical_delta_value,
+    canonical_support,
+    owner_gate,
+    *,
+    topk=8,
+    min_similarity=0.35,
+    strength=0.20,
+    max_rms_ratio=1.0,
+    eps=1e-8,
+):
+    """Read a frozen delta-V bank without changing native attention.
+
+    Current clean-source queries address immutable first-block clean-source
+    keys.  Only the corresponding target-minus-source value residual is read.
+    The retrieved residual is RMS-clipped relative to the native output and
+    added through the automatic owner gate.  Unsupported queries are copied
+    bit-for-bit from ``native_output``.
+    """
+    tensors = {
+        "native_output": native_output,
+        "current_source_query": current_source_query,
+        "canonical_source_key": canonical_source_key,
+        "canonical_delta_value": canonical_delta_value,
+    }
+    if any(value.ndim != 4 for value in tensors.values()):
+        raise ValueError(
+            "M1 attention tensors must have shape [B,L,H,D]"
+        )
+    if native_output.shape != current_source_query.shape:
+        raise ValueError(
+            "M1 native output and current source query must align"
+        )
+    if canonical_source_key.shape != canonical_delta_value.shape:
+        raise ValueError(
+            "M1 canonical source keys and delta values must align"
+        )
+    if (
+        canonical_source_key.shape[0] != native_output.shape[0]
+        or canonical_source_key.shape[2:] != native_output.shape[2:]
+    ):
+        raise ValueError(
+            "M1 canonical memory must align with batch and attention heads"
+        )
+    if canonical_support.shape != canonical_source_key.shape[:2]:
+        raise ValueError(
+            "M1 canonical support must align with memory tokens"
+        )
+    if owner_gate.shape != native_output.shape[:2]:
+        raise ValueError(
+            "M1 owner gate must align with current queries"
+        )
+    if int(topk) <= 0:
+        raise ValueError("M1 topk must be positive")
+    if not -1.0 < float(min_similarity) < 1.0:
+        raise ValueError(
+            "M1 minimum similarity must lie in (-1, 1)"
+        )
+    if not 0.0 <= float(strength) <= 1.0:
+        raise ValueError("M1 strength must lie in [0, 1]")
+    if float(max_rms_ratio) <= 0.0:
+        raise ValueError("M1 maximum RMS ratio must be positive")
+    if float(eps) <= 0.0:
+        raise ValueError("M1 epsilon must be positive")
+
+    batch, query_count, heads, head_dim = native_output.shape
+    memory_count = canonical_source_key.shape[1]
+    if memory_count <= 0:
+        raise ValueError("M1 bank must contain at least one token")
+
+    query_address = torch.nn.functional.normalize(
+        current_source_query.detach().float().flatten(2),
+        dim=-1,
+        eps=float(eps),
+    )
+    memory_address = torch.nn.functional.normalize(
+        canonical_source_key.detach().float().flatten(2),
+        dim=-1,
+        eps=float(eps),
+    )
+    similarity = torch.einsum(
+        "bqd,bkd->bqk", query_address, memory_address
+    )
+    valid_memory = canonical_support.detach().bool()
+    similarity = similarity.masked_fill(
+        ~valid_memory[:, None, :], -torch.inf
+    )
+    candidate_count = min(int(topk), memory_count)
+    selected_similarity, selected_index = similarity.topk(
+        candidate_count, dim=-1
+    )
+    best_similarity = selected_similarity[..., 0]
+    selected_valid = (
+        torch.isfinite(selected_similarity)
+        & (selected_similarity >= float(min_similarity))
+    )
+    owner = owner_gate.detach().float().clamp(0.0, 1.0)
+    admitted = (
+        owner > 0.0
+    ) & torch.isfinite(best_similarity) & (
+        best_similarity >= float(min_similarity)
+    )
+
+    # Work only on admitted queries and supported memory.  The foreground is
+    # small in StreamEdit, so this avoids materializing a dense
+    # [B,Q,K,H,D] gather tensor for background queries.
+    retrieved = native_output.new_zeros(
+        native_output.shape, dtype=torch.float32
+    )
+    memory_key = canonical_source_key.detach().float()
+    memory_value = canonical_delta_value.detach().float()
+    source_query = current_source_query.detach().float()
+    for batch_index in range(batch):
+        query_index = torch.nonzero(
+            admitted[batch_index], as_tuple=False
+        ).flatten()
+        if query_index.numel() == 0:
+            continue
+        query_selected_index = selected_index[batch_index, query_index]
+        query_selected_valid = selected_valid[batch_index, query_index]
+        selected_key = memory_key[batch_index][query_selected_index]
+        selected_value = memory_value[batch_index][query_selected_index]
+        logits = torch.einsum(
+            "qhd,qkhd->qhk",
+            source_query[batch_index, query_index],
+            selected_key,
+        ) * (head_dim ** -0.5)
+        valid_per_head = query_selected_valid[:, None, :].expand(
+            -1, heads, -1
+        )
+        safe_logits = torch.where(
+            valid_per_head, logits, torch.full_like(logits, -1e4)
+        )
+        weight = torch.softmax(safe_logits, dim=-1)
+        weight = weight * valid_per_head.float()
+        weight = weight / weight.sum(dim=-1, keepdim=True).clamp_min(
+            float(eps)
+        )
+        retrieved[batch_index, query_index] = torch.einsum(
+            "qhk,qkhd->qhd", weight, selected_value
+        )
+
+    native = native_output.float()
+    native_rms = native.square().mean(dim=(2, 3)).sqrt()
+    residual_rms = retrieved.square().mean(dim=(2, 3)).sqrt()
+    rms_cap = native_rms * float(max_rms_ratio)
+    clip_scale = torch.minimum(
+        torch.ones_like(residual_rms),
+        rms_cap / residual_rms.clamp_min(float(eps)),
+    ).detach()
+    clipped = retrieved * clip_scale[:, :, None, None]
+    address_confidence = (
+        (best_similarity - float(min_similarity))
+        / max(1.0 - float(min_similarity), float(eps))
+    ).clamp(0.0, 1.0)
+    gate = (
+        owner * address_confidence * float(strength)
+    ).detach()
+    corrected = native + gate[:, :, None, None] * clipped
+    output = torch.where(
+        admitted[:, :, None, None],
+        corrected.to(native_output.dtype),
+        native_output,
+    )
+
+    admitted_count = admitted.float().sum().clamp_min(1.0)
+
+    def admitted_mean(value):
+        return (value * admitted.float()).sum() / admitted_count
+
+    clipped_rms = clipped.square().mean(dim=(2, 3)).sqrt()
+    correction_rms = (
+        output.float() - native
+    ).square().mean(dim=(2, 3)).sqrt()
+    diagnostics = {
+        "owner_gated_coverage": (owner > 0.0).float().mean().detach(),
+        "matched_query_fraction": admitted.float().mean().detach(),
+        "retrieval_similarity": admitted_mean(
+            torch.where(
+                torch.isfinite(best_similarity),
+                best_similarity,
+                torch.full_like(best_similarity, -1.0),
+            )
+        ).detach(),
+        "memory_residual_rms": admitted_mean(residual_rms).detach(),
+        "native_output_rms": admitted_mean(native_rms).detach(),
+        "clipped_residual_rms": admitted_mean(clipped_rms).detach(),
+        "memory_to_native_rms": admitted_mean(
+            clipped_rms / native_rms.clamp_min(float(eps))
+        ).detach(),
+        "applied_correction_rms": admitted_mean(
+            correction_rms
+        ).detach(),
+        "mean_gate": admitted_mean(gate).detach(),
+        "cap_fraction": admitted_mean(
+            (clip_scale < 1.0).float()
+        ).detach(),
+    }
+    return output, diagnostics
 
 
 def _evenly_spaced_mask_indices(mask, max_samples):
