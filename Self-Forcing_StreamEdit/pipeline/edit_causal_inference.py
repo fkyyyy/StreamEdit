@@ -21,7 +21,10 @@ from .contact_graph import (
     contact_graph_stats,
 )
 from .belief_kv import build_belief_kv_weights
-from .appearance_leakage import build_target_change_core
+from .appearance_leakage import (
+    build_target_change_core,
+    remove_antagonistic_source_residual,
+)
 from .control_belief import CausalControlBeliefBuilder
 from .causal_ownership import (
     AutomaticTransactionalOwnerTracker,
@@ -309,6 +312,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         first_block_identity_anchor: bool = False,
         identity_anchor_scale: float = 1.5,
         suppress_source_bg_value: bool = False,
+        projected_source_residual: bool = False,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
         posterior_flow_mode: str = "soft",
@@ -811,6 +815,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 first_block_identity_anchor=first_block_identity_anchor,
                 identity_anchor_scale=identity_anchor_scale,
                 suppress_source_bg_value=suppress_source_bg_value,
+                projected_source_residual=projected_source_residual,
                 global_frame_indices=list(range(src_video.shape[1])),
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
@@ -2432,6 +2437,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     first_block_identity_anchor=first_block_identity_anchor,
                 identity_anchor_scale=identity_anchor_scale,
                 suppress_source_bg_value=suppress_source_bg_value,
+                projected_source_residual=projected_source_residual,
                     global_frame_indices=(
                         rollout_global_frame_indices[:proposal_frame_count]
                     ),
@@ -2954,6 +2960,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 first_block_identity_anchor=first_block_identity_anchor,
                 identity_anchor_scale=identity_anchor_scale,
                 suppress_source_bg_value=suppress_source_bg_value,
+                projected_source_residual=projected_source_residual,
                 global_frame_indices=rollout_global_frame_indices,
                 role_boundary_radius=role_boundary_radius,
                 contact_target_weight=contact_target_weight,
@@ -3236,6 +3243,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
         first_block_identity_anchor: bool = False,
         identity_anchor_scale: float = 1.5,
         suppress_source_bg_value: bool = False,
+        projected_source_residual: bool = False,
         global_frame_indices: Optional[List[int]] = None,
         role_boundary_radius: int = 1,
         contact_target_weight: float = 0.7,
@@ -10094,7 +10102,45 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         + 1e-7
                     )
                     bg_mask = 1 - fg_mask
-                    v_t = v_trg + bg_mask * (v_gt - v_src)
+                    source_residual = v_gt - v_src
+                    if projected_source_residual:
+                        edit_direction = (
+                            v_trg.float() - v_src.float()
+                        )
+                        valid_core = (
+                            edit_direction.square()
+                            .sum(dim=2)
+                            > 1e-6
+                        )
+                        safe_residual, proj_diag = (
+                            remove_antagonistic_source_residual(
+                                source_residual=source_residual,
+                                edit_direction=edit_direction,
+                                target_change_core=valid_core,
+                            )
+                        )
+                        v_t = v_trg + bg_mask * safe_residual
+                        if index == 0:
+                            removed_frac = (
+                                proj_diag[
+                                    "appearance_leakage_removed_energy"
+                                ].sum()
+                                / (
+                                    source_residual.float()
+                                    .square()
+                                    .sum(dim=2, keepdim=True)
+                                    .sum()
+                                    + 1e-8
+                                )
+                            ).item()
+                            print(
+                                "PROJECTED_RESIDUAL "
+                                f"block={current_start_frame // self.num_frame_per_block} "
+                                f"removed_frac={removed_frac:.4f} "
+                                f"core_coverage={valid_core.float().mean().item():.4f}"
+                            )
+                    else:
+                        v_t = v_trg + bg_mask * source_residual
                 denoised_pred = noisy_pred_input - t_i * v_t
                 if (
                     source_owner_residual_constraint

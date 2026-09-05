@@ -1464,6 +1464,17 @@ if __name__ == '__main__':
             "source appearance no longer leaks through the value path."
         ),
     )
+    parser.add_argument(
+        "--projected_source_residual",
+        action="store_true",
+        default=False,
+        help=(
+            "Remove only the source residual component opposing the "
+            "target edit direction, keeping geometry and illumination. "
+            "Applied on the original native velocity formula without "
+            "changing attention or KV."
+        ),
+    )
     parser.add_argument("--mask_white_threshold", type=int, default=245)
     parser.add_argument(
         "--hand_mask_mode",
@@ -3411,6 +3422,7 @@ if __name__ == '__main__':
         first_block_identity_anchor=args.first_block_identity_anchor,
         identity_anchor_scale=args.identity_anchor_scale,
         suppress_source_bg_value=args.suppress_source_bg_value,
+        projected_source_residual=args.projected_source_residual,
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,
         posterior_flow_mode=args.posterior_flow_mode,
