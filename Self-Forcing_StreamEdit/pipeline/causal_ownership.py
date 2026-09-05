@@ -5,6 +5,7 @@ from enum import IntEnum
 from typing import Dict
 
 import torch
+import torch.nn.functional as F
 
 from .target_identity_memory import (
     CausalIdentityOwnerTracker,
@@ -889,6 +890,385 @@ class CausalObjectOwnershipTracker:
             eps=eps,
         )
         self._missing_count: torch.Tensor | None = None
+        # A causal signature of the edit response, not a 2-D displacement.
+        # Clean-source queries transport ownership; this vector only verifies
+        # that the transported token still reacts like the edited object.
+        self._velocity_signature: torch.Tensor | None = None
+        self._velocity_signature_live: torch.Tensor | None = None
+
+    @staticmethod
+    def _velocity_tokens(
+        edit_response: torch.Tensor,
+        spatial_shape: tuple[int, int],
+        eps: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if edit_response.ndim != 5:
+            raise ValueError(
+                "edit_response must have shape [B,T,C,H,W]"
+            )
+        batch, frames, channels = edit_response.shape[:3]
+        height, width = spatial_shape
+        vector = F.adaptive_avg_pool2d(
+            edit_response.detach().float().reshape(
+                batch * frames, channels, *edit_response.shape[-2:]
+            ),
+            output_size=spatial_shape,
+        ).reshape(batch, frames, channels, height, width)
+        vector = vector.permute(0, 1, 3, 4, 2).reshape(
+            batch, frames * height * width, channels
+        )
+        magnitude = vector.square().mean(dim=-1).sqrt()
+        frame_magnitude = magnitude.reshape(
+            batch, frames, height * width
+        )
+        median = torch.quantile(
+            frame_magnitude, 0.50, dim=-1, keepdim=True
+        )
+        high = torch.quantile(
+            frame_magnitude, 0.95, dim=-1, keepdim=True
+        )
+        likelihood = (
+            (frame_magnitude - median) / (high - median).clamp_min(eps)
+        ).clamp(0.0, 1.0).reshape_as(magnitude)
+        unit = F.normalize(vector, dim=-1, eps=eps)
+        return unit, magnitude, likelihood
+
+    @torch.no_grad()
+    def refine_with_velocity(
+        self,
+        *,
+        ownership: CausalObjectOwnership,
+        source_features: torch.Tensor,
+        edit_response: torch.Tensor,
+        hand_mask: torch.Tensor,
+        tokens_per_frame: int,
+        spatial_shape: tuple[int, int],
+        min_response: float = 0.10,
+        min_signature_similarity: float = 0.0,
+        transport_floor: float = 0.25,
+        signature_momentum: float = 0.80,
+        update_state: bool = True,
+    ) -> CausalObjectOwnership:
+        """Verify source-query transport with counterfactual velocity.
+
+        ``edit_response`` is ``v_target - v_source`` at the first denoising
+        step.  It is deliberately treated as a per-token causal signature,
+        never as image-space flow.  The source-query matcher decides where a
+        previous owner moved; response magnitude and signature agreement decide
+        whether that correspondence may retain edit ownership.
+        """
+        ownership.validate()
+        if not 0.0 <= min_response <= 1.0:
+            raise ValueError("min_response must lie in [0, 1]")
+        if not -1.0 < min_signature_similarity < 1.0:
+            raise ValueError(
+                "min_signature_similarity must lie in (-1, 1)"
+            )
+        if not 0.0 <= transport_floor <= 1.0:
+            raise ValueError("transport_floor must lie in [0, 1]")
+        if not 0.0 <= signature_momentum < 1.0:
+            raise ValueError("signature_momentum must lie in [0, 1)")
+        expected = source_features.shape[:2]
+        if ownership.owner_weight.shape != expected:
+            raise ValueError(
+                "ownership and source_features must share [B,L]"
+            )
+        if hand_mask.shape != expected:
+            raise ValueError("hand_mask must align with source tokens")
+        if expected[1] % tokens_per_frame:
+            raise ValueError(
+                "tokens_per_frame must evenly divide source tokens"
+            )
+        batch = expected[0]
+        frames = expected[1] // tokens_per_frame
+        if edit_response.shape[:2] != (batch, frames):
+            raise ValueError(
+                "edit_response and ownership must share [B,T]"
+            )
+        if spatial_shape[0] * spatial_shape[1] != tokens_per_frame:
+            raise ValueError(
+                "spatial_shape must match tokens_per_frame"
+            )
+
+        unit, magnitude, response_likelihood = self._velocity_tokens(
+            edit_response, spatial_shape, self.eps
+        )
+        hand = hand_mask.detach().bool()
+        old_signature = self._velocity_signature
+        old_signature_live = self._velocity_signature_live
+        old_missing = self._missing_count
+        previous_weight = self.transport.previous_weight
+        previous_features = self.transport.previous_features
+        previous_area_weight = (
+            unit.new_zeros(batch, tokens_per_frame)
+            if previous_weight is None
+            else previous_weight.to(unit.device).float().clone()
+        )
+        normalized_source = F.normalize(
+            source_features.detach().float(), dim=-1, eps=self.eps
+        ).reshape(batch, frames, tokens_per_frame, -1)
+        reference_features = (
+            normalized_source[:, 0].clone()
+            if previous_features is None
+            else previous_features.to(unit.device).float().clone()
+        )
+        if reference_features.shape != (
+            batch, tokens_per_frame, source_features.shape[-1]
+        ):
+            raise ValueError(
+                "Source-query reference shape changed across blocks"
+            )
+        owner_live = (previous_area_weight > self.eps).any(dim=-1)
+        signature = (
+            unit.new_zeros(batch, unit.shape[-1])
+            if old_signature is None
+            else F.normalize(
+                old_signature.to(unit.device).float(),
+                dim=-1,
+                eps=self.eps,
+            )
+        )
+        signature_live = (
+            torch.zeros(batch, dtype=torch.bool, device=unit.device)
+            if old_signature_live is None
+            else old_signature_live.to(unit.device).bool()
+        )
+        if signature.shape != (batch, unit.shape[-1]):
+            raise ValueError(
+                "Velocity signature shape changed across causal blocks"
+            )
+        if signature_live.shape != (batch,):
+            raise ValueError(
+                "Velocity signature batch size changed across calls"
+            )
+
+        unit_frames = unit.reshape(
+            batch, frames, tokens_per_frame, -1
+        )
+        magnitude_frames = magnitude.reshape(
+            batch, frames, tokens_per_frame
+        )
+        response_frames = response_likelihood.reshape(
+            batch, frames, tokens_per_frame
+        )
+        hand_frames = hand.reshape(batch, frames, tokens_per_frame)
+        observation_frames = ownership.observation_weight.float().reshape(
+            batch, frames, tokens_per_frame
+        )
+        verified_frames = []
+        support_frames = []
+        ignition_frames = []
+        verified_transport_frames = []
+        query_similarity_frames = []
+        query_confidence_frames = []
+        query_cycle_frames = []
+        response_active_frames = []
+        signature_similarity_frames = []
+        signature_confidence_frames = []
+        signature_active_frames = []
+        verification_frames = []
+        missing = (
+            torch.zeros(batch, dtype=torch.long, device=unit.device)
+            if old_missing is None
+            else old_missing.to(unit.device).clone()
+        )
+        state_frames = []
+        missing_frames = []
+        for frame_index in range(frames):
+            (
+                transported,
+                query_similarity,
+                query_confidence,
+                query_cycle,
+            ) = self.transport._transport(
+                normalized_source[:, frame_index],
+                reference_features,
+                previous_area_weight,
+                spatial_shape=spatial_shape,
+            )
+            current_unit = unit_frames[:, frame_index]
+            current_response = response_frames[:, frame_index]
+            current_hand = hand_frames[:, frame_index]
+            current_similarity = torch.einsum(
+                "bnc,bc->bn", current_unit, signature
+            ).clamp(-1.0, 1.0)
+            current_confidence = (
+                (current_similarity - min_signature_similarity)
+                / (1.0 - min_signature_similarity)
+            ).clamp(0.0, 1.0)
+            current_confidence = torch.where(
+                signature_live[:, None],
+                current_confidence,
+                torch.ones_like(current_confidence),
+            )
+            response_active = current_response >= min_response
+            signature_active = (
+                ~signature_live[:, None]
+                | (current_similarity >= min_signature_similarity)
+            )
+            verification = torch.sqrt(
+                current_response * current_confidence
+            )
+            ignition = (
+                observation_frames[:, frame_index]
+                * current_response
+                * response_active.float()
+                * (~current_hand).float()
+            ).clamp(0.0, 1.0)
+            transported_gate = (
+                transport_floor
+                + (1.0 - transport_floor) * verification
+            ) * response_active.float() * signature_active.float()
+            verified_transport = (
+                transported
+                * transported_gate
+                * (~current_hand).float()
+            ).clamp(0.0, 1.0)
+            # Once any frame has ignited an owner, all later frames in the
+            # same chunk must use source-query transport.  This prevents the
+            # per-frame semantic proposal from relocating ownership.
+            candidate = torch.where(
+                owner_live[:, None], verified_transport, ignition
+            )
+            verified = self.transport._bound_area(
+                candidate, ignition, previous_area_weight
+            )
+            support = verified >= self.min_owner_weight
+            verified = verified * support.float()
+            present = support.any(dim=-1)
+
+            # Update the causal response signature online so the first
+            # verified frame already constrains later frames in this chunk.
+            signature_weight = (
+                verified * magnitude_frames[:, frame_index]
+            )
+            proposed_signature = (
+                current_unit * signature_weight[:, :, None]
+            ).sum(dim=1) / signature_weight.sum(
+                dim=-1, keepdim=True
+            ).clamp_min(self.eps)
+            proposed_norm = proposed_signature.norm(dim=-1)
+            proposed_signature = F.normalize(
+                proposed_signature, dim=-1, eps=self.eps
+            )
+            valid_signature = present & (proposed_norm > self.eps)
+            blended_signature = F.normalize(
+                signature_momentum * signature
+                + (1.0 - signature_momentum) * proposed_signature,
+                dim=-1,
+                eps=self.eps,
+            )
+            next_signature = torch.where(
+                signature_live[:, None],
+                blended_signature,
+                proposed_signature,
+            )
+            signature = torch.where(
+                valid_signature[:, None], next_signature, signature
+            )
+            signature_live = signature_live | valid_signature
+            previous_area_weight = torch.where(
+                present[:, None], verified, previous_area_weight
+            )
+            reference_features = torch.where(
+                present[:, None, None],
+                normalized_source[:, frame_index],
+                reference_features,
+            )
+            owner_live = owner_live | present
+            missing = torch.where(
+                present, torch.zeros_like(missing), missing + 1
+            )
+            state = torch.full_like(
+                missing, int(CausalOwnershipState.UNINITIALIZED)
+            )
+            state = torch.where(
+                owner_live & ~present,
+                torch.full_like(state, int(CausalOwnershipState.ABSENT)),
+                state,
+            )
+            state = torch.where(
+                owner_live
+                & ~present
+                & (missing <= self.max_occluded_frames),
+                torch.full_like(state, int(CausalOwnershipState.OCCLUDED)),
+                state,
+            )
+            state = torch.where(
+                present,
+                torch.full_like(state, int(CausalOwnershipState.VISIBLE)),
+                state,
+            )
+            verified_frames.append(verified)
+            support_frames.append(support)
+            ignition_frames.append(ignition)
+            verified_transport_frames.append(verified_transport)
+            query_similarity_frames.append(query_similarity)
+            query_confidence_frames.append(query_confidence)
+            query_cycle_frames.append(query_cycle)
+            response_active_frames.append(response_active.float())
+            signature_similarity_frames.append(current_similarity)
+            signature_confidence_frames.append(current_confidence)
+            signature_active_frames.append(signature_active.float())
+            verification_frames.append(verification)
+            state_frames.append(state)
+            missing_frames.append(missing.clone())
+
+        def flatten(values: list[torch.Tensor]) -> torch.Tensor:
+            return torch.stack(values, dim=1).reshape(batch, -1)
+
+        verified = flatten(verified_frames)
+        support = flatten(support_frames).bool()
+        ignition = flatten(ignition_frames)
+        verified_transport = flatten(verified_transport_frames)
+        query_similarity = flatten(query_similarity_frames)
+        query_confidence = flatten(query_confidence_frames)
+        query_cycle = flatten(query_cycle_frames)
+        response_active = flatten(response_active_frames)
+        signature_similarity = flatten(signature_similarity_frames)
+        signature_confidence = flatten(signature_confidence_frames)
+        signature_active = flatten(signature_active_frames)
+        verification = flatten(verification_frames)
+
+        if update_state:
+            self.transport.commit_verified(
+                source_features=source_features,
+                verified_weight=verified,
+                tokens_per_frame=tokens_per_frame,
+            )
+            self._velocity_signature = signature.detach().cpu()
+            self._velocity_signature_live = (
+                signature_live.detach().cpu()
+            )
+            self._missing_count = missing.detach().cpu()
+
+        result = CausalObjectOwnership(
+            owner_weight=verified,
+            owner_support=support,
+            transported_weight=verified_transport,
+            observation_weight=ignition,
+            match_similarity=query_similarity,
+            match_confidence=query_confidence,
+            semantic_support=ownership.semantic_support,
+            state_code=torch.stack(state_frames, dim=1),
+            missing_frames=torch.stack(missing_frames, dim=1),
+            diagnostics={
+                "velocity_owner_response_magnitude": magnitude,
+                "velocity_owner_response_likelihood": response_likelihood,
+                "velocity_owner_response_active": response_active.float(),
+                "velocity_owner_signature_similarity": signature_similarity,
+                "velocity_owner_signature_confidence": signature_confidence,
+                "velocity_owner_signature_active": signature_active.float(),
+                "velocity_owner_verification": verification,
+                "velocity_owner_ignition": ignition,
+                "velocity_owner_verified_transport": verified_transport,
+                "velocity_owner_query_cycle_confidence": (
+                    query_cycle
+                ),
+            },
+        )
+        result.validate()
+        return result
 
     @torch.no_grad()
     def commit_verified(
@@ -1068,6 +1448,11 @@ class CausalObjectOwnershipTracker:
             semantic_support=tracked.semantic_support,
             state_code=torch.stack(state_frames, dim=1),
             missing_frames=torch.stack(missing_frames, dim=1),
+            diagnostics={
+                "causal_owner_query_cycle_confidence": (
+                    tracked.cycle_confidence
+                ),
+            },
         )
         result.validate()
         if not update_state:

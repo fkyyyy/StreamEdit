@@ -631,6 +631,7 @@ def route_factorized_velocity(
     *,
     target_owned_weight: torch.Tensor | None = None,
     block_target_owned_source: bool = True,
+    native_outside_target_owned: bool = False,
     geometry_owner_weight: torch.Tensor | None = None,
     geometry_strength: float = 0.0,
     denoising_fraction: float = 1.0,
@@ -695,6 +696,11 @@ def route_factorized_velocity(
             "owner_complement_min_preserve_confidence must lie in "
             "[0, 1]"
         )
+    if native_outside_target_owned and not block_target_owned_source:
+        raise ValueError(
+            "Native owner-complement fallback requires target-owned "
+            "source blocking"
+        )
     batch, frames = target_velocity.shape[:2]
 
     def resize(value: torch.Tensor) -> torch.Tensor:
@@ -730,7 +736,17 @@ def route_factorized_velocity(
             raise ValueError(
                 "Target ownership and velocity must share [B,T]"
             )
-        target_owned_action = resize(target_owned_weight)
+        target_owned_action = (
+            resize_discrete(target_owned_weight).float()
+            if native_outside_target_owned
+            else resize(target_owned_weight)
+        )
+    if native_outside_target_owned and target_owned_weight is None:
+        raise ValueError(
+            "Native owner-complement fallback requires target-owned "
+            "weights"
+        )
+    raw_source_action = source_action.clone()
     if block_target_owned_source:
         source_action = (
             source_action * (1.0 - target_owned_action)
@@ -822,6 +838,20 @@ def route_factorized_velocity(
         source_residual = (
             source_residual - verified_appearance_removed
         )
+    owner_native_complement_action = torch.zeros_like(effective_action)
+    if native_outside_target_owned:
+        # F1V is an owner-only intervention. Everywhere outside the verified
+        # causal owner, recover the exact StreamGVE source-residual action
+        # instead of applying the broader factorized posterior. This avoids
+        # turning uncertain background classifications into frame-wise motion.
+        owner_complement = 1.0 - target_owned_action
+        owner_native_complement_action = (
+            owner_complement * native_fallback_action.float()
+        )
+        effective_action = (
+            target_owned_action * effective_action
+            + owner_native_complement_action
+        ).clamp(0.0, 1.0)
     geometry_action = torch.zeros_like(effective_action)
     geometry_residual = torch.zeros_like(source_residual)
     geometry_diagnostics = {}
@@ -1002,6 +1032,13 @@ def route_factorized_velocity(
             )
         ).to(target_velocity.dtype)
     diagnostics = {
+        "raw_source_residual_action": raw_source_action,
+        "owner_source_residual_blocked_action": (
+            raw_source_action - source_action
+        ).clamp(0.0, 1.0),
+        "owner_native_complement_action": (
+            owner_native_complement_action
+        ),
         "source_residual_action": source_action,
         "unknown_action": unknown_action,
         "target_owned_action": target_owned_action,

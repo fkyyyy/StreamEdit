@@ -335,6 +335,43 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        "--velocity_native_owner",
+        action="store_true",
+        default=False,
+        help=(
+            "Track causal ownership without optical flow: source-query "
+            "correspondence transports the owner and the first-step "
+            "target-minus-source diffusion velocity verifies it."
+        ),
+    )
+    parser.add_argument(
+        "--velocity_owner_min_response",
+        type=float,
+        default=0.10,
+        help="Minimum normalized counterfactual response for F1V ownership.",
+    )
+    parser.add_argument(
+        "--velocity_owner_min_signature_similarity",
+        type=float,
+        default=0.0,
+        help="Minimum cosine similarity to the causal velocity signature.",
+    )
+    parser.add_argument(
+        "--velocity_owner_transport_floor",
+        type=float,
+        default=0.25,
+        help=(
+            "Minimum retained source-query transport when the response is "
+            "active but its velocity signature is uncertain."
+        ),
+    )
+    parser.add_argument(
+        "--velocity_owner_signature_momentum",
+        type=float,
+        default=0.80,
+        help="EMA momentum for the cross-chunk velocity signature.",
+    )
+    parser.add_argument(
         "--target_semantic_competition",
         action="store_true",
         default=False,
@@ -2579,11 +2616,71 @@ if __name__ == '__main__':
         )
     if (
         args.factorized_orthogonal_geometry
-        and not args.factorized_immutable_target_memory
+        and not (
+            args.factorized_immutable_target_memory
+            or args.velocity_native_owner
+        )
     ):
         parser.error(
             "--factorized_orthogonal_geometry requires "
-            "--factorized_immutable_target_memory"
+            "--factorized_immutable_target_memory or "
+            "--velocity_native_owner"
+        )
+    if args.velocity_native_owner:
+        if (
+            args.routing_mode
+            != "hand_role_factorized_causal_owner_kv"
+        ):
+            parser.error(
+                "--velocity_native_owner requires causal-owner routing"
+            )
+        if not args.factorized_native_target_history:
+            parser.error(
+                "--velocity_native_owner requires "
+                "--factorized_native_target_history"
+            )
+        if not args.factorized_owner_source_block:
+            parser.error(
+                "--velocity_native_owner requires "
+                "--factorized_owner_source_block"
+            )
+        if args.factorized_owner_complement_source:
+            parser.error(
+                "F1V forbids --factorized_owner_complement_source"
+            )
+        if args.native_history_transactional_owner:
+            parser.error(
+                "F1V owns its source-coordinate state transaction; "
+                "disable --native_history_transactional_owner"
+            )
+        if args.motion_geometry_owner or args.source_flow_cache is not None:
+            parser.error(
+                "--velocity_native_owner is the no-flow ablation"
+            )
+        if (
+            args.object_mask_video is not None
+            or args.source_owner_mask_video is not None
+        ):
+            parser.error(
+                "--velocity_native_owner forbids external object masks"
+            )
+    if not 0.0 <= args.velocity_owner_min_response <= 1.0:
+        parser.error(
+            "--velocity_owner_min_response must lie in [0, 1]"
+        )
+    if not (
+        -1.0 < args.velocity_owner_min_signature_similarity < 1.0
+    ):
+        parser.error(
+            "--velocity_owner_min_signature_similarity must lie in (-1, 1)"
+        )
+    if not 0.0 <= args.velocity_owner_transport_floor <= 1.0:
+        parser.error(
+            "--velocity_owner_transport_floor must lie in [0, 1]"
+        )
+    if not 0.0 <= args.velocity_owner_signature_momentum < 1.0:
+        parser.error(
+            "--velocity_owner_signature_momentum must lie in [0, 1)"
         )
     if not 0.0 <= args.factorized_geometry_strength <= 1.0:
         parser.error("--factorized_geometry_strength must be in [0, 1]")
@@ -3346,6 +3443,19 @@ if __name__ == '__main__':
         ),
         factorized_owner_source_block=(
             args.factorized_owner_source_block
+        ),
+        velocity_native_owner=args.velocity_native_owner,
+        velocity_owner_min_response=(
+            args.velocity_owner_min_response
+        ),
+        velocity_owner_min_signature_similarity=(
+            args.velocity_owner_min_signature_similarity
+        ),
+        velocity_owner_transport_floor=(
+            args.velocity_owner_transport_floor
+        ),
+        velocity_owner_signature_momentum=(
+            args.velocity_owner_signature_momentum
         ),
         target_semantic_competition=(
             args.target_semantic_competition
