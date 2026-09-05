@@ -184,6 +184,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
         factorized_immutable_target_memory: bool = False,
         factorized_native_target_history: bool = False,
         factorized_owner_source_block: bool = False,
+        velocity_native_owner: bool = False,
+        velocity_owner_min_response: float = 0.10,
+        velocity_owner_min_signature_similarity: float = 0.0,
+        velocity_owner_transport_floor: float = 0.25,
+        velocity_owner_signature_momentum: float = 0.80,
         target_semantic_competition: bool = False,
         target_edit_phrases: Optional[List[str]] = None,
         target_preserve_phrases: Optional[List[str]] = None,
@@ -455,6 +460,53 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "source_flow_verified_region requires "
                 "source_flow_role_fusion"
             )
+        if velocity_native_owner:
+            if routing_mode != "hand_role_factorized_causal_owner_kv":
+                raise ValueError(
+                    "velocity_native_owner requires causal-owner routing"
+                )
+            if motion_geometry_owner or source_flow_cache is not None:
+                raise ValueError(
+                    "velocity_native_owner is the no-flow ablation and "
+                    "forbids motion_geometry_owner/source_flow_cache"
+                )
+            if oracle_source_owner_mask is not None or oracle_object_mask is not None:
+                raise ValueError(
+                    "velocity_native_owner forbids external object masks"
+                )
+            if not factorized_native_target_history:
+                raise ValueError(
+                    "velocity_native_owner requires native target history"
+                )
+            if not factorized_owner_source_block:
+                raise ValueError(
+                    "velocity_native_owner requires owner source blocking"
+                )
+            if factorized_owner_complement_source:
+                raise ValueError(
+                    "F1V keeps owner-complement source closure disabled"
+                )
+            if native_history_transactional_owner:
+                raise ValueError(
+                    "velocity_native_owner owns its state transaction and "
+                    "forbids native_history_transactional_owner"
+                )
+        if not 0.0 <= velocity_owner_min_response <= 1.0:
+            raise ValueError(
+                "velocity_owner_min_response must lie in [0, 1]"
+            )
+        if not -1.0 < velocity_owner_min_signature_similarity < 1.0:
+            raise ValueError(
+                "velocity_owner_min_signature_similarity must lie in (-1, 1)"
+            )
+        if not 0.0 <= velocity_owner_transport_floor <= 1.0:
+            raise ValueError(
+                "velocity_owner_transport_floor must lie in [0, 1]"
+            )
+        if not 0.0 <= velocity_owner_signature_momentum < 1.0:
+            raise ValueError(
+                "velocity_owner_signature_momentum must lie in [0, 1)"
+            )
         if not 0.0 <= source_flow_role_weight <= 1.0:
             raise ValueError("source_flow_role_weight must lie in [0, 1]")
         if source_flow_verified_owner_radius < 0:
@@ -682,6 +734,19 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 ),
                 factorized_owner_source_block=(
                     factorized_owner_source_block
+                ),
+                velocity_native_owner=velocity_native_owner,
+                velocity_owner_min_response=(
+                    velocity_owner_min_response
+                ),
+                velocity_owner_min_signature_similarity=(
+                    velocity_owner_min_signature_similarity
+                ),
+                velocity_owner_transport_floor=(
+                    velocity_owner_transport_floor
+                ),
+                velocity_owner_signature_momentum=(
+                    velocity_owner_signature_momentum
                 ),
                 target_semantic_competition=(
                     target_semantic_competition
@@ -1730,10 +1795,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
             )
         if (
             factorized_orthogonal_geometry
-            and not factorized_immutable_target_memory
+            and not (
+                factorized_immutable_target_memory
+                or velocity_native_owner
+            )
         ):
             raise ValueError(
-                "Orthogonal geometry requires immutable target memory"
+                "Orthogonal geometry requires immutable target memory or "
+                "velocity-native ownership"
             )
         if (
             first_chunk_identity_replay
@@ -2299,6 +2368,19 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     ),
                     factorized_owner_source_block=(
                         factorized_owner_source_block
+                    ),
+                    velocity_native_owner=velocity_native_owner,
+                    velocity_owner_min_response=(
+                        velocity_owner_min_response
+                    ),
+                    velocity_owner_min_signature_similarity=(
+                        velocity_owner_min_signature_similarity
+                    ),
+                    velocity_owner_transport_floor=(
+                        velocity_owner_transport_floor
+                    ),
+                    velocity_owner_signature_momentum=(
+                        velocity_owner_signature_momentum
                     ),
                     target_semantic_competition=(
                         target_semantic_competition
@@ -2891,6 +2973,19 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 factorized_owner_source_block=(
                     factorized_owner_source_block
                 ),
+                velocity_native_owner=velocity_native_owner,
+                velocity_owner_min_response=(
+                    velocity_owner_min_response
+                ),
+                velocity_owner_min_signature_similarity=(
+                    velocity_owner_min_signature_similarity
+                ),
+                velocity_owner_transport_floor=(
+                    velocity_owner_transport_floor
+                ),
+                velocity_owner_signature_momentum=(
+                    velocity_owner_signature_momentum
+                ),
                 target_semantic_competition=(
                     target_semantic_competition
                 ),
@@ -3399,6 +3494,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
         factorized_immutable_target_memory: bool = False,
         factorized_native_target_history: bool = False,
         factorized_owner_source_block: bool = False,
+        velocity_native_owner: bool = False,
+        velocity_owner_min_response: float = 0.10,
+        velocity_owner_min_signature_similarity: float = 0.0,
+        velocity_owner_transport_floor: float = 0.25,
+        velocity_owner_signature_momentum: float = 0.80,
         target_semantic_competition: bool = False,
         target_edit_phrases: Optional[List[str]] = None,
         target_preserve_phrases: Optional[List[str]] = None,
@@ -3884,6 +3984,37 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "Source-coordinate target-delta routing cannot be "
                 "combined with orthogonal geometry"
             )
+        if velocity_native_owner:
+            if not causal_ownership_enabled:
+                raise ValueError(
+                    "Velocity-native ownership requires causal-owner routing"
+                )
+            if motion_geometry_owner or source_flow_cache is not None:
+                raise ValueError(
+                    "Velocity-native ownership forbids optical-flow inputs"
+                )
+            if oracle_source_owner_mask is not None or oracle_object_mask is not None:
+                raise ValueError(
+                    "Velocity-native ownership forbids object masks"
+                )
+            if not factorized_native_target_history:
+                raise ValueError(
+                    "Velocity-native ownership requires native target history"
+                )
+            if not factorized_owner_source_block:
+                raise ValueError(
+                    "Velocity-native ownership requires owner source blocking"
+                )
+            if factorized_owner_complement_source:
+                raise ValueError(
+                    "Velocity-native F1V forbids owner-complement closure"
+                )
+            if native_history_transactional_owner:
+                raise ValueError(
+                    "Velocity-native ownership has a single verified "
+                    "state transaction and forbids transactional native "
+                    "history ownership"
+                )
         if factorized_native_target_history and not causal_ownership_enabled:
             raise ValueError(
                 "Native target-history ablation requires factorized "
@@ -4668,10 +4799,14 @@ class EditCausalInferencePipeline(torch.nn.Module):
             )
         if (
             factorized_orthogonal_geometry
-            and not factorized_immutable_target_memory
+            and not (
+                factorized_immutable_target_memory
+                or velocity_native_owner
+            )
         ):
             raise ValueError(
-                "Orthogonal geometry requires immutable target memory"
+                "Orthogonal geometry requires immutable target memory or "
+                "velocity-native ownership"
             )
         if not (
             0.0
@@ -6509,9 +6644,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             # appearance-memory write transaction.
                             update_state=(
                                 motion_geometry_owner
-                                or not isinstance(
-                                    native_owner_tracker,
-                                    AutomaticTransactionalOwnerTracker,
+                                or (
+                                    not velocity_native_owner
+                                    and not isinstance(
+                                        native_owner_tracker,
+                                        AutomaticTransactionalOwnerTracker,
+                                    )
                                 )
                             ),
                         )
@@ -8892,12 +9030,106 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 ].shape
                             )
                         )
+                    if velocity_native_owner:
+                        if not isinstance(
+                            causal_ownership_tracker,
+                            CausalObjectOwnershipTracker,
+                        ):
+                            raise RuntimeError(
+                                "Velocity-native ownership requires the "
+                                "source-query causal tracker"
+                            )
+                        velocity_hand = hand_role_debug[
+                            "hand_hard_exclusion"
+                        ].reshape(batch_size, -1) > 0.0
+                        current_causal_ownership = (
+                            causal_ownership_tracker.refine_with_velocity(
+                                ownership=current_causal_ownership,
+                                source_features=source_query_features,
+                                edit_response=(v_trg - v_src).detach(),
+                                hand_mask=velocity_hand,
+                                tokens_per_frame=self.frame_seq_length,
+                                spatial_shape=(
+                                    hand_role_debug[
+                                        "object_posterior"
+                                    ].shape[-2:]
+                                ),
+                                min_response=velocity_owner_min_response,
+                                min_signature_similarity=(
+                                    velocity_owner_min_signature_similarity
+                                ),
+                                transport_floor=(
+                                    velocity_owner_transport_floor
+                                ),
+                                signature_momentum=(
+                                    velocity_owner_signature_momentum
+                                ),
+                                update_state=True,
+                            )
+                        )
+                        owner_shape = hand_role_debug[
+                            "object_posterior"
+                        ].shape
+                        hand_role_debug.update(
+                            current_causal_ownership.as_debug_maps(
+                                owner_shape
+                            )
+                        )
+                        velocity_owner_support = (
+                            current_causal_ownership.owner_support.reshape(
+                                owner_shape
+                            )
+                        )
+                        role_edit_tokens = (
+                            role_edit_tokens
+                            | current_causal_ownership.owner_support
+                        )
+                        current_memory_query_weight = (
+                            current_causal_ownership.owner_weight.float()
+                        )
+                        # Geometry reads the verified owner directly.  This is
+                        # intentionally independent from any target-appearance
+                        # memory; F1V is the provenance-only experiment.
+                        current_identity_read_mask = (
+                            current_causal_ownership.owner_weight.float()
+                        )
+                        active_owner = velocity_owner_support
+                        owner_count = active_owner.float().sum().clamp_min(1.0)
+
+                        def velocity_owner_mean(name):
+                            value = hand_role_debug[name]
+                            return (
+                                value.float()[active_owner].sum() / owner_count
+                            ).item()
+
+                        print(
+                            "VELOCITY_NATIVE_OWNER "
+                            f"block={current_start_frame // self.num_frame_per_block} "
+                            "flow=disabled object_mask=disabled "
+                            f"ignition={hand_role_debug['velocity_owner_ignition'].mean().item():.4f} "
+                            f"response={velocity_owner_mean('velocity_owner_response_likelihood'):.4f} "
+                            f"transport={current_causal_ownership.transported_weight.mean().item():.4f} "
+                            f"query_similarity={current_causal_ownership.match_similarity[active_owner.reshape(batch_size, -1)].mean().item() if active_owner.any() else 0.0:.4f} "
+                            f"query_confidence={current_causal_ownership.match_confidence[active_owner.reshape(batch_size, -1)].mean().item() if active_owner.any() else 0.0:.4f} "
+                            f"cycle={velocity_owner_mean('velocity_owner_query_cycle_confidence'):.4f} "
+                            f"signature={velocity_owner_mean('velocity_owner_signature_similarity'):.4f} "
+                            f"owner={current_causal_ownership.owner_weight.mean().item():.4f} "
+                            f"support={active_owner.float().mean().item():.4f} "
+                            f"visible={(current_causal_ownership.state_code == 1).float().mean().item():.4f} "
+                            f"occluded={(current_causal_ownership.state_code == 2).float().mean().item():.4f} "
+                            f"absent={(current_causal_ownership.state_code == 3).float().mean().item():.4f}"
+                        )
                     if (
                         current_causal_ownership is not None
                         and isinstance(
                             native_owner_tracker,
                             AutomaticTransactionalOwnerTracker,
                         )
+                        # F1V already committed the velocity-verified owner
+                        # above.  Never let the legacy field transaction
+                        # overwrite that source-coordinate state or replace
+                        # its closed-loop read permission in the same step.
+                        and not velocity_native_owner
                     ):
                         refined_owner_shape = hand_role_debug[
                             "object_posterior"
@@ -9069,15 +9301,32 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         adaptive_role_enabled
                         or hand_field_update_mode == "posterior"
                     ):
-                        current_roles = hand_role_inference.roles
-                        if adaptive_role_enabled:
+                        if velocity_native_owner:
+                            owner_shape = hand_role_debug[
+                                "object_posterior"
+                            ].shape
+                            current_roles = HandRoleInferencer._build_roles(
+                                current_causal_ownership.owner_weight.reshape(
+                                    owner_shape
+                                ),
+                                hand_occupancy_mask[
+                                    :, role_left:role_right
+                                ],
+                                soft_hand_contact=hand_causal_evidence,
+                            )
+                            role_edit_tokens = (
+                                current_causal_ownership.owner_support
+                            )
+                        else:
+                            current_roles = hand_role_inference.roles
+                        if adaptive_role_enabled and not velocity_native_owner:
                             role_edit_tokens = (
                                 hand_role_debug["object_posterior"]
                                 >= hand_role_debug[
                                     "posterior_threshold"
                                 ]
                             ).reshape(batch_size, -1)
-                        else:
+                        elif not velocity_native_owner:
                             role_edit_tokens = (
                                 hand_role_inference
                                 .token_edit_confidence
@@ -9086,6 +9335,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         if (
                             current_causal_ownership is not None
                             and not source_flow_verified_region
+                            and not velocity_native_owner
                         ):
                             role_edit_tokens = (
                                 role_edit_tokens
@@ -9109,6 +9359,32 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             hand_role_debug.update(
                                 current_factorized_operators.as_debug_maps()
                             )
+                            if velocity_native_owner:
+                                verified_owner = (
+                                    current_causal_ownership.owner_support
+                                )
+                                verified_count = (
+                                    verified_owner.float().sum().clamp_min(1.0)
+                                )
+
+                                def verified_operator_mean(value):
+                                    return (
+                                        value.float()[verified_owner].sum()
+                                        / verified_count
+                                    ).item()
+
+                                print(
+                                    "VELOCITY_NATIVE_PERMISSIONS "
+                                    f"block={current_start_frame // self.num_frame_per_block} "
+                                    "owner_source_value="
+                                    f"{verified_operator_mean(current_factorized_operators.source_value_action):.4f} "
+                                    "owner_source_residual="
+                                    f"{verified_operator_mean(current_factorized_operators.source_residual_action):.4f} "
+                                    "owner_target_memory="
+                                    f"{verified_operator_mean(current_factorized_operators.target_memory_action):.4f} "
+                                    "raw_source_fallback=blocked "
+                                    "complement_source=disabled"
+                                )
                         if not soft_region_modulation:
                             inloop_trg_fg_mask = role_edit_tokens
                         src_fg_mask_map = self._mask_reshape(
@@ -10309,6 +10585,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 or not factorized_native_target_history
                                 or target_semantic_competition
                             ),
+                            native_outside_target_owned=(
+                                velocity_native_owner
+                            ),
                             geometry_owner_weight=(
                                 current_identity_read_mask.reshape_as(
                                     hand_role_debug["object_posterior"]
@@ -10458,6 +10737,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 *v_trg.shape[-2:],
                             ) > 0.0
                             owner_count = owner_velocity.sum().clamp_min(1)
+                            owner_complement = ~owner_velocity
+                            complement_count = (
+                                owner_complement.sum().clamp_min(1)
+                            )
                             owner_source_fallback = factorized_flow_debug[
                                 "target_owned_native_fallback_action"
                             ]
@@ -10466,7 +10749,13 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 f"block={current_start_frame // self.num_frame_per_block} "
                                 f"blocked={int(factorized_owner_source_block)} "
                                 "fallback="
-                                f"{owner_source_fallback[owner_velocity].sum().div(owner_count).item():.4f}"
+                                f"{owner_source_fallback[owner_velocity].sum().div(owner_count).item():.4f} "
+                                "raw_residual="
+                                f"{factorized_flow_debug['source_residual_action'][owner_velocity].sum().div(owner_count).item():.4f} "
+                                "blocked_residual="
+                                f"{factorized_flow_debug['owner_source_residual_blocked_action'][owner_velocity].sum().div(owner_count).item():.4f} "
+                                "outside_native="
+                                f"{factorized_flow_debug['owner_native_complement_action'][owner_complement].sum().div(complement_count).item():.4f}"
                             )
                         if factorized_orthogonal_geometry:
                             owner_velocity = F.interpolate(
@@ -10493,7 +10782,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 "owner_action="
                                 f"{geometry_action[owner_velocity].sum().div(owner_count).item():.4f} "
                                 "residual="
-                                f"{factorized_flow_debug['orthogonal_geometry_residual_abs'][owner_velocity].sum().div(owner_count).item():.4f}"
+                                f"{factorized_flow_debug['orthogonal_geometry_residual_abs'][owner_velocity].sum().div(owner_count).item():.4f} "
+                                "removed_appearance_energy="
+                                f"{factorized_flow_debug['orthogonal_geometry_appearance_leakage_removed_energy'][owner_velocity].sum().div(owner_count).item():.6f}"
                             )
                         if save_role_dir is not None:
                             self._save_hand_role_debug(

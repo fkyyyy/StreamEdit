@@ -253,6 +253,7 @@ class CausalIdentityOwnership:
     observation_weight: torch.Tensor
     match_similarity: torch.Tensor
     match_confidence: torch.Tensor
+    cycle_confidence: torch.Tensor
     semantic_support: torch.Tensor
 
     def validate(self) -> None:
@@ -266,6 +267,7 @@ class CausalIdentityOwnership:
             ("observation_weight", self.observation_weight),
             ("match_similarity", self.match_similarity),
             ("match_confidence", self.match_confidence),
+            ("cycle_confidence", self.cycle_confidence),
             ("semantic_support", self.semantic_support),
         ):
             if value.shape != expected_shape:
@@ -278,6 +280,7 @@ class CausalIdentityOwnership:
             ("observation_weight", self.observation_weight),
             ("match_similarity", self.match_similarity),
             ("match_confidence", self.match_confidence),
+            ("cycle_confidence", self.cycle_confidence),
             ("semantic_support", self.semantic_support),
         ):
             if not torch.isfinite(value.float()).all():
@@ -289,6 +292,7 @@ class CausalIdentityOwnership:
             ("transported_weight", self.transported_weight),
             ("observation_weight", self.observation_weight),
             ("match_confidence", self.match_confidence),
+            ("cycle_confidence", self.cycle_confidence),
             ("semantic_support", self.semantic_support),
         ):
             if value.min() < 0 or value.max() > 1:
@@ -323,6 +327,9 @@ class CausalIdentityOwnership:
             ),
             "identity_owner_confidence": reshape(
                 self.match_confidence
+            ),
+            "identity_owner_cycle_confidence": reshape(
+                self.cycle_confidence
             ),
             "identity_owner_semantic": reshape(
                 self.semantic_support
@@ -512,11 +519,14 @@ class CausalIdentityOwnerTracker:
         reference_features: torch.Tensor,
         reference_weight: torch.Tensor,
         spatial_shape: tuple[int, int] | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+    ]:
         batch, token_count, _ = current_features.shape
         transported = reference_weight.new_zeros(batch, token_count)
         best_similarity = reference_weight.new_zeros(batch, token_count)
         confidence = reference_weight.new_zeros(batch, token_count)
+        cycle = reference_weight.new_zeros(batch, token_count)
         for batch_index in range(batch):
             candidates = torch.nonzero(
                 reference_weight[batch_index] > self.eps,
@@ -616,7 +626,8 @@ class CausalIdentityOwnerTracker:
             transported[batch_index] = current_transport
             best_similarity[batch_index] = best
             confidence[batch_index] = current_confidence
-        return transported, best_similarity, confidence
+            cycle[batch_index] = cycle_confidence * has_local.float()
+        return transported, best_similarity, confidence, cycle
 
     def _bound_area(
         self,
@@ -770,6 +781,7 @@ class CausalIdentityOwnerTracker:
         observations = []
         similarities = []
         confidences = []
+        cycles = []
         semantics = []
         for frame_index in range(frames):
             current_features = features[:, frame_index]
@@ -787,8 +799,11 @@ class CausalIdentityOwnerTracker:
                 transported = torch.zeros_like(current_observation)
                 similarity = torch.zeros_like(current_observation)
                 confidence = torch.zeros_like(current_observation)
+                cycle = torch.zeros_like(current_observation)
             else:
-                transported, similarity, confidence = self._transport(
+                (
+                    transported, similarity, confidence, cycle
+                ) = self._transport(
                     current_features,
                     reference_features,
                     reference_weight,
@@ -862,6 +877,7 @@ class CausalIdentityOwnerTracker:
             observations.append(current_observation)
             similarities.append(similarity)
             confidences.append(confidence)
+            cycles.append(cycle)
             semantics.append(current_semantic)
             if reference_features is None or reference_weight is None:
                 reference_features = current_features
@@ -920,6 +936,7 @@ class CausalIdentityOwnerTracker:
             observation_weight=flatten(observations),
             match_similarity=flatten(similarities),
             match_confidence=flatten(confidences),
+            cycle_confidence=flatten(cycles),
             semantic_support=flatten(semantics),
         )
         result.validate()
