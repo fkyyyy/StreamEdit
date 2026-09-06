@@ -1,16 +1,10 @@
-import importlib.util
-from pathlib import Path
-import sys
-
 import pytest
 import torch
 
+from tests._pipeline_imports import load_pipeline_module
 
-MODULE_PATH = Path(__file__).parents[1] / "pipeline" / "role_router.py"
-SPEC = importlib.util.spec_from_file_location("role_router", MODULE_PATH)
-role_router = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = role_router
-SPEC.loader.exec_module(role_router)
+
+role_router = load_pipeline_module("role_router")
 
 
 def _roles():
@@ -267,6 +261,181 @@ def test_posterior_router_supports_bfloat16():
     assert routed.dtype == torch.bfloat16
     assert debug["target_expert_weight"].dtype == torch.bfloat16
     assert torch.isfinite(routed.float()).all()
+
+
+def test_posterior_router_explicit_role_residual_policy():
+    target = torch.full((1, 1, 1, 2, 2), 10.0)
+    source = torch.full_like(target, 3.0)
+    source_reconstruction = torch.full_like(target, 5.0)
+    safe_residual = torch.full_like(target, 4.0)
+
+    routed, debug = role_router.PosteriorResidualFlowRouter()(
+        target_velocity=target,
+        source_velocity=source,
+        source_reconstruction_velocity=source_reconstruction,
+        roles=_roles(),
+        editable_source_residual=safe_residual,
+        object_residual_strength=0.10,
+        contact_residual_strength=0.35,
+    )
+
+    expected = torch.tensor([[[[[10.4, 11.4], [12.0, 12.0]]]]])
+    expected_weight = torch.tensor([[[[[0.10, 0.35], [1.0, 1.0]]]]])
+    assert torch.allclose(routed, expected)
+    assert torch.allclose(
+        debug["residual_expert_weight"], expected_weight
+    )
+
+
+def test_role_memory_gates_read_contact_but_write_object_core_only():
+    read, write, debug = role_router.build_role_memory_gates(
+        _roles(),
+        spatial_size=(2, 2),
+        contact_read_weight=0.5,
+        object_write_threshold=0.5,
+    )
+
+    assert torch.equal(
+        read, torch.tensor([[[[1.0, 0.5], [0.0, 0.0]]]])
+    )
+    assert torch.equal(
+        write, torch.tensor([[[[True, False], [False, False]]]])
+    )
+    assert torch.equal(debug["role_memory_write_gate"], write.float())
+
+
+def test_role_memory_gates_abstain_on_high_entropy_tokens():
+    read, write, debug = role_router.build_role_memory_gates(
+        _soft_roles(),
+        spatial_size=(1, 1),
+        contact_read_weight=0.5,
+        object_write_threshold=0.35,
+    )
+
+    assert 0.0 < read.item() < 0.55
+    assert not write.item()
+    assert debug["role_memory_entropy"].item() > 0.5
+
+
+def test_hand_connected_memory_gate_rejects_disconnected_distractor():
+    object_probability = torch.zeros(1, 2, 5, 8)
+    object_probability[0, 0, 2, 1:4] = 0.9
+    object_probability[0, 0, 0, 5:8] = 0.95
+    # The hand temporarily disappears in frame 1. Ownership must follow the
+    # preceding connected component instead of jumping to the distractor.
+    object_probability[0, 1, 2, 2:5] = 0.9
+    object_probability[0, 1, 0, 5:8] = 0.95
+    background = 1.0 - object_probability
+    roles = role_router.RoleState(
+        object=object_probability,
+        boundary=torch.zeros_like(object_probability),
+        hand=torch.zeros_like(object_probability),
+        background=background,
+    )
+    hand_anchor = torch.zeros_like(object_probability)
+    hand_anchor[0, 0, 2, 0] = 1.0
+
+    read, write, debug = role_router.build_role_memory_gates(
+        roles,
+        spatial_size=(5, 8),
+        object_write_threshold=0.5,
+        hand_anchor=hand_anchor,
+    )
+
+    assert write[0, 0, 2, 1:4].all()
+    assert write[0, 1, 2, 2:5].all()
+    assert not write[0, :, 0, 5:8].any()
+    assert not (read[0, :, 0, 5:8] > 0).any()
+    assert debug["role_memory_raw_write_gate"][
+        0, :, 0, 5:8
+    ].bool().all()
+
+
+def test_memory_gate_can_share_precomputed_s1_owner_support():
+    object_probability = torch.full((1, 1, 2, 3), 0.9)
+    roles = role_router.RoleState(
+        object=object_probability,
+        boundary=torch.zeros_like(object_probability),
+        hand=torch.zeros_like(object_probability),
+        background=1.0 - object_probability,
+    )
+    owner_support = torch.tensor(
+        [[[[True, True, False], [False, False, False]]]]
+    )
+
+    read, write, debug = role_router.build_role_memory_gates(
+        roles,
+        spatial_size=(2, 3),
+        object_write_threshold=0.5,
+        owner_support=owner_support,
+    )
+
+    assert torch.equal(write, owner_support)
+    assert torch.equal(read > 0, owner_support)
+    assert torch.equal(
+        debug["role_memory_connected_support"].bool(),
+        owner_support,
+    )
+
+
+def test_adaptive_write_is_sparse_consistent_and_recovery_read_only():
+    object_probability = torch.full((1, 3, 3, 4), 0.9)
+    roles = role_router.RoleState(
+        object=object_probability,
+        boundary=torch.zeros_like(object_probability),
+        hand=torch.zeros_like(object_probability),
+        background=1.0 - object_probability,
+    )
+    support = torch.ones_like(object_probability, dtype=torch.bool)
+    recovery = torch.zeros(1, 3, 1, 1, dtype=torch.bool)
+    recovery[:, 1] = True
+
+    read, write, debug = role_router.build_role_memory_gates(
+        roles,
+        spatial_size=(3, 4),
+        object_write_threshold=0.5,
+        owner_support=support,
+        evidence_reliability=torch.ones(1, 3, 1, 1),
+        temporal_recovery=recovery,
+        adaptive_write=True,
+        temporal_write_consensus=True,
+    )
+
+    assert (read[:, 1] > 0).any()
+    assert not write[:, 0].any()  # first frame establishes candidates
+    assert not write[:, 1].any()  # recovery frames are read-only
+    assert not write[:, 2].any()  # previous frame had no trusted write
+    assert debug["role_memory_raw_write_gate"][:, 0].sum() == 12
+    assert debug["role_memory_connected_write_gate"][:, 0].sum() == 12
+    assert debug["role_memory_candidate_write_gate"][:, 0].sum() == 12
+    assert debug["role_memory_preconsensus_write_gate"][:, 0].sum() == 4
+
+
+def test_connected_area_limit_respects_budget_and_preserves_path():
+    support = torch.zeros(1, 1, 5, 8, dtype=torch.bool)
+    support[0, 0, 2, 1:8] = True
+    support[0, 0, 1:4, 6:8] = True
+    weight = torch.linspace(1.0, 0.1, 40).reshape(1, 1, 5, 8)
+    anchor = torch.zeros_like(support)
+    anchor[0, 0, 2, 0] = True
+
+    limited = role_router.limit_connected_support_area(
+        support,
+        weight,
+        anchor,
+        torch.tensor([[[[0.10]]]]),
+    )
+
+    assert limited.sum().item() == 4
+    # Every selected token is reachable from the hand-side root through the
+    # selected support; the distant high-area blob cannot survive alone.
+    reached = torch.zeros_like(limited)
+    reached[0, 0, 2, 1] = limited[0, 0, 2, 1]
+    for _ in range(4):
+        reached = reached | (
+            role_router._dilate(reached, 1) & limited
+        )
+    assert torch.equal(reached, limited)
 
 
 def test_bayes_router_matches_precision_weighted_closed_form():

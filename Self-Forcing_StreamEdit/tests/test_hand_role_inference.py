@@ -16,6 +16,9 @@ FlowRoleEvidence = load_pipeline_module(
 connected_hysteresis_growth = (
     hand_role_module._connected_hysteresis_growth
 )
+adaptive_connected_hysteresis_growth = (
+    hand_role_module._adaptive_connected_hysteresis_growth
+)
 
 
 class ConnectedHysteresisTests(unittest.TestCase):
@@ -46,6 +49,20 @@ class ConnectedHysteresisTests(unittest.TestCase):
         self.assertTrue(grown[0, 0, 1, :4].all())
         self.assertFalse(grown[0, 0, 1, 4:].any())
 
+    def test_adaptive_growth_uses_per_frame_step_budget(self):
+        seed = torch.zeros(1, 2, 3, 7, dtype=torch.bool)
+        seed[:, :, 1, 0] = True
+        candidate = torch.zeros_like(seed)
+        candidate[:, :, 1, :] = True
+        budget = torch.tensor([1, 4]).reshape(1, 2, 1, 1)
+
+        grown = adaptive_connected_hysteresis_growth(
+            seed, candidate, budget
+        )
+
+        self.assertEqual(grown[0, 0].sum().item(), 2)
+        self.assertEqual(grown[0, 1].sum().item(), 5)
+
     def test_high_confidence_seed_survives_candidate_mismatch(self):
         seed = torch.zeros(1, 1, 3, 3, dtype=torch.bool)
         seed[0, 0, 1, 1] = True
@@ -75,6 +92,40 @@ class ConnectedHysteresisTests(unittest.TestCase):
         roles = HandRoleInferencer._build_roles(posterior, hand)
 
         self.assertEqual(roles.boundary.sum().item(), 9.0)
+
+    def test_temporal_affinity_survives_one_frame_visibility_dropout(self):
+        inferencer = HandRoleInferencer(
+            adaptive=False,
+            connected_hysteresis=True,
+            temporal_weight=0.8,
+        )
+        inferencer.reference_interaction_support = torch.ones(
+            1, 1, 1, 1
+        )
+        inferencer.previous_features = torch.eye(4).unsqueeze(0)
+        inferencer.previous_posterior = torch.tensor(
+            [[[0.0, 1.0], [0.0, 0.0]]]
+        )
+        inferencer.previous_connected_support = (
+            inferencer.previous_posterior > 0
+        )
+        hand = torch.zeros(1, 1, 4, 4)
+        attention = torch.tensor([[0.0, 1.0, 0.5, 0.2]])
+
+        result = inferencer(
+            source_attention=attention,
+            hand_mask=hand,
+            source_features=torch.eye(4).unsqueeze(0),
+        )
+
+        self.assertFalse(result.debug["object_visible"].bool().any())
+        self.assertTrue(
+            result.debug["temporal_visibility_recovery"].bool().any()
+        )
+        self.assertGreater(
+            result.debug["object_posterior"][0, 0, 0, 1].item(),
+            0.0,
+        )
 
 
 class HandRoleFieldInferenceTests(unittest.TestCase):

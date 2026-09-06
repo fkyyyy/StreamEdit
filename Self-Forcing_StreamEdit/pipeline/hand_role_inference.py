@@ -5,9 +5,16 @@ from typing import Dict
 import torch
 import torch.nn.functional as F
 
-from .adaptive_role_calibrator import AdaptiveRoleCalibrator
+from .adaptive_role_calibrator import (
+    AdaptiveOwnerExtentController,
+    AdaptiveRoleCalibrator,
+)
 from .motion.flow_role_evidence import FlowRoleEvidence
-from .role_router import RoleState
+from .role_router import (
+    RoleState,
+    limit_connected_support_area,
+    select_hand_connected_support,
+)
 from .source_flow_verified_region import (
     build_source_flow_verified_region,
 )
@@ -61,6 +68,29 @@ def _connected_hysteresis_growth(
         support = support | (
             _neighbor_max(support.float()).bool() & candidate.bool()
         )
+    return support
+
+
+def _adaptive_connected_hysteresis_growth(
+    seed: torch.Tensor,
+    candidate: torch.Tensor,
+    step_budget: torch.Tensor,
+) -> torch.Tensor:
+    """Grow each frame only for its reliability-conditioned hop budget."""
+    if seed.shape != candidate.shape or seed.ndim != 4:
+        raise ValueError("seed and candidate must share shape [B,T,H,W]")
+    if step_budget.shape != seed.shape[:2] + (1, 1):
+        raise ValueError("step_budget must have shape [B,T,1,1]")
+    if (step_budget < 0).any():
+        raise ValueError("step_budget must be non-negative")
+    support = seed.bool()
+    maximum = int(step_budget.max().item())
+    for step in range(maximum):
+        active = step_budget > step
+        grown = support | (
+            _neighbor_max(support.float()).bool() & candidate.bool()
+        )
+        support = torch.where(active, grown, support)
     return support
 
 
@@ -212,9 +242,20 @@ class HandRoleInferencer:
         self.eps = eps
         self.previous_features = None
         self.previous_posterior = None
+        self.previous_connected_support = None
         self.reference_interaction_support = None
         self.adaptive_calibrator = (
-            AdaptiveRoleCalibrator(eps=eps) if adaptive else None
+            AdaptiveRoleCalibrator(
+                max_coverage=max_object_coverage,
+                eps=eps,
+            )
+            if adaptive
+            else None
+        )
+        self.extent_controller = (
+            AdaptiveOwnerExtentController(eps=eps)
+            if adaptive
+            else None
         )
 
     @staticmethod
@@ -294,7 +335,10 @@ class HandRoleInferencer:
 
         prior_posterior = prior.debug["object_posterior"].float()
         source_attention = prior.debug["source_attention"].float()
-        object_visible = prior.debug["object_visible"].float()
+        object_visible = prior.debug.get(
+            "effective_object_visible",
+            prior.debug["object_visible"],
+        ).float()
         token_height, token_width = prior_posterior.shape[-2:]
         expected_tokens = frames * token_height * token_width
         if prior.token_edit_confidence.shape != (batch, expected_tokens):
@@ -465,6 +509,18 @@ class HandRoleInferencer:
                         posterior_threshold.expand_as(posterior),
                     ),
                     posterior,
+                )
+            connected_object_support = prior.debug.get(
+                "connected_object_support"
+            )
+            if connected_object_support is not None:
+                connected_object_support = connected_object_support.bool()
+                if connected_object_support.shape != posterior.shape:
+                    raise ValueError(
+                        "Connected object support must align with posterior"
+                    )
+                posterior = (
+                    posterior * connected_object_support.float()
                 )
 
         if apply_update:
@@ -935,8 +991,32 @@ class HandRoleInferencer:
                     hand_probability > 0.0,
                     2 * self.hand_proximity_radius,
                 ).bool()
+            if self.adaptive:
+                attention_reliability = (
+                    adaptive_observation.attention_reliability
+                )
+                adaptive_candidate_ratio = (
+                    1.0
+                    - attention_reliability
+                    * (1.0 - self.connected_candidate_ratio)
+                )
+                connected_step_budget = torch.round(
+                    adaptive_observation.debug["adaptive_hand_radius"]
+                    * (1.0 + 0.5 * attention_reliability)
+                ).clamp(1, self.connected_growth_steps).long()
+            else:
+                adaptive_candidate_ratio = attention.new_full(
+                    (batch, frames, 1, 1),
+                    self.connected_candidate_ratio,
+                )
+                connected_step_budget = torch.full(
+                    (batch, frames, 1, 1),
+                    self.connected_growth_steps,
+                    device=attention.device,
+                    dtype=torch.long,
+                )
             connected_candidate_threshold = (
-                candidate_threshold * self.connected_candidate_ratio
+                candidate_threshold * adaptive_candidate_ratio
             )
             hysteresis_candidate = (
                 (attention >= connected_candidate_threshold)
@@ -944,11 +1024,20 @@ class HandRoleInferencer:
                 & extended_hand
                 & object_visible.bool()
             )
-            hysteresis_support = _connected_hysteresis_growth(
-                seed > self.eps,
-                hysteresis_candidate,
-                steps=self.connected_growth_steps,
-            )
+            if self.adaptive:
+                hysteresis_support = (
+                    _adaptive_connected_hysteresis_growth(
+                        seed > self.eps,
+                        hysteresis_candidate,
+                        connected_step_budget,
+                    )
+                )
+            else:
+                hysteresis_support = _connected_hysteresis_growth(
+                    seed > self.eps,
+                    hysteresis_candidate,
+                    steps=self.connected_growth_steps,
+                )
             # Candidate attention is calibrated evidence, not a binary mask.
             # Preserve its confidence while ensuring connected low-score
             # interiors survive later posterior thresholding.
@@ -963,6 +1052,17 @@ class HandRoleInferencer:
 
         temporal_posterior = torch.zeros_like(posterior)
         temporal_confidence = torch.zeros_like(posterior)
+        temporal_evidence_reliability = torch.zeros(
+            batch,
+            frames,
+            1,
+            1,
+            device=posterior.device,
+            dtype=torch.float32,
+        )
+        temporal_visibility_recovery = torch.zeros_like(
+            object_visible, dtype=torch.bool
+        )
         adaptive_temporal_weight = torch.zeros(
             batch,
             frames,
@@ -1017,18 +1117,46 @@ class HandRoleInferencer:
                     )
                 else:
                     temporal_weight = self.temporal_weight
+                propagated_peak = propagated.flatten(1).amax(
+                    dim=-1
+                ).reshape(batch, 1, 1)
+                confidence_peak = confidence.flatten(1).amax(
+                    dim=-1
+                ).reshape(batch, 1, 1)
+                temporal_reliable = (
+                    (propagated_peak >= 0.15)
+                    & (confidence_peak >= 0.50)
+                )
+                temporal_evidence_reliability[:, frame_index] = (
+                    torch.sqrt(
+                        propagated_peak.clamp(0.0, 1.0)
+                        * confidence_peak.clamp(0.0, 1.0)
+                    )
+                )
+                temporal_visibility_recovery[:, frame_index] = (
+                    ~object_visible[:, frame_index].bool()
+                    & temporal_reliable
+                )
+                frame_visible = (
+                    object_visible[:, frame_index].bool()
+                    | temporal_reliable
+                )
                 posterior[:, frame_index] = torch.maximum(
                     posterior[:, frame_index],
                     temporal_weight
                     * propagated
                     * semantic_gate,
-                ) * object_visible[:, frame_index].float()
+                ) * frame_visible.float()
+
+        effective_object_visible = (
+            object_visible.bool() | temporal_visibility_recovery
+        )
 
         if self.adaptive:
             posterior = self.adaptive_calibrator.limit_posterior(
                 posterior,
                 adaptive_observation.coverage_budget,
-                object_visible,
+                effective_object_visible,
             )
             posterior_threshold = (
                 self.adaptive_calibrator.posterior_threshold(posterior)
@@ -1043,7 +1171,7 @@ class HandRoleInferencer:
             posterior = (
                 posterior
                 * (posterior >= coverage_threshold).float()
-                * object_visible.float()
+                * effective_object_visible.float()
             ).clamp(0.0, 1.0)
             posterior_threshold = posterior.new_full(
                 (batch, frames, 1, 1),
@@ -1056,6 +1184,65 @@ class HandRoleInferencer:
                     posterior, posterior_threshold.expand_as(posterior)
                 ),
                 posterior,
+            )
+            component_threshold = torch.minimum(
+                posterior_threshold.expand_as(posterior),
+                posterior.new_full(posterior.shape, 0.20),
+            )
+            component_candidate = (
+                (posterior >= component_threshold)
+                | hysteresis_support
+            ) & (posterior > self.eps)
+            previous_connected_support = self.previous_connected_support
+            connected_object_support = select_hand_connected_support(
+                component_candidate,
+                posterior,
+                proximity_hand_probability > 0.0,
+                anchor_radius=1,
+                previous_support=previous_connected_support,
+            )
+            if self.adaptive:
+                adaptive_owner_area_budget = self.extent_controller.budget(
+                    seed=seed,
+                    hand_probability=hand_probability,
+                    proposal_support=connected_object_support,
+                    attention_reliability=(
+                        adaptive_observation.attention_reliability
+                    ),
+                    temporal_reliability=(
+                        temporal_evidence_reliability
+                    ),
+                    observed_visible=object_visible.bool(),
+                    temporal_recovery=temporal_visibility_recovery,
+                    maximum_budget=(
+                        adaptive_observation.coverage_budget
+                    ),
+                )
+                connected_object_support = limit_connected_support_area(
+                    connected_object_support,
+                    posterior,
+                    proximity_hand_probability > 0.0,
+                    adaptive_owner_area_budget,
+                    previous_support=previous_connected_support,
+                )
+            else:
+                adaptive_owner_area_budget = (
+                    connected_object_support.flatten(2)
+                    .float().mean(dim=-1, keepdim=True)
+                    .unsqueeze(-1)
+                )
+            posterior = posterior * connected_object_support.float()
+            self.previous_connected_support = (
+                connected_object_support[:, -1].detach()
+            )
+        else:
+            connected_object_support = torch.ones_like(
+                posterior, dtype=torch.bool
+            )
+            adaptive_owner_area_budget = (
+                connected_object_support.flatten(2)
+                .float().mean(dim=-1, keepdim=True)
+                .unsqueeze(-1)
             )
         if source_features is not None:
             self.previous_features = source_features[:, -1].detach()
@@ -1071,8 +1258,17 @@ class HandRoleInferencer:
                 interaction_support
             ),
             "object_visible": object_visible.float(),
+            "effective_object_visible": (
+                effective_object_visible.float()
+            ),
+            "temporal_visibility_recovery": (
+                temporal_visibility_recovery.float()
+            ),
             "temporal_posterior": temporal_posterior,
             "temporal_confidence": temporal_confidence,
+            "temporal_evidence_reliability": (
+                temporal_evidence_reliability
+            ),
             "object_posterior": posterior,
             "posterior_threshold": posterior_threshold,
             "connected_hysteresis_candidate": (
@@ -1083,9 +1279,23 @@ class HandRoleInferencer:
                 if self.connected_hysteresis
                 else torch.zeros_like(attention)
             ),
+            "connected_candidate_ratio": (
+                adaptive_candidate_ratio.expand_as(attention)
+                if self.connected_hysteresis
+                else torch.zeros_like(attention)
+            ),
+            "connected_step_budget": (
+                connected_step_budget.float().expand_as(attention)
+                if self.connected_hysteresis
+                else torch.zeros_like(attention)
+            ),
             "connected_hysteresis_support": (
                 hysteresis_support.float()
             ),
+            "connected_object_support": (
+                connected_object_support.float()
+            ),
+            "adaptive_owner_area_budget": adaptive_owner_area_budget,
         }
         if self.adaptive:
             debug["adaptive_temporal_weight"] = (

@@ -68,6 +68,152 @@ class AdaptiveCalibrationState:
     current_attention_reliability: Optional[torch.Tensor] = None
 
 
+@dataclass
+class AdaptiveOwnerExtentState:
+    area_ema: Optional[torch.Tensor] = None
+
+
+class AdaptiveOwnerExtentController:
+    """Set a causal object-area budget from evidence reliability.
+
+    The controller has no object-category constants.  It bootstraps scale
+    from the hand-conditioned seed and hand size, then tracks only areas from
+    visible, non-recovery observations.  Weak or occluded frames inherit the
+    last trusted extent instead of expanding toward nearby contacted objects.
+    """
+
+    def __init__(
+        self,
+        *,
+        area_momentum: float = 0.85,
+        min_reference_ratio: float = 0.70,
+        max_reference_ratio: float = 1.30,
+        seed_scale: float = 3.0,
+        hand_scale: float = 1.75,
+        eps: float = 1e-6,
+    ):
+        if not 0.0 <= area_momentum < 1.0:
+            raise ValueError("area_momentum must lie in [0, 1)")
+        if not 0.0 < min_reference_ratio <= 1.0:
+            raise ValueError("min_reference_ratio must lie in (0, 1]")
+        if max_reference_ratio < 1.0:
+            raise ValueError("max_reference_ratio must be at least 1")
+        if seed_scale <= 0.0 or hand_scale <= 0.0:
+            raise ValueError("extent bootstrap scales must be positive")
+        self.area_momentum = float(area_momentum)
+        self.min_reference_ratio = float(min_reference_ratio)
+        self.max_reference_ratio = float(max_reference_ratio)
+        self.seed_scale = float(seed_scale)
+        self.hand_scale = float(hand_scale)
+        self.eps = float(eps)
+        self.state = AdaptiveOwnerExtentState()
+
+    def reset(self) -> None:
+        self.state = AdaptiveOwnerExtentState()
+
+    @torch.no_grad()
+    def budget(
+        self,
+        *,
+        seed: torch.Tensor,
+        hand_probability: torch.Tensor,
+        proposal_support: torch.Tensor,
+        attention_reliability: torch.Tensor,
+        temporal_reliability: torch.Tensor,
+        observed_visible: torch.Tensor,
+        temporal_recovery: torch.Tensor,
+        maximum_budget: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return one causal area fraction per frame as [B,T,1,1]."""
+        shape = seed.shape
+        for name, value in (
+            ("hand_probability", hand_probability),
+            ("proposal_support", proposal_support),
+        ):
+            if value.shape != shape:
+                raise ValueError(f"{name} must align with seed")
+        batch, frames, height, width = shape
+        scalar_shape = (batch, frames, 1, 1)
+        for name, value in (
+            ("attention_reliability", attention_reliability),
+            ("temporal_reliability", temporal_reliability),
+            ("observed_visible", observed_visible),
+            ("temporal_recovery", temporal_recovery),
+        ):
+            if value.shape != scalar_shape:
+                raise ValueError(f"{name} must have shape [B,T,1,1]")
+        if maximum_budget is not None and maximum_budget.shape != scalar_shape:
+            raise ValueError(
+                "maximum_budget must have shape [B,T,1,1]"
+            )
+
+        seed_area = (seed > self.eps).flatten(2).float().mean(-1)
+        hand_area = hand_probability.flatten(2).float().mean(-1)
+        proposal_area = proposal_support.flatten(2).float().mean(-1)
+        minimum = seed.new_full(
+            (batch,), 1.0 / float(height * width), dtype=torch.float32
+        )
+        reference = (
+            None
+            if self.state.area_ema is None
+            else self.state.area_ema.to(seed.device).float()
+        )
+        budgets = []
+        for frame_index in range(frames):
+            bootstrap = torch.maximum(
+                self.seed_scale * seed_area[:, frame_index],
+                self.hand_scale * hand_area[:, frame_index],
+            )
+            bootstrap = torch.minimum(
+                bootstrap, proposal_area[:, frame_index]
+            ).clamp_min(minimum)
+            if reference is None:
+                reference = bootstrap
+
+            reliability = torch.sqrt(
+                attention_reliability[:, frame_index, 0, 0].float()
+                * temporal_reliability[:, frame_index, 0, 0]
+                .float().clamp_min(0.10)
+            ).clamp(0.0, 1.0)
+            lower = reference * self.min_reference_ratio
+            upper = reference * (
+                1.0
+                + (self.max_reference_ratio - 1.0) * reliability
+            )
+            observed_target = proposal_area[:, frame_index].clamp(
+                min=lower, max=upper
+            )
+            current = (
+                (1.0 - reliability) * reference
+                + reliability * observed_target
+            )
+            recovery = temporal_recovery[:, frame_index, 0, 0].bool()
+            current = torch.where(recovery, reference, current)
+            current = torch.minimum(
+                current.clamp_min(minimum),
+                proposal_area[:, frame_index].clamp_min(minimum),
+            )
+            if maximum_budget is not None:
+                current = torch.minimum(
+                    current,
+                    maximum_budget[:, frame_index, 0, 0].float(),
+                ).clamp_min(minimum)
+            budgets.append(current)
+
+            trusted = (
+                observed_visible[:, frame_index, 0, 0].bool()
+                & ~recovery
+            )
+            updated = (
+                self.area_momentum * reference
+                + (1.0 - self.area_momentum) * current
+            )
+            reference = torch.where(trusted, updated, reference)
+
+        self.state.area_ema = reference.detach()
+        return torch.stack(budgets, dim=1).unsqueeze(-1).unsqueeze(-1)
+
+
 class AdaptiveRoleCalibrator:
     """Causally calibrate role evidence from its online reliability."""
 

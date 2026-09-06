@@ -1469,6 +1469,42 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        "--role_object_residual_strength",
+        type=float,
+        default=0.10,
+        help=(
+            "Role-aware S1+M2 source-geometry residual strength on "
+            "object-core tokens."
+        ),
+    )
+    parser.add_argument(
+        "--role_contact_residual_strength",
+        type=float,
+        default=0.35,
+        help=(
+            "Role-aware S1+M2 source-geometry residual strength on "
+            "hand-object contact tokens."
+        ),
+    )
+    parser.add_argument(
+        "--role_memory_contact_read_weight",
+        type=float,
+        default=0.50,
+        help="M2 read weight assigned to contact tokens.",
+    )
+    parser.add_argument(
+        "--role_memory_min_read_probability",
+        type=float,
+        default=0.20,
+        help="Minimum object/contact probability for an M2 read.",
+    )
+    parser.add_argument(
+        "--role_memory_object_write_threshold",
+        type=float,
+        default=0.35,
+        help="Minimum object-core probability allowed to freeze into M2.",
+    )
+    parser.add_argument(
         "--first_block_identity_anchor",
         action="store_true",
         default=False,
@@ -3009,10 +3045,16 @@ if __name__ == '__main__':
             "--immutable_delta_v_bank"
         )
     if args.immutable_delta_v_bank:
-        if args.routing_mode != "dynamic_sog":
+        role_aware_s1m2 = (
+            args.closed_loop_delta_v_error
+            and args.soft_region_modulation
+            and args.routing_mode
+            == "hand_role_factorized_causal_owner_kv"
+        )
+        if args.routing_mode != "dynamic_sog" and not role_aware_s1m2:
             parser.error(
-                "--immutable_delta_v_bank requires --routing_mode "
-                "dynamic_sog"
+                "--immutable_delta_v_bank requires dynamic_sog or the "
+                "role-aware S1+M2 configuration"
             )
         if (
             not args.immutable_delta_v_layers
@@ -3054,13 +3096,16 @@ if __name__ == '__main__':
             ),
             "--projected_source_residual": args.projected_source_residual,
             "--drop_source_bg_kv": args.drop_source_bg_kv,
-            "--soft_region_modulation": args.soft_region_modulation,
+            "--soft_region_modulation": (
+                args.soft_region_modulation and not role_aware_s1m2
+            ),
             "--factorized_target_identity": args.factorized_target_identity,
             "--factorized_immutable_target_memory": (
                 args.factorized_immutable_target_memory
             ),
             "--factorized_native_target_history": (
                 args.factorized_native_target_history
+                and not role_aware_s1m2
             ),
             "--causal_paired_edit_memory": args.causal_paired_edit_memory,
             "--role_fixed_native_history": args.role_fixed_native_history,
@@ -3074,7 +3119,9 @@ if __name__ == '__main__':
             "--source_owner_mask_video": (
                 args.source_owner_mask_video is not None
             ),
-            "--hand_mask_video": args.hand_mask_video is not None,
+            "--hand_mask_video": (
+                args.hand_mask_video is not None and not role_aware_s1m2
+            ),
             "--source_flow_cache": args.source_flow_cache is not None,
         }
         enabled_incompatible = [
@@ -3085,6 +3132,15 @@ if __name__ == '__main__':
                 "--immutable_delta_v_bank is a strict L0 single-variable "
                 "experiment; remove " + ", ".join(enabled_incompatible)
             )
+    for name in (
+        "role_object_residual_strength",
+        "role_contact_residual_strength",
+        "role_memory_contact_read_weight",
+        "role_memory_min_read_probability",
+        "role_memory_object_write_threshold",
+    ):
+        if not 0.0 <= float(getattr(args, name)) <= 1.0:
+            parser.error(f"--{name} must lie in [0, 1]")
     pipeline, low_memory, device, local_rank = load_pipe(args)
     if (
         args.source_bg_attention_diagnostics
@@ -3805,6 +3861,21 @@ if __name__ == '__main__':
         ),
         soft_region_modulation=args.soft_region_modulation,
         soft_region_blend_strength=args.soft_region_blend_strength,
+        role_object_residual_strength=(
+            args.role_object_residual_strength
+        ),
+        role_contact_residual_strength=(
+            args.role_contact_residual_strength
+        ),
+        role_memory_contact_read_weight=(
+            args.role_memory_contact_read_weight
+        ),
+        role_memory_min_read_probability=(
+            args.role_memory_min_read_probability
+        ),
+        role_memory_object_write_threshold=(
+            args.role_memory_object_write_threshold
+        ),
         first_block_identity_anchor=args.first_block_identity_anchor,
         identity_anchor_scale=args.identity_anchor_scale,
         suppress_source_bg_value=args.suppress_source_bg_value,

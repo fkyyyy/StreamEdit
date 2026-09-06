@@ -93,6 +93,7 @@ from .role_router import (
     PosteriorResidualFlowRouter,
     ResidualRoleFlowRouter,
     RoleFlowRouter,
+    build_role_memory_gates,
     build_oracle_roles,
 )
 from wan.modules.attention import (
@@ -317,6 +318,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
         source_flow_background_veto_min_confidence: float = 0.50,
         soft_region_modulation: bool = False,
         soft_region_blend_strength: float = 0.5,
+        role_object_residual_strength: float = 0.10,
+        role_contact_residual_strength: float = 0.35,
+        role_memory_contact_read_weight: float = 0.50,
+        role_memory_min_read_probability: float = 0.20,
+        role_memory_object_write_threshold: float = 0.35,
         first_block_identity_anchor: bool = False,
         identity_anchor_scale: float = 1.5,
         suppress_source_bg_value: bool = False,
@@ -595,16 +601,31 @@ class EditCausalInferencePipeline(torch.nn.Module):
             if os.path.exists(source_bg_attention_diagnostic_path):
                 os.remove(source_bg_attention_diagnostic_path)
         immutable_delta_v_layers = tuple(immutable_delta_v_layers)
+        role_aware_s1m2 = (
+            immutable_delta_v_bank
+            and closed_loop_delta_v_error
+            and soft_region_modulation
+            and routing_mode == "hand_role_factorized_causal_owner_kv"
+        )
+        for name, value in (
+            ("role_object_residual_strength", role_object_residual_strength),
+            ("role_contact_residual_strength", role_contact_residual_strength),
+            ("role_memory_contact_read_weight", role_memory_contact_read_weight),
+            ("role_memory_min_read_probability", role_memory_min_read_probability),
+            ("role_memory_object_write_threshold", role_memory_object_write_threshold),
+        ):
+            if not 0.0 <= float(value) <= 1.0:
+                raise ValueError(f"{name} must lie in [0, 1]")
         if closed_loop_delta_v_error and not immutable_delta_v_bank:
             raise ValueError(
                 "M2 closed-loop delta-V error requires the immutable "
                 "delta-V bank"
             )
         if immutable_delta_v_bank:
-            if routing_mode != "dynamic_sog":
+            if routing_mode != "dynamic_sog" and not role_aware_s1m2:
                 raise ValueError(
-                    "M1 immutable delta-V bank requires native dynamic_sog "
-                    "routing"
+                    "M1/M2 requires native dynamic_sog routing or the "
+                    "role-aware S1+M2 configuration"
                 )
             if (
                 not immutable_delta_v_layers
@@ -649,6 +670,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 ),
                 "factorized_native_target_history": (
                     factorized_native_target_history
+                    and not role_aware_s1m2
                 ),
                 "causal_paired_edit_memory": causal_paired_edit_memory,
                 "role_fixed_native_history": role_fixed_native_history,
@@ -1062,6 +1084,21 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 ),
                 soft_region_modulation=soft_region_modulation,
                 soft_region_blend_strength=soft_region_blend_strength,
+                role_object_residual_strength=(
+                    role_object_residual_strength
+                ),
+                role_contact_residual_strength=(
+                    role_contact_residual_strength
+                ),
+                role_memory_contact_read_weight=(
+                    role_memory_contact_read_weight
+                ),
+                role_memory_min_read_probability=(
+                    role_memory_min_read_probability
+                ),
+                role_memory_object_write_threshold=(
+                    role_memory_object_write_threshold
+                ),
                 first_block_identity_anchor=first_block_identity_anchor,
                 identity_anchor_scale=identity_anchor_scale,
                 suppress_source_bg_value=suppress_source_bg_value,
@@ -2738,6 +2775,21 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     ),
                     soft_region_modulation=soft_region_modulation,
                     soft_region_blend_strength=soft_region_blend_strength,
+                    role_object_residual_strength=(
+                        role_object_residual_strength
+                    ),
+                    role_contact_residual_strength=(
+                        role_contact_residual_strength
+                    ),
+                    role_memory_contact_read_weight=(
+                        role_memory_contact_read_weight
+                    ),
+                    role_memory_min_read_probability=(
+                        role_memory_min_read_probability
+                    ),
+                    role_memory_object_write_threshold=(
+                        role_memory_object_write_threshold
+                    ),
                     first_block_identity_anchor=first_block_identity_anchor,
                     identity_anchor_scale=identity_anchor_scale,
                     suppress_source_bg_value=suppress_source_bg_value,
@@ -3300,6 +3352,21 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 ),
                 soft_region_modulation=soft_region_modulation,
                 soft_region_blend_strength=soft_region_blend_strength,
+                role_object_residual_strength=(
+                    role_object_residual_strength
+                ),
+                role_contact_residual_strength=(
+                    role_contact_residual_strength
+                ),
+                role_memory_contact_read_weight=(
+                    role_memory_contact_read_weight
+                ),
+                role_memory_min_read_probability=(
+                    role_memory_min_read_probability
+                ),
+                role_memory_object_write_threshold=(
+                    role_memory_object_write_threshold
+                ),
                 first_block_identity_anchor=first_block_identity_anchor,
                 identity_anchor_scale=identity_anchor_scale,
                 suppress_source_bg_value=suppress_source_bg_value,
@@ -3625,6 +3692,11 @@ class EditCausalInferencePipeline(torch.nn.Module):
         source_flow_background_veto_min_confidence: float = 0.50,
         soft_region_modulation: bool = False,
         soft_region_blend_strength: float = 0.5,
+        role_object_residual_strength: float = 0.10,
+        role_contact_residual_strength: float = 0.35,
+        role_memory_contact_read_weight: float = 0.50,
+        role_memory_min_read_probability: float = 0.20,
+        role_memory_object_write_threshold: float = 0.35,
         first_block_identity_anchor: bool = False,
         identity_anchor_scale: float = 1.5,
         suppress_source_bg_value: bool = False,
@@ -3761,16 +3833,31 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 "routing"
             )
         immutable_delta_v_layers = tuple(immutable_delta_v_layers)
+        role_aware_s1m2 = (
+            immutable_delta_v_bank
+            and closed_loop_delta_v_error
+            and soft_region_modulation
+            and routing_mode == "hand_role_factorized_causal_owner_kv"
+        )
+        for name, value in (
+            ("role_object_residual_strength", role_object_residual_strength),
+            ("role_contact_residual_strength", role_contact_residual_strength),
+            ("role_memory_contact_read_weight", role_memory_contact_read_weight),
+            ("role_memory_min_read_probability", role_memory_min_read_probability),
+            ("role_memory_object_write_threshold", role_memory_object_write_threshold),
+        ):
+            if not 0.0 <= float(value) <= 1.0:
+                raise ValueError(f"{name} must lie in [0, 1]")
         if closed_loop_delta_v_error and not immutable_delta_v_bank:
             raise ValueError(
                 "M2 closed-loop delta-V error requires the immutable "
                 "delta-V bank"
             )
         if immutable_delta_v_bank:
-            if routing_mode != "dynamic_sog":
+            if routing_mode != "dynamic_sog" and not role_aware_s1m2:
                 raise ValueError(
-                    "M1 immutable delta-V bank requires native dynamic_sog "
-                    "routing"
+                    "M1/M2 requires native dynamic_sog routing or the "
+                    "role-aware S1+M2 configuration"
                 )
             if (
                 not immutable_delta_v_layers
@@ -3807,10 +3894,10 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     counterfactual_source_bg_output,
                     projected_source_residual,
                     drop_source_bg_kv,
-                    soft_region_modulation,
+                    soft_region_modulation and not role_aware_s1m2,
                     factorized_target_identity,
                     factorized_immutable_target_memory,
-                    factorized_native_target_history,
+                    factorized_native_target_history and not role_aware_s1m2,
                     causal_paired_edit_memory,
                     role_fixed_native_history,
                 )
@@ -6390,6 +6477,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
             current_roles = None
             role_edit_tokens = None
             role_object_posterior_tokens = None
+            role_memory_write_tokens = None
             contact_graphs = None
             hand_role_debug = None
             hand_role_inference = None
@@ -6575,6 +6663,52 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     .float()
                     .reshape(batch_size, -1)
                 )
+                if role_aware_s1m2:
+                    (
+                        role_object_posterior_tokens,
+                        role_memory_write_tokens,
+                        role_memory_debug,
+                    ) = build_role_memory_gates(
+                        current_roles,
+                        hand_role_debug["object_posterior"].shape[-2:],
+                        contact_read_weight=(
+                            role_memory_contact_read_weight
+                        ),
+                        object_write_threshold=(
+                            role_memory_object_write_threshold
+                        ),
+                        hand_anchor=hand_role_debug["hand_union"],
+                        owner_support=hand_role_debug.get(
+                            "connected_object_support"
+                        ),
+                        evidence_reliability=torch.sqrt(
+                            hand_role_debug[
+                                "adaptive_attention_reliability"
+                            ].float()
+                            * (
+                                0.25
+                                + 0.75
+                                * hand_role_debug[
+                                    "temporal_evidence_reliability"
+                                ].float()
+                            )
+                        ).clamp(0.0, 1.0),
+                        temporal_recovery=hand_role_debug[
+                            "temporal_visibility_recovery"
+                        ],
+                        adaptive_write=True,
+                        temporal_write_consensus=True,
+                    )
+                    role_object_posterior_tokens = torch.where(
+                        role_object_posterior_tokens
+                        >= role_memory_min_read_probability,
+                        role_object_posterior_tokens,
+                        torch.zeros_like(role_object_posterior_tokens),
+                    ).reshape(batch_size, -1)
+                    role_memory_write_tokens = (
+                        role_memory_write_tokens.reshape(batch_size, -1)
+                    )
+                    hand_role_debug.update(role_memory_debug)
                 if causal_ownership_enabled:
                     owner_shape = hand_role_debug[
                         "object_posterior"
@@ -6724,6 +6858,58 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             .float()
                             .reshape(batch_size, -1)
                         )
+                        if role_aware_s1m2:
+                            (
+                                role_object_posterior_tokens,
+                                role_memory_write_tokens,
+                                role_memory_debug,
+                            ) = build_role_memory_gates(
+                                current_roles,
+                                hand_role_debug[
+                                    "object_posterior"
+                                ].shape[-2:],
+                                contact_read_weight=(
+                                    role_memory_contact_read_weight
+                                ),
+                                object_write_threshold=(
+                                    role_memory_object_write_threshold
+                                ),
+                                hand_anchor=hand_role_debug["hand_union"],
+                                owner_support=hand_role_debug.get(
+                                    "connected_object_support"
+                                ),
+                                evidence_reliability=torch.sqrt(
+                                    hand_role_debug[
+                                        "adaptive_attention_reliability"
+                                    ].float()
+                                    * (
+                                        0.25
+                                        + 0.75
+                                        * hand_role_debug[
+                                            "temporal_evidence_reliability"
+                                        ].float()
+                                    )
+                                ).clamp(0.0, 1.0),
+                                temporal_recovery=hand_role_debug[
+                                    "temporal_visibility_recovery"
+                                ],
+                                adaptive_write=True,
+                                temporal_write_consensus=True,
+                            )
+                            role_object_posterior_tokens = torch.where(
+                                role_object_posterior_tokens
+                                >= role_memory_min_read_probability,
+                                role_object_posterior_tokens,
+                                torch.zeros_like(
+                                    role_object_posterior_tokens
+                                ),
+                            ).reshape(batch_size, -1)
+                            role_memory_write_tokens = (
+                                role_memory_write_tokens.reshape(
+                                    batch_size, -1
+                                )
+                            )
+                            hand_role_debug.update(role_memory_debug)
                         if not source_flow_verified_region:
                             role_edit_tokens = (
                                 role_edit_tokens
@@ -8952,7 +9138,8 @@ class EditCausalInferencePipeline(torch.nn.Module):
                     )
                 ):
                     apply_field_update = (
-                        isinstance(
+                        role_aware_s1m2
+                        or isinstance(
                             native_owner_tracker,
                             AutomaticTransactionalOwnerTracker,
                         )
@@ -9331,6 +9518,58 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             )
                         else:
                             current_roles = hand_role_inference.roles
+                        if role_aware_s1m2:
+                            (
+                                role_object_posterior_tokens,
+                                role_memory_write_tokens,
+                                role_memory_debug,
+                            ) = build_role_memory_gates(
+                                current_roles,
+                                hand_role_debug[
+                                    "object_posterior"
+                                ].shape[-2:],
+                                contact_read_weight=(
+                                    role_memory_contact_read_weight
+                                ),
+                                object_write_threshold=(
+                                    role_memory_object_write_threshold
+                                ),
+                                hand_anchor=hand_role_debug["hand_union"],
+                                owner_support=hand_role_debug.get(
+                                    "connected_object_support"
+                                ),
+                                evidence_reliability=torch.sqrt(
+                                    hand_role_debug[
+                                        "adaptive_attention_reliability"
+                                    ].float()
+                                    * (
+                                        0.25
+                                        + 0.75
+                                        * hand_role_debug[
+                                            "temporal_evidence_reliability"
+                                        ].float()
+                                    )
+                                ).clamp(0.0, 1.0),
+                                temporal_recovery=hand_role_debug[
+                                    "temporal_visibility_recovery"
+                                ],
+                                adaptive_write=True,
+                                temporal_write_consensus=True,
+                            )
+                            role_object_posterior_tokens = torch.where(
+                                role_object_posterior_tokens
+                                >= role_memory_min_read_probability,
+                                role_object_posterior_tokens,
+                                torch.zeros_like(
+                                    role_object_posterior_tokens
+                                ),
+                            ).reshape(batch_size, -1)
+                            role_memory_write_tokens = (
+                                role_memory_write_tokens.reshape(
+                                    batch_size, -1
+                                )
+                            )
+                            hand_role_debug.update(role_memory_debug)
                         if adaptive_role_enabled and not velocity_native_owner:
                             role_edit_tokens = (
                                 hand_role_debug["object_posterior"]
@@ -9405,7 +9644,7 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             else inloop_trg_fg_mask,
                             size=(current_num_frames, height, width),
                         )
-                        if not soft_region_modulation:
+                        if not soft_region_modulation or role_aware_s1m2:
                             self._inject_masks_to_kv_cache(
                                 kv_cache_dual,
                                 trg_fg_mask_cache,
@@ -10503,18 +10742,96 @@ class EditCausalInferencePipeline(torch.nn.Module):
                         else:
                             source_suppression = torch.zeros_like(bg_mask)
                         source_residual = (v_gt - v_src)
-                        v_t = (
-                            v_trg
-                            + bg_mask
-                            * (1.0 - source_suppression)
-                            * source_residual
-                        ).to(v_trg.dtype)
+                        if role_aware_s1m2:
+                            edit_direction = v_trg.float() - v_src.float()
+                            valid_edit_direction = (
+                                edit_direction.square().sum(dim=2) > 1e-6
+                            )
+                            safe_source_residual, role_projection_debug = (
+                                remove_antagonistic_source_residual(
+                                    source_residual=source_residual,
+                                    edit_direction=edit_direction,
+                                    target_change_core=valid_edit_direction,
+                                )
+                            )
+                            v_t, role_velocity_debug = (
+                                posterior_residual_flow_router(
+                                    target_velocity=v_trg,
+                                    source_velocity=v_src,
+                                    source_reconstruction_velocity=v_gt,
+                                    roles=current_roles,
+                                    editable_source_residual=(
+                                        safe_source_residual
+                                    ),
+                                    object_residual_strength=(
+                                        role_object_residual_strength
+                                    ),
+                                    contact_residual_strength=(
+                                        role_contact_residual_strength
+                                    ),
+                                )
+                            )
+                            role_uncertainty = role_velocity_debug[
+                                "role_entropy"
+                            ].to(v_t)
+                            native_velocity = (
+                                v_trg + bg_mask * source_residual
+                            ).to(v_t.dtype)
+                            v_t = (
+                                (1.0 - role_uncertainty) * v_t
+                                + role_uncertainty * native_velocity
+                            ).to(v_trg.dtype)
+                            role_probabilities = role_velocity_debug[
+                                "role_probabilities"
+                            ]
+                            effective_residual_action = (
+                                (1.0 - role_uncertainty)
+                                * role_velocity_debug[
+                                    "residual_expert_weight"
+                                ]
+                                + role_uncertainty * bg_mask
+                            )
+                            source_suppression = (
+                                1.0 - effective_residual_action
+                            ).clamp(0.0, 1.0)
+                            if index == 0:
+                                spatial_projection_debug = {
+                                    name: (
+                                        value.squeeze(2)
+                                        if (
+                                            value.ndim == 5
+                                            and value.shape[2] == 1
+                                        )
+                                        else value
+                                    )
+                                    for name, value in (
+                                        role_projection_debug.items()
+                                    )
+                                }
+                                hand_role_debug.update({
+                                    "flow_object_probability": role_probabilities[:, :, 0],
+                                    "flow_contact_probability": role_probabilities[:, :, 1],
+                                    "flow_hand_probability": role_probabilities[:, :, 2],
+                                    "flow_background_probability": role_probabilities[:, :, 3],
+                                    "flow_role_entropy": role_velocity_debug["role_entropy"].squeeze(2),
+                                    "role_velocity_residual_action": effective_residual_action.squeeze(2),
+                                    **spatial_projection_debug,
+                                })
+                        else:
+                            effective_residual_action = (
+                                bg_mask * (1.0 - source_suppression)
+                            )
+                            v_t = (
+                                v_trg
+                                + effective_residual_action
+                                * source_residual
+                            ).to(v_trg.dtype)
                         factorized_flow_debug = {
                             "source_residual_action": bg_mask,
                             "unknown_action": torch.zeros_like(bg_mask),
                             "native_fallback_action": native_background_action,
                             "effective_source_residual_action": (
-                                bg_mask * (1.0 - source_suppression)
+                                effective_residual_action
                             ),
                             "source_suppression": source_suppression,
                             "paired_memory_source_suppression_action": torch.zeros_like(bg_mask),
@@ -10531,7 +10848,9 @@ class EditCausalInferencePipeline(torch.nn.Module):
                             ] = torch.zeros_like(bg_mask)
                         if index == 0:
                             region_coverage = (
-                                region_confidence.mean().item()
+                                role_object_posterior_tokens.mean().item()
+                                if role_aware_s1m2
+                                else region_confidence.mean().item()
                                 if region_posterior is not None
                                 else 0.0
                             )
@@ -10539,16 +10858,45 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 source_suppression.mean().item()
                             )
                             effective_residual = (
-                                bg_mask * (1.0 - source_suppression)
+                                effective_residual_action
                             ).mean().item()
                             print(
-                                "SOFT_REGION_MODULATION "
+                                (
+                                    "ROLE_AWARE_S1M2 "
+                                    if role_aware_s1m2
+                                    else "SOFT_REGION_MODULATION "
+                                )
+                                +
                                 f"block={current_start_frame // self.num_frame_per_block} "
                                 f"blend_strength={soft_region_blend_strength:.2f} "
                                 f"region_coverage={region_coverage:.4f} "
                                 f"bg_mask_mean={bg_mask.mean().item():.4f} "
                                 f"source_suppression={suppression_mean:.4f} "
                                 f"effective_residual={effective_residual:.4f}"
+                                + (
+                                    " memory_read="
+                                    f"{role_object_posterior_tokens.mean().item():.4f} "
+                                    "memory_write="
+                                    f"{role_memory_write_tokens.float().mean().item():.4f} "
+                                    "memory_write_raw="
+                                    f"{hand_role_debug['role_memory_raw_write_gate'].mean().item():.4f} "
+                                    "memory_write_preconsensus="
+                                    f"{hand_role_debug['role_memory_preconsensus_write_gate'].mean().item():.4f} "
+                                    "connected_support="
+                                    f"{hand_role_debug['role_memory_connected_support'].mean().item():.4f} "
+                                    "area_budget="
+                                    f"{hand_role_debug['adaptive_owner_area_budget'].mean().item():.4f} "
+                                    "object="
+                                    f"{current_roles.object.mean().item():.4f} "
+                                    "contact="
+                                    f"{current_roles.boundary.mean().item():.4f} "
+                                    "hand="
+                                    f"{current_roles.hand.mean().item():.4f} "
+                                    "background="
+                                    f"{current_roles.background.mean().item():.4f}"
+                                    if role_aware_s1m2
+                                    else ""
+                                )
                             )
                         if soft_region_modulation and region_posterior is not None:
                             blender_rate_scalar = (
@@ -10556,8 +10904,12 @@ class EditCausalInferencePipeline(torch.nn.Module):
                                 - float(timestep_next)
                                 ** blend_power
                             )
-                            region_flat = region_posterior.reshape(
-                                batch_size, -1
+                            region_flat = (
+                                role_object_posterior_tokens
+                                if role_aware_s1m2
+                                else region_posterior.reshape(
+                                    batch_size, -1
+                                )
                             ).clamp(0.0, 1.0)
                             spatial_blender = (
                                 blender_rate_scalar
@@ -11619,12 +11971,28 @@ class EditCausalInferencePipeline(torch.nn.Module):
                 immutable_delta_v_bank
                 and not immutable_delta_v_state.is_frozen
             ):
-                freeze_diagnostics = immutable_delta_v_state.freeze(
-                    source_kv_cache=kv_cache_src,
-                    target_kv_cache=kv_cache_trg,
-                    source_keys=immutable_delta_v_source_keys,
-                    support=src_fg_mask_bin.bool(),
+                freeze_support = (
+                    role_memory_write_tokens
+                    if role_aware_s1m2
+                    else src_fg_mask_bin.bool()
                 )
+                if not bool(freeze_support.any()):
+                    print(
+                        "IMMUTABLE_DELTA_V_FREEZE "
+                        f"block={block_index} state=deferred "
+                        "reason=no_high_confidence_object_core"
+                    )
+                    freeze_diagnostics = None
+                else:
+                    freeze_diagnostics = immutable_delta_v_state.freeze(
+                        source_kv_cache=kv_cache_src,
+                        target_kv_cache=kv_cache_trg,
+                        source_keys=immutable_delta_v_source_keys,
+                        support=freeze_support,
+                    )
+            else:
+                freeze_diagnostics = None
+            if freeze_diagnostics is not None:
                 print(
                     "IMMUTABLE_DELTA_V_FREEZE "
                     f"block={block_index} "
@@ -12950,10 +13318,27 @@ class EditCausalInferencePipeline(torch.nn.Module):
         )
         for name, value in debug.items():
             strip = value[0].detach().float().cpu().numpy()
-            strip = np.concatenate(
-                list((strip * 255).clip(0, 255).astype(np.uint8)),
-                axis=0,
-            )
+            # Most diagnostics are [B,T,H,W], while vector-field energy
+            # diagnostics can be [B,T,C,H,W].  Reduce feature channels for
+            # visualization but retain the full tensor in the NPZ above.
+            if strip.ndim >= 4:
+                channel_axes = tuple(range(1, strip.ndim - 2))
+                strip = strip.mean(axis=channel_axes)
+            if strip.ndim == 3:
+                strip = np.concatenate(
+                    list(
+                        (strip * 255).clip(0, 255).astype(np.uint8)
+                    ),
+                    axis=0,
+                )
+            elif strip.ndim == 2:
+                strip = (
+                    strip * 255
+                ).clip(0, 255).astype(np.uint8)
+            else:
+                # Scalar and non-spatial diagnostics remain available in
+                # the compressed NPZ; they do not have a meaningful image.
+                continue
             Image.fromarray(strip, mode="L").resize(
                 (832, strip.shape[0] * 16),
                 Image.Resampling.NEAREST,

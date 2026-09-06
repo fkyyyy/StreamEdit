@@ -96,6 +96,41 @@ def test_temporal_weight_follows_query_confidence():
     assert high.item() > low.item()
 
 
+def test_owner_extent_budget_is_reliability_adaptive_and_recovery_stable():
+    controller = adaptive.AdaptiveOwnerExtentController(
+        area_momentum=0.0,
+    )
+    shape = (1, 3, 10, 10)
+    seed = torch.zeros(shape)
+    seed[:, :, 4:5, 3:5] = 1.0
+    hand = torch.zeros(shape)
+    hand[:, :, 4:5, 2:4] = 1.0
+    proposal = torch.zeros(shape, dtype=torch.bool)
+    proposal[:, 0, 3:6, 2:7] = True
+    proposal[:, 1, 2:7, 1:9] = True
+    proposal[:, 2, 1:8, 1:10] = True
+    attention = torch.tensor([0.0, 1.0, 0.0]).reshape(1, 3, 1, 1)
+    temporal = torch.ones(1, 3, 1, 1)
+    visible = torch.ones(1, 3, 1, 1, dtype=torch.bool)
+    recovery = torch.zeros_like(visible)
+    recovery[:, 2] = True
+
+    budget = controller.budget(
+        seed=seed,
+        hand_probability=hand,
+        proposal_support=proposal,
+        attention_reliability=attention,
+        temporal_reliability=temporal,
+        observed_visible=visible,
+        temporal_recovery=recovery,
+        maximum_budget=torch.full((1, 3, 1, 1), 0.5),
+    )
+
+    assert budget[0, 1].item() > budget[0, 0].item()
+    assert torch.equal(budget[:, 2], budget[:, 1])
+    assert torch.equal(controller.state.area_ema, budget[:, 1, 0, 0])
+
+
 def test_posterior_threshold_follows_attention_reliability():
     posterior = torch.linspace(0.05, 0.95, 16).reshape(
         1, 1, 4, 4
