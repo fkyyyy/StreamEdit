@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 DATA_PATH="${DATA_PATH:-/root/CASE8/01_ball_ivory_stress_0da77f69400be699d452104ef5fe301c.mp4}"
-HAND_MASK="${HAND_MASK:-/root/CASE8/01_ball_ivory_stress_handmask.mp4}"
+HAND_MASK="${HAND_MASK:-$SCRIPT_DIR/hand_mask_ball.mp4}"
 OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/ball_S1M2_basketball}"
 OUTPUT_NAME="${OUTPUT_NAME:-ball-S1M2-ivory-to-basketball.mp4}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
