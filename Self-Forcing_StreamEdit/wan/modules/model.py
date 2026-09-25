@@ -7,6 +7,10 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 from einops import repeat
 
+from utils.mechanism_attention_diagnostics import (
+    maybe_capture_cross_attention,
+)
+
 from .attention import flash_attention
 
 __all__ = ['WanModel']
@@ -158,7 +162,14 @@ class WanSelfAttention(nn.Module):
 
 class WanT2VCrossAttention(WanSelfAttention):
 
-    def forward(self, x, context, context_lens, crossattn_cache=None):
+    def forward(
+        self,
+        x,
+        context,
+        context_lens,
+        crossattn_cache=None,
+        layer_index=None,
+    ):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
@@ -184,6 +195,14 @@ class WanT2VCrossAttention(WanSelfAttention):
         else:
             k = self.norm_k(self.k(context)).view(b, -1, n, d)
             v = self.v(context).view(b, -1, n, d)
+
+        maybe_capture_cross_attention(
+            crossattn_cache,
+            q,
+            k,
+            layer_index=layer_index,
+            key_lens=context_lens,
+        )
 
         # compute attention
         if crossattn_cache is not None and \
@@ -384,7 +403,14 @@ class WanI2VCrossAttention(WanSelfAttention):
         self.norm_k_img = WanRMSNorm(
             dim, eps=eps) if qk_norm else nn.Identity()
 
-    def forward(self, x, context, context_lens):
+    def forward(
+        self,
+        x,
+        context,
+        context_lens,
+        crossattn_cache=None,
+        layer_index=None,
+    ):
         r"""
         Args:
             x(Tensor): Shape [B, L1, C]
@@ -401,6 +427,13 @@ class WanI2VCrossAttention(WanSelfAttention):
         v = self.v(context).view(b, -1, n, d)
         k_img = self.norm_k_img(self.k_img(context_img)).view(b, -1, n, d)
         v_img = self.v_img(context_img).view(b, -1, n, d)
+        maybe_capture_cross_attention(
+            crossattn_cache,
+            q,
+            k,
+            layer_index=layer_index,
+            key_lens=context_lens,
+        )
         img_x = flash_attention(q, k_img, v_img, k_lens=None)
         # compute attention
         x = flash_attention(q, k, v, k_lens=context_lens)

@@ -61,7 +61,7 @@ class ImmutableDeltaVBank:
         source_keys: Mapping[int, torch.Tensor],
         support: torch.Tensor,
     ) -> Dict[str, torch.Tensor]:
-        """Freeze the first clean block; a second write is forbidden."""
+        """Freeze the first eligible clean block; later writes are forbidden."""
         if self.is_frozen:
             raise RuntimeError("M1 immutable delta-V bank is already frozen")
         if support.ndim != 2:
@@ -72,7 +72,7 @@ class ImmutableDeltaVBank:
         max_slots = int(support_counts.max().item())
         if max_slots <= 0:
             raise RuntimeError(
-                "M1 first-block automatic SOG support is empty"
+                "M1 first-eligible-block support is empty"
             )
         states: Dict[int, ImmutableDeltaVLayerState] = {}
         for layer in self.layers:

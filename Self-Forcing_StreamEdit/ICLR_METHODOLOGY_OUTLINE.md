@@ -4,7 +4,7 @@
 >
 > 证据状态：作者反馈接线后的结果视觉效果不错，并已完成编辑数据用于机械臂训练和真机测试。本文档尚未据此核验视频、日志、定量表格或机器人实验协议，因此不写提升数值，也不把初步观察升级为已证明的机制。
 >
-> 版本边界：本大纲描述在 `7463ea6` 基础上、经过 native-attention 接线修复的完整设计，即 `s1m2_attention_mode=full`。撰写时接线代码、四组脚本和测试仍是本地未提交改动；本次文档提交不包含它们。仅检出本次文档提交不能复现修复版完整系统。正式投稿必须补充实际实验代码提交号、配置和日志，不得将旧默认配置的结果直接归因于 M2。
+> 版本边界：本大纲描述经过 native-attention 接线修复的完整设计，即 `s1m2_attention_mode=full`。当前工作树已包含该接线、四组消融脚本和调用计数测试；在形成正式实验提交前，它们仍属于未提交改动。正式投稿必须补充实际实验代码提交号、配置和新日志，不得将旧默认配置的结果直接归因于 M2。
 
 ## 0. 严格审稿人的结论与贡献边界
 
@@ -144,25 +144,42 @@ $$
 
 ### 4.3 角色控制与不确定性回退
 
-$$
-v_{\mathrm{role}}=v^t_\tau+
-(\alpha_o q^o+\alpha_c q^c)r_{\mathrm{safe}}+(q^h+q^b)r.
-$$
-
-默认 $\alpha_o=0.10$、$\alpha_c=0.35$：物体核心较少保留源残差，交互界面保留更强约束，手部与背景使用完整源残差。这里依旧以 $v^t_\tau$ 为基底，因此不等价于像素级精确复制源手部或背景。
-
-保留基座的动态背景策略：
+先定义原生 target-source 响应的背景置信度：
 
 $$
-B=1-\operatorname{MinMax}(\operatorname{Mean}_c|v^t_\tau-v^s_\tau|),\qquad
-v_{\mathrm{native}}=v^t_\tau+Br,
+B=1-\operatorname{MinMax}(\operatorname{Mean}_c|v^t_\tau-v^s_\tau|).
+$$
+
+该门控同时作用于背景源残差与背景端点锚定。角色残差路由为：
+
+$$
+\widetilde v_{\mathrm{role}}=v^t_\tau+
+(\alpha_o q^o+\alpha_c q^c)r_{\mathrm{safe}}+(q^h+q^bB)r.
+$$
+
+再令 $a=\lambda_b q^b B$，只对“角色为背景且目标响应较弱”的 token 执行有界源端点锚定：
+
+$$
+v_{\mathrm{role}}=(1-a)\widetilde v_{\mathrm{role}}+a v^{s,*}.
+$$
+
+默认 $\alpha_o=0.10$、$\alpha_c=0.35$、$\lambda_b=0.50$。物体核心较少保留源残差，交互界面保留更强约束；背景锚定只消除一部分全局目标漂移。$\lambda_b=0$ 只关闭端点锚定，背景残差仍受 $B$ 门控。$\lambda_b=1$、$q^b=1$ 且 $B=1$ 时严格回到源重建速度。因新增物体轮廓通常产生较强的 target-source 响应，$B$ 会让背景残差和端点锚定同时在这些位置弃权，即使角色后验暂时误判为背景也不应逐步抹除编辑。手部残差不受 $B$ 门控且不执行精确端点锚定，因为输入 hand mask 可能覆盖被操纵物体。该操作发生在 latent velocity 空间，不能宣称像素级精确复制背景。
+
+不确定性回退沿用基座的动态背景权重 $B$，再使用同一个有界背景锚定：
+
+$$
+\widetilde v_{\mathrm{native}}=v^t_\tau+Br,
+$$
+
+$$
+v_{\mathrm{native}}=(1-a)\widetilde v_{\mathrm{native}}+a v^{s,*},
 $$
 
 $$
 v_{\mathrm{final}}=(1-u)v_{\mathrm{role}}+u v_{\mathrm{native}}.
 $$
 
-源重建残差在角色明确时按角色使用，不确定时回到基座，而不是强迫硬分类。当前 clean latent 预测为 $\widehat x^t=x^t_\tau-\tau v_{\mathrm{final}}$，后续沿用基座重新加噪步骤，不要擅自写成不同的 ODE 积分器。
+角色明确时仅由背景概率执行有界源端点锚定，并在物体与接触区域叠加过滤后的源残差；不确定时先回到基座动态残差路由，再应用同一背景锚定，而不是强迫硬分类。当前 clean latent 预测为 $\widehat x^t=x^t_\tau-\tau v_{\mathrm{final}}$，后续沿用基座重新加噪步骤，不要擅自写成不同的 ODE 积分器。
 
 ### 4.4 空间 Q/K 混合：同一权限的注意力接口
 
@@ -204,9 +221,24 @@ $$
 
 这不是跨所有 blocks 维护的持久两帧确认，也不是 feature warping。允许满足资格条件的混合 token 写入，不能笼统写成“所有 contact probability 非零的位置都禁止写入”。
 
+完整 M2 另构造一组只服务于 canonical identity 的稠密 gate，而不改变上述普通 memory gate。令 $O_i$ 为 clean-source causal owner 的验证支持，$x_i$ 为 persistent-hand 硬排除，$p_i^{\mathrm{extent}}=q_i^o+q_i^c$，并定义角色准入 $A_i=[p_i^{\mathrm{extent}}\ge0.20]\land[p_i^{\mathrm{extent}}\ge q_i^g]$，则一格局部扩展为：
+
+$$
+B_i=\left(\operatorname{Dilate}_1(O)_i\setminus O_i\right)\land A_i.
+$$
+
+canonical 写入支持为：
+
+$$
+W_i^{\mathrm{canonical}}=((O_i\land A_i)\lor B_i)
+\land[q_i^h\le0.50]\land[\neg x_i].
+$$
+
+其连续读取 gate 取角色读取置信与经 $A_i$ 过滤的 causal-owner confidence 的较大者，再乘 $A_i(1-q_i^h)(1-x_i)$。这样盘沿等局部结构不再被极稀疏 object core 丢掉，同时 persistent hand、背景占优和远离 owner 的不连通区域仍无读写权限。这里的 `boundary` 仍是 role overlap，不宣称为真实几何轮廓。
+
 ### 5.2 冻结的源地址外观残差
 
-每块去噪完成后进行 clean target commit。第一次出现非空合格支持时，对选定层存储：
+每块去噪完成后进行 clean target commit。普通配置使用上一节的高精度 core；启用 canonical identity commit 时使用 $W^{\mathrm{canonical}}$。第一次出现非空合格支持时，对选定层存储：
 
 $$
 \mathcal M^\ell=\{(K_{s,j}^{\ell,\mathrm{clean}},\Delta V_j^\ell):j\in W\},\qquad
@@ -255,7 +287,20 @@ $$
 
 “Closed-loop”仅指响应差反馈，不证明最终视频误差单调下降。$e$ 是检索到的 value 响应差，加入的是 attention output，不能把代数诊断量 $e-\lambda g c\bar e$ 直接称为重新执行模型后测得的真实误差收敛。
 
-M2 校正算子本身不修改原生 attention softmax 分母及 KV payload，但完整系统仍有空间 Q/K 混合、原生源背景注入和 clean target history 更新，不能笼统说“整个 attention/KV 不变”。
+上述 denoising-time M2 校正算子本身不修改原生 attention softmax 分母及 KV payload，但完整方法还包含下一节的 owner-only clean-target V commit；因此只能声称 target K、非 owner V 和未匹配 V 不变，不能笼统说“整个 attention/KV 不变”。
+
+### 5.5 Canonical identity 的 clean-target V commit
+
+仅在 bank 已冻结后的 block 中，正常 clean target forward 先写入当前原生 K/V。随后对每个 M2 层，以当前 clean-source Q/K 检索 frozen canonical delta，并从当前 clean target/source V 检索当前 delta，复用 5.3–5.4 的 top-k、阈值、双边匹配和 RMS 限幅：
+
+$$
+\widetilde V_{t,i}^{\mathrm{clean}}
+=V_{t,i}^{\mathrm{clean}}
++\lambda_{\mathrm{commit}}a_i g_i^{\mathrm{canonical}}c_i\bar e_i,
+\qquad \lambda_{\mathrm{commit}}=0.50.
+$$
+
+修正后的 owner V 被写回刚生成的 target cache，因此下一 block 的 native target history 读取的是经过 canonical 响应重基的状态，而不是让每个 block 的新生成结果无约束地重新定义物体身份。当前 target K 保持原样；非 owner、低相似度、persistent-hand 和背景 token 通过 abstention 保持 bit-exact。该操作不是复制第一块完整 target K/V，也不把第一块姿态或背景拼入后续序列；它只约束 source-addressed target-minus-source value response。该设计降低跨 block 的盘沿、纹理和颜色身份漂移，但仍依赖首个合格 canonical delta 的质量，并不保证新视角下的身份完全不变。
 
 ## 6. 3.5 Editing for Robotic Learning
 
@@ -297,6 +342,8 @@ For each causal video block:
         Predict clean target and follow the backbone re-noising schedule
         Store spatial blending rates for the subsequent forward
     Commit clean target KV
+    If canonical M2 enabled and bank frozen:
+        materialize matched owner-only canonical response into current target V
     If bank empty and write support nonempty: freeze source keys and clean target–source ΔV
 Decode edited video
 ```
@@ -314,10 +361,10 @@ Decode edited video
 
 ### 8.2 当前四组实验回答什么
 
-| 组别 | 固定基础 | M2 | 空间 Q/K | 回答的问题 |
+| 组别 | 固定基础 | M2 response + canonical V commit | 空间 Q/K | 回答的问题 |
 |---|---|---|---|---|
 | A: legacy | 角色、S1、写入策略、基座 | 关 | 关 | 旧实际路径表现 |
-| B: m2 | 同 A | 开 | 关 | M2 的增量效果 |
+| B: m2 | 同 A | 开 | 关 | M2 identity 通道的增量效果 |
 | C: spatial | 同 A | 关 | 开 | 空间混合的增量效果 |
 | D: full | 同 A | 开 | 开 | 完整系统与交互效应 |
 
@@ -369,17 +416,17 @@ A/B/C/D 本身不能证明全部角色模块的新意。还需基座、同角色
 | 手部证据投影 | `pipeline/mask_alignment.py` / `project_hand_evidence_to_causal_latents` |
 | 角色先验与速度细化 | `pipeline/hand_role_inference.py` / `HandRoleInferencer` |
 | 在线可靠度与面积预算 | `pipeline/adaptive_role_calibrator.py` / `AdaptiveRoleCalibrator`, `AdaptiveOwnerExtentController` |
-| 角色残差与读写权限 | `pipeline/role_router.py` / `PosteriorResidualFlowRouter`, `build_role_memory_gates` |
+| 角色残差与读写权限 | `pipeline/role_router.py` / `PosteriorResidualFlowRouter`, `build_role_memory_gates`, `build_canonical_m2_gates` |
 | 残差方向过滤 | `pipeline/appearance_leakage.py` / `remove_antagonistic_source_residual` |
 | 独立 owner 状态 | `pipeline/causal_ownership.py` / `CausalObjectOwnershipTracker` |
 | 一次冻结的 bank | `pipeline/immutable_delta_v_bank.py` / `ImmutableDeltaVBank` |
-| M2 数值算子 | `wan/modules/attention.py` / `closed_loop_delta_v_memory_attention` |
+| M2 数值算子 | `wan/modules/attention.py` / `closed_loop_delta_v_memory_attention`, `materialize_closed_loop_delta_v_value` |
 | 修复后的实际 attention 接线 | `wan/modules/causal_model.py` / `CausalWanSelfAttention.forward` |
 | 时序编排、S1、commit 和调用诊断 | `pipeline/edit_causal_inference.py` / `rollout_inference`, `inference` |
 | 实验入口 | `run_cook_S1M2_ablation.sh`, `run_cook_S1M2_A_legacy.sh` 至 `run_cook_S1M2_D_full.sh` |
 | 接线与脚本测试 | `tests/test_s1m2_attention_modes.py` |
 
-当前默认复现参数：15 步、seed 0、query/M2 层 8/12/16/20、$\alpha_o=0.10$、$\alpha_c=0.35$、读取 contact 权重 0.50、读取下限 0.20、物体写入资格 0.50、M2 strength 0.20、匹配下限 0.35、top-k 8、误差比上限 1.0、覆盖率上限 0.18。它们是默认值，不代表已完成跨场景共享参数验证；最终 schedule 以 scheduler 实际变换后为准。
+当前默认复现参数：15 步、seed 0、query/M2 层 8/12/16/20、$\alpha_o=0.10$、$\alpha_c=0.35$、读取 contact 权重 0.50、读取下限 0.20、物体写入资格 0.50、M2 attention strength 0.20、canonical commit strength 0.50、匹配下限 0.35、top-k 8、误差比上限 1.0、canonical boundary radius 1、role extent 下限 0.20、覆盖率上限 0.18。它们是默认值，不代表已完成跨场景共享参数验证；最终 schedule 以 scheduler 实际变换后为准。
 
 ## 10. 最终写作禁区与完成条件
 

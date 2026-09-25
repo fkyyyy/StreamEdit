@@ -13,10 +13,12 @@ from wan.modules.attention import (
     build_factorized_history_read_mask,
     build_target_owned_source_background_mask,
     closed_loop_delta_v_memory_attention,
+    blend_s1m2_spatial_qk,
     fuse_aligned_memory,
     fuse_factorized_aligned_memory,
     project_source_addressed_target_value,
     route_source_background_kv,
+    resolve_s1m2_attention_features,
     resolve_target_identity_correction_strength,
     immutable_canonical_anchor_attention_delta,
     immutable_delta_v_memory_attention,
@@ -47,6 +49,10 @@ import torch.nn.functional as F
 import torch
 import math
 import torch.distributed as dist
+
+from utils.mechanism_attention_diagnostics import (
+    maybe_capture_self_attention,
+)
 
 # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
 # see https://github.com/pytorch/pytorch/issues/133254
@@ -430,6 +436,12 @@ class CausalWanSelfAttention(nn.Module):
                 x = attention(roped_query, attn_key, attn_value)
             else:
                 # init
+                if b % 2 != 0:
+                    raise ValueError(
+                        "Editing attention expects equally sized source and "
+                        "target batches"
+                    )
+                branch_batch_size = b // 2
                 src_query, trg_query = roped_query.chunk(2, dim=0)
                 raw_src_query, raw_trg_query = q.chunk(2, dim=0)
                 src_key, trg_key = attn_key.chunk(2, dim=0)
@@ -701,7 +713,7 @@ class CausalWanSelfAttention(nn.Module):
                 x_list = [
                     attention(src_query, src_key, src_value)   # source
                 ]
-                for b_idx in range(b // 2):
+                for b_idx in range(branch_batch_size):
                     factorized_bayes_kv = all(
                         kv_cache.get(name) is not None
                         for name in (
@@ -716,6 +728,15 @@ class CausalWanSelfAttention(nn.Module):
                         )
                     )
                     if factorized_bayes_kv:
+                        s1m2_attention_mode = shared_dict.get(
+                            "s1m2_attention_mode", "legacy"
+                        )
+                        (
+                            s1m2_spatial_enabled,
+                            s1m2_m2_enabled,
+                        ) = resolve_s1m2_attention_features(
+                            s1m2_attention_mode
+                        )
                         history_actions = {
                             name: kv_cache[f"cached_{name}"][
                                 b_idx, attn_seq_slice
@@ -981,6 +1002,11 @@ class CausalWanSelfAttention(nn.Module):
                         )
                         native_key_list = [native_prev_key]
                         native_value_list = [trg_prev_value[b_idx]]
+                        native_key_segments = [{
+                            "name": "target_history",
+                            "start": 0,
+                            "end": int(native_prev_key.shape[0]),
+                        }]
                         if kv_cache["shared_dict"][
                             "current_timestep_index"
                         ] > kv_cache["shared_dict"][
@@ -1023,13 +1049,87 @@ class CausalWanSelfAttention(nn.Module):
                             )
                             if source_bg_pair is not None:
                                 source_bg_key, source_bg_value = source_bg_pair
+                                source_bg_start = sum(
+                                    item.shape[0] for item in native_key_list
+                                )
                                 native_key_list.append(source_bg_key)
                                 native_value_list.append(source_bg_value)
-                        native_key_list.append(
-                            trg_current_key[b_idx] * blender_rate
-                            + src_current_key[b_idx]
-                            * (1.0 - blender_rate)
+                                native_key_segments.append({
+                                    "name": "current_source_background",
+                                    "start": source_bg_start,
+                                    "end": (
+                                        source_bg_start
+                                        + int(source_bg_key.shape[0])
+                                    ),
+                                })
+                        native_spatial_blender = (
+                            shared_dict.get("spatial_blender_rate")
+                            if s1m2_spatial_enabled
+                            else None
                         )
+                        if native_spatial_blender is not None:
+                            if native_spatial_blender.shape != (
+                                branch_batch_size, num_new_tokens
+                            ):
+                                raise ValueError(
+                                    "S1+M2 spatial blender must align with "
+                                    "the current target tokens"
+                                )
+                            native_query, native_current_key = (
+                                blend_s1m2_spatial_qk(
+                                    trg_query[b_idx],
+                                    src_query[b_idx],
+                                    trg_current_key[b_idx],
+                                    src_current_key[b_idx],
+                                    native_spatial_blender[b_idx],
+                                )
+                            )
+                        else:
+                            native_current_blender = blender_rate
+                            native_query = (
+                                trg_query[b_idx] * native_current_blender
+                                + src_query[b_idx]
+                                * (1.0 - native_current_blender)
+                            )
+                            native_current_key = (
+                                trg_current_key[b_idx]
+                                * native_current_blender
+                                + src_current_key[b_idx]
+                                * (1.0 - native_current_blender)
+                            )
+                        if shared_dict.get(
+                            "responsibility_diagnostics_enabled", False
+                        ):
+                            if native_spatial_blender is None:
+                                actual_blender = torch.full(
+                                    (1, num_new_tokens),
+                                    float(native_current_blender),
+                                    device=trg_query.device,
+                                    dtype=torch.float32,
+                                )
+                            else:
+                                actual_blender = native_spatial_blender[
+                                    b_idx:b_idx + 1
+                                ].detach().float()
+                            shared_dict.setdefault(
+                                "responsibility_spatial_blender_maps", {}
+                            ).setdefault(layer_index, []).append(
+                                actual_blender
+                            )
+                        current_target_start = sum(
+                            item.shape[0] for item in native_key_list
+                        )
+                        native_key_list.append(native_current_key)
+                        current_target_segment = (
+                            current_target_start,
+                            current_target_start
+                            + int(native_current_key.shape[0]),
+                        )
+                        native_key_segments.append({
+                            "name": "current_target",
+                            "start": current_target_segment[0],
+                            "end": current_target_segment[1],
+                        })
                         # In query-gated mode this first pass must remain
                         # genuinely native.  A masked V write is still
                         # globally readable by self-attention, so using the
@@ -1042,15 +1142,273 @@ class CausalWanSelfAttention(nn.Module):
                                 else attention_target_value
                             ).squeeze(0)
                         )
-                        native_query = (
-                            trg_query[b_idx] * blender_rate
-                            + src_query[b_idx] * (1.0 - blender_rate)
-                        )
+                        native_key = torch.cat(native_key_list, dim=0)
                         native_output = attention(
                             native_query.unsqueeze(0),
-                            torch.cat(native_key_list, dim=0).unsqueeze(0),
+                            native_key.unsqueeze(0),
                             torch.cat(native_value_list, dim=0).unsqueeze(0),
                         )
+                        maybe_capture_self_attention(
+                            kv_cache,
+                            native_query,
+                            native_key,
+                            layer_index=layer_index,
+                            batch_index=b_idx,
+                            current_target_segment=current_target_segment,
+                            key_segments=native_key_segments,
+                            path_name="factorized_native_output",
+                        )
+                        s1m2_call_counts = shared_dict.get(
+                            "s1m2_attention_call_counts"
+                        )
+                        if s1m2_call_counts is not None:
+                            s1m2_call_counts["native"] += 1
+                            if s1m2_spatial_enabled:
+                                s1m2_call_counts[
+                                    "spatial_requested"
+                                ] += 1
+                            if native_spatial_blender is not None:
+                                s1m2_call_counts["spatial"] += 1
+                            elif s1m2_spatial_enabled:
+                                s1m2_call_counts[
+                                    "spatial_missing_rate"
+                                ] += 1
+                        immutable_delta_v_bank = shared_dict.get(
+                            "immutable_delta_v_bank"
+                        )
+                        s1m2_m2_layer_requested = (
+                            s1m2_m2_enabled
+                            and layer_index in shared_dict.get(
+                                "immutable_delta_v_layers", ()
+                            )
+                        )
+                        if (
+                            s1m2_call_counts is not None
+                            and s1m2_m2_layer_requested
+                        ):
+                            s1m2_call_counts["m2_requested"] += 1
+                        if (
+                            s1m2_m2_enabled
+                            and immutable_delta_v_bank is not None
+                            and layer_index in immutable_delta_v_bank
+                        ):
+                            if not shared_dict.get(
+                                "closed_loop_delta_v_error", False
+                            ):
+                                raise RuntimeError(
+                                    "S1+M2 M2 mode requires closed-loop "
+                                    "delta-V error correction"
+                                )
+                            source_query_by_layer = shared_dict.get(
+                                "immutable_delta_v_source_query", {}
+                            )
+                            source_key_by_layer = shared_dict.get(
+                                "immutable_delta_v_source_key", {}
+                            )
+                            current_source_query = (
+                                source_query_by_layer.get(layer_index)
+                            )
+                            current_source_key = source_key_by_layer.get(
+                                layer_index
+                            )
+                            if current_source_query is None:
+                                raise RuntimeError(
+                                    "M2 is missing the current clean-source "
+                                    f"query at layer {layer_index}"
+                                )
+                            if current_source_key is None:
+                                raise RuntimeError(
+                                    "M2 is missing the current clean-source "
+                                    f"key at layer {layer_index}"
+                                )
+                            expected_current_shape = (
+                                branch_batch_size,
+                                num_new_tokens,
+                                self.num_heads,
+                                self.head_dim,
+                            )
+                            if (
+                                current_source_query.shape
+                                != expected_current_shape
+                                or current_source_key.shape
+                                != expected_current_shape
+                            ):
+                                raise ValueError(
+                                    "M2 clean-source Q/K must align with "
+                                    "the source/target branch batch and "
+                                    "current tokens"
+                                )
+                            memory_state = immutable_delta_v_bank[
+                                layer_index
+                            ]
+                            role_read_gate = kv_cache.get(
+                                "current_role_memory_read_gate"
+                            )
+                            if role_read_gate is None:
+                                role_read_gate = kv_cache.get(
+                                    "current_role_object_posterior"
+                                )
+                            if role_read_gate is not None:
+                                owner_gate = role_read_gate[
+                                    b_idx:b_idx + 1
+                                ].float()
+                            else:
+                                owner_gate = kv_cache[
+                                    "current_src_fg_mask"
+                                ][b_idx:b_idx + 1].float()
+                            if owner_gate.shape != (1, num_new_tokens):
+                                raise ValueError(
+                                    "M2 role read gate must align with the "
+                                    "current target tokens"
+                                )
+                            if (
+                                memory_state["source_key"].shape[0]
+                                != branch_batch_size
+                                or memory_state["delta_value"].shape[0]
+                                != branch_batch_size
+                                or memory_state["support"].shape[0]
+                                != branch_batch_size
+                            ):
+                                raise ValueError(
+                                    "M2 immutable bank must align with the "
+                                    "source/target branch batch"
+                                )
+                            memory_result = (
+                                closed_loop_delta_v_memory_attention(
+                                    native_output=native_output,
+                                    current_source_query=(
+                                        current_source_query[
+                                            b_idx:b_idx + 1
+                                        ].to(
+                                            device=native_output.device,
+                                            dtype=native_output.dtype,
+                                        )
+                                    ),
+                                    current_source_key=(
+                                        current_source_key[
+                                            b_idx:b_idx + 1
+                                        ].to(
+                                            device=native_output.device,
+                                            dtype=native_output.dtype,
+                                        )
+                                    ),
+                                    current_source_value=(
+                                        src_current_value[
+                                            b_idx:b_idx + 1
+                                        ]
+                                    ),
+                                    current_target_value=(
+                                        trg_current_value[
+                                            b_idx:b_idx + 1
+                                        ]
+                                    ),
+                                    canonical_source_key=(
+                                        memory_state["source_key"][
+                                            b_idx:b_idx + 1
+                                        ].to(
+                                            device=native_output.device,
+                                            dtype=native_output.dtype,
+                                        )
+                                    ),
+                                    canonical_delta_value=(
+                                        memory_state["delta_value"][
+                                            b_idx:b_idx + 1
+                                        ].to(
+                                            device=native_output.device,
+                                            dtype=native_output.dtype,
+                                        )
+                                    ),
+                                    canonical_support=(
+                                        memory_state["support"][
+                                            b_idx:b_idx + 1
+                                        ].to(device=native_output.device)
+                                    ),
+                                    owner_gate=owner_gate,
+                                    topk=int(
+                                        shared_dict[
+                                            "immutable_delta_v_topk"
+                                        ]
+                                    ),
+                                    min_similarity=float(
+                                        shared_dict[
+                                            "immutable_delta_v_min_similarity"
+                                        ]
+                                    ),
+                                    strength=float(
+                                        shared_dict[
+                                            "immutable_delta_v_strength"
+                                        ]
+                                    ),
+                                    max_error_ratio=float(
+                                        shared_dict[
+                                            "closed_loop_delta_v_max_error_ratio"
+                                        ]
+                                    ),
+                                    return_maps=bool(
+                                        shared_dict.get(
+                                            "responsibility_diagnostics_enabled",
+                                            False,
+                                        )
+                                    ),
+                                )
+                            )
+                            if shared_dict.get(
+                                "responsibility_diagnostics_enabled", False
+                            ):
+                                (
+                                    native_output,
+                                    memory_diagnostics,
+                                    memory_maps,
+                                ) = memory_result
+                                shared_dict.setdefault(
+                                    "responsibility_m2_maps", {}
+                                ).setdefault(layer_index, []).append(
+                                    memory_maps
+                                )
+                            else:
+                                native_output, memory_diagnostics = (
+                                    memory_result
+                                )
+                            memory_diagnostics["layer"] = torch.tensor(
+                                float(layer_index),
+                                device=native_output.device,
+                            )
+                            shared_dict.setdefault(
+                                "immutable_delta_v_diagnostics", []
+                            ).append(memory_diagnostics)
+                            if s1m2_call_counts is not None:
+                                s1m2_call_counts["m2"] += 1
+                                if float(
+                                    memory_diagnostics[
+                                        "matched_query_fraction"
+                                    ].item()
+                                ) == 0.0:
+                                    s1m2_call_counts[
+                                        "m2_unmatched"
+                                    ] += 1
+                                if float(
+                                    memory_diagnostics[
+                                        "raw_error_rms"
+                                    ].item()
+                                ) == 0.0:
+                                    s1m2_call_counts[
+                                        "m2_zero_error"
+                                    ] += 1
+                                if float(
+                                    memory_diagnostics[
+                                        "applied_correction_rms"
+                                    ].item()
+                                ) > 0.0:
+                                    s1m2_call_counts[
+                                        "m2_nonzero_correction"
+                                    ] += 1
+                        elif (
+                            s1m2_call_counts is not None
+                            and s1m2_m2_layer_requested
+                        ):
+                            s1m2_call_counts[
+                                "m2_bank_unavailable"
+                            ] += 1
                         source_mixed_native_output = native_output
                         projected_native_output = native_output
                         ungated_projection_leakage = (
@@ -2393,6 +2751,7 @@ class CausalWanSelfAttention(nn.Module):
 
                     b_key_list = []
                     b_value_list = []
+                    b_key_segments = []
 
                     # Spatial blender rate: boost inside edit region
                     spatial_blender = shared_dict.get(
@@ -2407,6 +2766,23 @@ class CausalWanSelfAttention(nn.Module):
                     else:
                         prev_blender = blender_rate
                         current_key_blender = blender_rate
+                    if shared_dict.get(
+                        "responsibility_diagnostics_enabled", False
+                    ):
+                        if spatial_blender is None:
+                            actual_blender = torch.full(
+                                (1, num_new_tokens),
+                                float(blender_rate),
+                                device=trg_query.device,
+                                dtype=torch.float32,
+                            )
+                        else:
+                            actual_blender = spatial_blender[
+                                b_idx:b_idx + 1
+                            ].detach().float()
+                        shared_dict.setdefault(
+                            "responsibility_spatial_blender_maps", {}
+                        ).setdefault(layer_index, []).append(actual_blender)
 
                     #✨ masked-blended previous kv
                     b_trg_fg_mask = kv_cache["trg_fg_mask"][b_idx]                              # [L_cache_size, ]
@@ -2418,14 +2794,21 @@ class CausalWanSelfAttention(nn.Module):
                     b_trg_prev_fg_value = trg_prev_value[b_idx]
                     b_key_list.append(b_trg_prev_fg_key)
                     b_value_list.append(b_trg_prev_fg_value)
+                    b_key_segments.append({
+                        "name": "target_history",
+                        "start": 0,
+                        "end": int(b_trg_prev_fg_key.shape[0]),
+                    })
 
                     #✨ current source condition
                     b_src_current_fg_mask = kv_cache["current_src_fg_mask"][b_idx]              # [Lq, ]
-                    # S1+M2: role object posterior as owner gate
+                    # S1+M2: thresholded role read gate (object + contact,
+                    # entropy-attenuated) controls memory correction.
                     b_role_object_posterior = (
-                        kv_cache.get("current_role_object_posterior")
-                        if kv_cache.get("current_role_object_posterior") is not None
-                        else None
+                        kv_cache.get("current_role_memory_read_gate")
+                        if kv_cache.get("current_role_memory_read_gate")
+                        is not None
+                        else kv_cache.get("current_role_object_posterior")
                     )
                     if b_role_object_posterior is not None:
                         b_role_object_posterior = b_role_object_posterior[b_idx]  # [Lq, ]
@@ -2500,13 +2883,31 @@ class CausalWanSelfAttention(nn.Module):
                             )
                             b_key_list.append(b_src_current_bg_key)
                             b_value_list.append(b_src_current_bg_value)
+                            b_key_segments.append({
+                                "name": "current_source_background",
+                                "start": source_bg_segment[0],
+                                "end": source_bg_segment[1],
+                            })
 
                     #✨ masked-blended current target condition
                     b_trg_current_key = trg_current_key[b_idx]                                  # [Lq, Nh, Dk]
                     b_trg_current_value = trg_current_value[b_idx]                              # [Lq, Nh, Dk]
                     b_trg_current_key = b_trg_current_key * current_key_blender + src_current_key[b_idx] * (1 - current_key_blender)
+                    current_target_start = sum(
+                        item.shape[0] for item in b_key_list
+                    )
                     b_key_list.append(b_trg_current_key)
                     b_value_list.append(b_trg_current_value)
+                    current_target_segment = (
+                        current_target_start,
+                        current_target_start
+                        + int(b_trg_current_key.shape[0]),
+                    )
+                    b_key_segments.append({
+                        "name": "current_target",
+                        "start": current_target_segment[0],
+                        "end": current_target_segment[1],
+                    })
 
                     # Identity anchor: concat frozen first-block KV
                     identity_anchor = shared_dict.get(
@@ -2522,12 +2923,20 @@ class CausalWanSelfAttention(nn.Module):
                         )
                         if anchor_scale != 1.0:
                             anchor_k = anchor_k * anchor_scale
+                        anchor_start = sum(
+                            item.shape[0] for item in b_key_list
+                        )
                         b_key_list.append(anchor_k)
                         b_value_list.append(
                             anchor_layer["v"][b_idx].to(
                                 b_trg_current_value.dtype
                             )
                         )
+                        b_key_segments.append({
+                            "name": "identity_anchor",
+                            "start": anchor_start,
+                            "end": anchor_start + int(anchor_k.shape[0]),
+                        })
 
                     # store and concatenate key and value
                     b_trg_key = torch.cat(b_key_list, dim=0)
@@ -2540,6 +2949,16 @@ class CausalWanSelfAttention(nn.Module):
                         b_query.unsqueeze(0),
                         b_trg_key.unsqueeze(0),
                         b_trg_value.unsqueeze(0),
+                    )
+                    maybe_capture_self_attention(
+                        kv_cache,
+                        b_query,
+                        b_trg_key,
+                        layer_index=layer_index,
+                        batch_index=b_idx,
+                        current_target_segment=current_target_segment,
+                        key_segments=b_key_segments,
+                        path_name="legacy_native_output",
                     )
                     immutable_delta_v_bank = shared_dict.get(
                         "immutable_delta_v_bank"
@@ -2579,7 +2998,7 @@ class CausalWanSelfAttention(nn.Module):
                         if shared_dict.get(
                             "closed_loop_delta_v_error", False
                         ):
-                            corrected, memory_diagnostics = (
+                            memory_result = (
                                 closed_loop_delta_v_memory_attention(
                                     native_output=b_target_output,
                                     current_source_query=(
@@ -2654,8 +3073,29 @@ class CausalWanSelfAttention(nn.Module):
                                             "closed_loop_delta_v_max_error_ratio"
                                         ]
                                     ),
+                                    return_maps=bool(
+                                        shared_dict.get(
+                                            "responsibility_diagnostics_enabled",
+                                            False,
+                                        )
+                                    ),
                                 )
                             )
+                            if shared_dict.get(
+                                "responsibility_diagnostics_enabled", False
+                            ):
+                                (
+                                    corrected,
+                                    memory_diagnostics,
+                                    memory_maps,
+                                ) = memory_result
+                                shared_dict.setdefault(
+                                    "responsibility_m2_maps", {}
+                                ).setdefault(layer_index, []).append(
+                                    memory_maps
+                                )
+                            else:
+                                corrected, memory_diagnostics = memory_result
                         else:
                             corrected, memory_diagnostics = (
                                 immutable_delta_v_memory_attention(
@@ -2993,7 +3433,13 @@ class CausalWanAttentionBlock(nn.Module):
         # cross-attention & ffn function
         def cross_attn_ffn(x, context, context_lens, e, crossattn_cache=None):
             x = x + self.cross_attn(self.norm3(x), context,
-                                    context_lens, crossattn_cache=crossattn_cache)
+                                    context_lens,
+                                    crossattn_cache=crossattn_cache,
+                                    layer_index=(
+                                        kv_cache.get("layer_index")
+                                        if isinstance(kv_cache, dict)
+                                        else None
+                                    ))
             y = self.ffn(
                 (self.norm2(x).unflatten(dim=1, sizes=(num_frames,
                  frame_seqlen)) * (1 + e[4]) + e[3]).flatten(1, 2)

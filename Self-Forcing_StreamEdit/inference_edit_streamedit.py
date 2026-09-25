@@ -326,6 +326,53 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        "--s1m2_attention_mode",
+        choices=["legacy", "m2", "spatial", "full"],
+        default="legacy",
+        help=(
+            "Select which role-aware attention corrections are consumed by "
+            "factorized native-target-history attention: legacy uses neither, "
+            "m2 uses only closed-loop delta-V, spatial uses only spatial Q/K, "
+            "and full uses both."
+        ),
+    )
+    parser.add_argument(
+        "--ablation_no_interface_role",
+        action="store_true",
+        default=False,
+        help=(
+            "B1: merge interface responsibility into object responsibility "
+            "before every role-guided velocity, attention, and anchor gate."
+        ),
+    )
+    parser.add_argument(
+        "--ablation_no_direction_filtering",
+        action="store_true",
+        default=False,
+        help=(
+            "B2: bypass only the antagonistic-direction projection so the "
+            "role router receives the unfiltered source residual."
+        ),
+    )
+    parser.add_argument(
+        "--ablation_no_attention_control",
+        action="store_true",
+        default=False,
+        help=(
+            "B3: disable only role-conditioned spatial Q/K blending and "
+            "retain the base scalar attention schedule."
+        ),
+    )
+    parser.add_argument(
+        "--ablation_no_appearance_anchor",
+        action="store_true",
+        default=False,
+        help=(
+            "B4: disable immutable appearance-anchor construction, write, "
+            "retrieval, and correction while retaining native KV history."
+        ),
+    )
+    parser.add_argument(
         "--factorized_owner_source_block",
         action="store_true",
         default=False,
@@ -1487,6 +1534,28 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        "--role_background_anchor_strength",
+        type=float,
+        default=0.50,
+        help=(
+            "Bounded interpolation strength from the residual-routed "
+            "velocity to exact source reconstruction on background-role "
+            "tokens with weak target-source change. 0 keeps legacy "
+            "residual routing; 1 is the maximum gated anchor."
+        ),
+    )
+    parser.add_argument(
+        "--role_background_owner_veto_strength",
+        type=float,
+        default=0.0,
+        help=(
+            "Suppress background source residual and exact-source anchor "
+            "inside persistent causal-owner support. 0 preserves the "
+            "existing response gate; 1 fully vetoes background source "
+            "authority at owner-core tokens."
+        ),
+    )
+    parser.add_argument(
         "--role_memory_contact_read_weight",
         type=float,
         default=0.50,
@@ -1675,6 +1744,25 @@ if __name__ == '__main__':
         help=(
             "Maximum M2 closed-loop error RMS relative to the larger of "
             "the desired and current response RMS."
+        ),
+    )
+    parser.add_argument(
+        "--m2_canonical_identity_commit",
+        action="store_true",
+        default=False,
+        help=(
+            "Expand the immutable M2 bank to verified owner/boundary "
+            "tokens and materialize its source-addressed delta-V into "
+            "fresh clean target V before each later block is committed."
+        ),
+    )
+    parser.add_argument(
+        "--m2_canonical_commit_strength",
+        type=float,
+        default=0.50,
+        help=(
+            "Strength of the owner-only canonical delta-V materialization "
+            "into later clean target KV writes."
         ),
     )
     parser.add_argument("--mask_white_threshold", type=int, default=245)
@@ -1899,6 +1987,55 @@ if __name__ == '__main__':
     )
     parser.add_argument("--contact_graph_seed", type=int, default=0)
     parser.add_argument("--save_role_dir", type=str, default=None)
+    parser.add_argument(
+        "--responsibility_diagnostics_dir",
+        type=str,
+        default=None,
+        help=(
+            "Optional output root for per-real-block responsibility "
+            "diagnostic torch artifacts. Disabled by default."
+        ),
+    )
+    parser.add_argument(
+        "--mechanism_diagnostics_dir",
+        type=str,
+        default=None,
+        help=(
+            "Optional output root for sampled all-head attention and "
+            "velocity diagnostics. Disabled by default and read-only with "
+            "respect to model outputs."
+        ),
+    )
+    parser.add_argument(
+        "--mechanism_diagnostics_block",
+        type=int,
+        default=None,
+        help="Global causal block index selected by the evidence-only pass.",
+    )
+    parser.add_argument(
+        "--mechanism_diagnostics_latent_frame",
+        type=int,
+        default=None,
+        help="Global latent frame selected by hand/object overlap.",
+    )
+    parser.add_argument(
+        "--mechanism_diagnostics_steps",
+        type=int,
+        nargs="+",
+        default=(0, 1, 2),
+        help="Denoising prediction indices to capture (default: 0 1 2).",
+    )
+    parser.add_argument(
+        "--mechanism_diagnostics_query_indices",
+        type=int,
+        nargs=3,
+        default=None,
+        metavar=("INTERFACE", "OBJECT", "HAND"),
+        help=(
+            "Current-block attention-token indices selected automatically "
+            "by the evidence pass for interface, object core, and hand."
+        ),
+    )
     args = parser.parse_args()
     oracle_role_enabled = args.routing_mode in {
         "oracle_role_flow",
@@ -3039,22 +3176,88 @@ if __name__ == '__main__':
                 "--source_bg_attention_diagnostic_path is required with "
                 "--source_bg_attention_diagnostics"
             )
+    ablation_flags = {
+        "B1_no_interface_role": args.ablation_no_interface_role,
+        "B2_no_direction_filtering": (
+            args.ablation_no_direction_filtering
+        ),
+        "B3_no_attention_control": args.ablation_no_attention_control,
+        "B4_no_appearance_anchor": args.ablation_no_appearance_anchor,
+    }
+    enabled_ablations = [
+        name for name, enabled in ablation_flags.items() if enabled
+    ]
+    if len(enabled_ablations) > 1:
+        parser.error(
+            "Main ablations are mutually exclusive; got "
+            + ", ".join(enabled_ablations)
+        )
+    if enabled_ablations and args.s1m2_attention_mode != "full":
+        parser.error(
+            "B1-B4 main ablations must start from "
+            "--s1m2_attention_mode full"
+        )
     if args.closed_loop_delta_v_error and not args.immutable_delta_v_bank:
         parser.error(
             "--closed_loop_delta_v_error requires "
             "--immutable_delta_v_bank"
         )
+    if args.m2_canonical_identity_commit:
+        if args.s1m2_attention_mode not in {"m2", "full"}:
+            parser.error(
+                "--m2_canonical_identity_commit requires an M2 attention "
+                "mode (m2 or full)"
+            )
+        if not args.immutable_delta_v_bank:
+            parser.error(
+                "--m2_canonical_identity_commit requires "
+                "--immutable_delta_v_bank"
+            )
+    if not 0.0 <= args.m2_canonical_commit_strength <= 1.0:
+        parser.error(
+            "--m2_canonical_commit_strength must lie in [0, 1]"
+        )
+    if args.s1m2_attention_mode != "legacy":
+        if not (
+            args.routing_mode == "hand_role_factorized_causal_owner_kv"
+            and args.factorized_native_target_history
+            and args.soft_region_modulation
+        ):
+            parser.error(
+                "--s1m2_attention_mode requires factorized causal-owner "
+                "routing, --factorized_native_target_history, and "
+                "--soft_region_modulation"
+            )
+        if args.s1m2_attention_mode in {"m2", "full"} and not (
+            args.immutable_delta_v_bank
+            and args.closed_loop_delta_v_error
+        ):
+            parser.error(
+                "M2 attention modes require --immutable_delta_v_bank and "
+                "--closed_loop_delta_v_error"
+            )
     if args.immutable_delta_v_bank:
         role_aware_s1m2 = (
-            args.closed_loop_delta_v_error
-            and args.soft_region_modulation
+            args.soft_region_modulation
             and args.routing_mode
             == "hand_role_factorized_causal_owner_kv"
+            and args.factorized_native_target_history
+            and (
+                args.closed_loop_delta_v_error
+                or args.s1m2_attention_mode != "legacy"
+            )
         )
         if args.routing_mode != "dynamic_sog" and not role_aware_s1m2:
             parser.error(
                 "--immutable_delta_v_bank requires dynamic_sog or the "
                 "role-aware S1+M2 configuration"
+            )
+        if args.m2_canonical_identity_commit and not (
+            role_aware_s1m2 and args.closed_loop_delta_v_error
+        ):
+            parser.error(
+                "--m2_canonical_identity_commit requires role-aware "
+                "S1+M2 with --closed_loop_delta_v_error"
             )
         if (
             not args.immutable_delta_v_layers
@@ -3135,6 +3338,8 @@ if __name__ == '__main__':
     for name in (
         "role_object_residual_strength",
         "role_contact_residual_strength",
+        "role_background_anchor_strength",
+        "role_background_owner_veto_strength",
         "role_memory_contact_read_weight",
         "role_memory_min_read_probability",
         "role_memory_object_write_threshold",
@@ -3496,6 +3701,17 @@ if __name__ == '__main__':
         ),
         factorized_native_target_history=(
             args.factorized_native_target_history
+        ),
+        s1m2_attention_mode=args.s1m2_attention_mode,
+        ablation_no_interface_role=args.ablation_no_interface_role,
+        ablation_no_direction_filtering=(
+            args.ablation_no_direction_filtering
+        ),
+        ablation_no_attention_control=(
+            args.ablation_no_attention_control
+        ),
+        ablation_no_appearance_anchor=(
+            args.ablation_no_appearance_anchor
         ),
         factorized_owner_source_block=(
             args.factorized_owner_source_block
@@ -3867,6 +4083,12 @@ if __name__ == '__main__':
         role_contact_residual_strength=(
             args.role_contact_residual_strength
         ),
+        role_background_anchor_strength=(
+            args.role_background_anchor_strength
+        ),
+        role_background_owner_veto_strength=(
+            args.role_background_owner_veto_strength
+        ),
         role_memory_contact_read_weight=(
             args.role_memory_contact_read_weight
         ),
@@ -3914,6 +4136,12 @@ if __name__ == '__main__':
         closed_loop_delta_v_error=args.closed_loop_delta_v_error,
         closed_loop_delta_v_max_error_ratio=(
             args.closed_loop_delta_v_max_error_ratio
+        ),
+        m2_canonical_identity_commit=(
+            args.m2_canonical_identity_commit
+        ),
+        m2_canonical_commit_strength=(
+            args.m2_canonical_commit_strength
         ),
         role_boundary_radius=args.role_boundary_radius,
         contact_target_weight=args.contact_target_weight,
@@ -3963,6 +4191,22 @@ if __name__ == '__main__':
         contact_graph_layer_end=args.contact_graph_layer_end,
         contact_graph_seed=args.contact_graph_seed,
         save_role_dir=args.save_role_dir,
+        responsibility_diagnostics_dir=(
+            args.responsibility_diagnostics_dir
+        ),
+        mechanism_diagnostics_dir=args.mechanism_diagnostics_dir,
+        mechanism_diagnostics_block=args.mechanism_diagnostics_block,
+        mechanism_diagnostics_latent_frame=(
+            args.mechanism_diagnostics_latent_frame
+        ),
+        mechanism_diagnostics_steps=tuple(
+            args.mechanism_diagnostics_steps
+        ),
+        mechanism_diagnostics_query_indices=(
+            tuple(args.mechanism_diagnostics_query_indices)
+            if args.mechanism_diagnostics_query_indices is not None
+            else None
+        ),
     )
 
     # Clear VAE cache

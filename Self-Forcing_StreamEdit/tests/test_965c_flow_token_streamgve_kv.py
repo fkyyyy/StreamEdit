@@ -118,7 +118,11 @@ class FlowTokenStreamGVEKVEntrypointTests(unittest.TestCase):
         )
         self.assertIn("kv_cache=kv_cache_trg,", self.pipeline)
         self.assertIn("NATIVE_TARGET_KV_COMMIT", self.pipeline)
-        self.assertIn('"immutable_write=0"', self.pipeline)
+        self.assertIn(
+            'f"{int(canonical_commit_diagnostics is not None)}"',
+            self.pipeline,
+        )
+        self.assertIn("_materialize_immutable_delta_v_kv(", self.pipeline)
 
 
 if __name__ == "__main__":

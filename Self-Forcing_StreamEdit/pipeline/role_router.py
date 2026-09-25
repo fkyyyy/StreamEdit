@@ -13,6 +13,60 @@ if TYPE_CHECKING:
     from .control_belief import CausalControlBelief
 
 
+def source_anchored_velocity(
+    target_velocity: torch.Tensor,
+    source_reconstruction_velocity: torch.Tensor,
+    preservation_weight: torch.Tensor,
+) -> torch.Tensor:
+    """Interpolate from target velocity to the exact source anchor.
+
+    A preservation weight of zero keeps the target-conditioned velocity,
+    while a weight of one returns the source-reconstruction velocity.  This
+    endpoint invariant prevents target-minus-source prompt changes from
+    surviving on tokens classified as pure hand or background.
+    """
+    if target_velocity.shape != source_reconstruction_velocity.shape:
+        raise ValueError(
+            "Target and source reconstruction velocities must have the "
+            "same shape"
+        )
+    weight = preservation_weight.to(
+        device=target_velocity.device,
+        dtype=target_velocity.dtype,
+    ).clamp(0.0, 1.0)
+    return target_velocity + weight * (
+        source_reconstruction_velocity - target_velocity
+    )
+
+
+def apply_background_owner_veto(
+    background_gate: torch.Tensor,
+    owner_confidence: torch.Tensor | None,
+    strength: float,
+) -> torch.Tensor:
+    """Suppress source preservation inside a persistent target owner.
+
+    ``strength`` is deliberately continuous: zero preserves the existing
+    response gate exactly, while one removes background source authority at
+    full-confidence owner tokens. This is a routing veto only; it does not
+    alter the role posterior or the hand-preservation path.
+    """
+    if not 0.0 <= float(strength) <= 1.0:
+        raise ValueError("strength must lie in [0, 1]")
+    gate = background_gate.clamp(0.0, 1.0)
+    if owner_confidence is None or float(strength) == 0.0:
+        return gate
+    if owner_confidence.shape != gate.shape:
+        raise ValueError(
+            "owner_confidence must have the same shape as background_gate"
+        )
+    owner = owner_confidence.to(
+        device=gate.device,
+        dtype=gate.dtype,
+    ).clamp(0.0, 1.0)
+    return gate * (1.0 - float(strength) * owner)
+
+
 def _dilate(mask: torch.Tensor, radius: int) -> torch.Tensor:
     if radius <= 0:
         return mask
@@ -296,6 +350,25 @@ class RoleState:
                 raise ValueError(f"Role '{name}' must lie in [0, 1]")
 
 
+def merge_interface_into_object(roles: RoleState) -> RoleState:
+    """Ablate the distinct interface role without changing total mass.
+
+    This transformation is intentionally performed on the shared RoleState
+    before velocity, attention, and memory consumers run.  It therefore makes
+    interface tokens ordinary object tokens while preserving the hand and
+    background responsibilities exactly.
+    """
+    roles.validate()
+    merged = RoleState(
+        object=(roles.object + roles.boundary).clamp(0.0, 1.0),
+        boundary=torch.zeros_like(roles.boundary),
+        hand=roles.hand,
+        background=roles.background,
+    )
+    merged.validate()
+    return merged
+
+
 def build_oracle_roles(
     object_mask: torch.Tensor,
     hand_mask: torch.Tensor,
@@ -479,6 +552,8 @@ class PosteriorResidualFlowRouter:
         editable_source_residual: torch.Tensor | None = None,
         object_residual_strength: float | None = None,
         contact_residual_strength: float | None = None,
+        background_anchor_strength: float = 0.5,
+        background_anchor_gate: torch.Tensor | None = None,
     ):
         velocity_shapes = {
             tuple(target_velocity.shape),
@@ -495,6 +570,7 @@ class PosteriorResidualFlowRouter:
         for name, strength in (
             ("object_residual_strength", object_residual_strength),
             ("contact_residual_strength", contact_residual_strength),
+            ("background_anchor_strength", background_anchor_strength),
         ):
             if strength is not None and not 0.0 <= float(strength) <= 1.0:
                 raise ValueError(f"{name} must lie in [0, 1]")
@@ -504,6 +580,20 @@ class PosteriorResidualFlowRouter:
             raise ValueError(
                 "editable_source_residual must align with the velocity fields"
             )
+        if background_anchor_gate is not None:
+            expected_gate_shape = (
+                target_velocity.shape[0],
+                target_velocity.shape[1],
+                1,
+                target_velocity.shape[-2],
+                target_velocity.shape[-1],
+            )
+            if tuple(background_anchor_gate.shape) != expected_gate_shape:
+                raise ValueError(
+                    "background_anchor_gate must have shape "
+                    f"{expected_gate_shape}, got "
+                    f"{tuple(background_anchor_gate.shape)}"
+                )
         probabilities = self._resize_roles(
             roles,
             target_velocity.shape[-2:],
@@ -524,6 +614,17 @@ class PosteriorResidualFlowRouter:
         background_probability = probabilities[:, :, 3:4]
         preservation_probability = (
             hand_probability + background_probability
+        )
+        background_preservation_gate = torch.ones_like(
+            background_probability
+        )
+        if background_anchor_gate is not None:
+            background_preservation_gate = background_anchor_gate.to(
+                device=target_velocity.device,
+                dtype=target_velocity.dtype,
+            ).clamp(0.0, 1.0)
+        gated_background_probability = (
+            background_probability * background_preservation_gate
         )
 
         explicit_role_policy = (
@@ -548,7 +649,8 @@ class PosteriorResidualFlowRouter:
             residual_expert_weight = (
                 object_probability * object_strength
                 + contact_probability * contact_strength
-                + preservation_probability
+                + hand_probability
+                + gated_background_probability
             ).clamp(0.0, 1.0)
             target_expert_weight = (1.0 - residual_expert_weight).clamp(
                 0.0, 1.0
@@ -589,6 +691,9 @@ class PosteriorResidualFlowRouter:
         source_residual = (
             source_reconstruction_velocity - source_velocity
         )
+        background_anchor_weight = torch.zeros_like(
+            background_probability
+        )
         if explicit_role_policy and editable_source_residual is not None:
             editable_residual = editable_source_residual.to(
                 device=target_velocity.device, dtype=target_velocity.dtype
@@ -597,10 +702,27 @@ class PosteriorResidualFlowRouter:
                 object_probability * float(object_residual_strength or 0.0)
                 + contact_probability * float(contact_residual_strength or 0.0)
             )
-            preservation_weight = preservation_probability
-            routed_velocity = target_velocity + (
+            # Keep the original residual route for interaction-bearing hand
+            # tokens. For background tokens, the native target-response gate
+            # controls both source-residual injection and the bounded exact
+            # source anchor. This lets a strong target edit survive a temporary
+            # background misclassification instead of being washed back toward
+            # the source appearance over successive streaming blocks.
+            preservation_residual_weight = (
+                hand_probability + gated_background_probability
+            )
+            residual_routed = target_velocity + (
                 editable_weight * editable_residual
-                + preservation_weight * source_residual
+                + preservation_residual_weight * source_residual
+            )
+            background_anchor_weight = (
+                gated_background_probability
+                * float(background_anchor_strength)
+            ).clamp(0.0, 1.0)
+            routed_velocity = source_anchored_velocity(
+                residual_routed,
+                source_reconstruction_velocity,
+                background_anchor_weight,
             )
         else:
             routed_velocity = (
@@ -621,6 +743,9 @@ class PosteriorResidualFlowRouter:
             "contact_residual_weight": contact_residual_weight,
             "role_entropy": entropy.to(target_velocity),
             "role_probabilities": probabilities,
+            "background_preservation_gate": background_preservation_gate,
+            "background_residual_weight": gated_background_probability,
+            "background_anchor_weight": background_anchor_weight,
         }
         return routed_velocity, diagnostics
 
@@ -827,6 +952,123 @@ def build_role_memory_gates(
             preconsensus_write_gate.float()
         ),
         "role_memory_write_gate": write_gate.float(),
+    }
+
+
+def build_canonical_m2_gates(
+    roles: RoleState,
+    spatial_size,
+    *,
+    owner_weight: torch.Tensor,
+    owner_support: torch.Tensor,
+    hard_hand_exclusion: torch.Tensor,
+    contact_read_weight: float = 0.5,
+    max_hand_probability: float = 0.5,
+    boundary_radius: int = 1,
+    min_role_extent: float = 0.2,
+):
+    """Build dense, owner-verified gates for canonical M2 identity state.
+
+    The ordinary M2 write gate intentionally keeps only a tiny high-precision
+    object core.  That is suitable for a transient correction but cannot
+    preserve instance details such as a plate rim.  Canonical M2 therefore
+    uses the transported source-coordinate owner as its write-once extent,
+    permits one connected role-supported boundary ring, and excludes
+    persistent hand tokens.  The returned read gate remains continuous.
+    """
+    roles.validate()
+    if not 0.0 <= float(contact_read_weight) <= 1.0:
+        raise ValueError("contact_read_weight must lie in [0, 1]")
+    if not 0.0 <= float(max_hand_probability) <= 1.0:
+        raise ValueError("max_hand_probability must lie in [0, 1]")
+    if not 0.0 <= float(min_role_extent) <= 1.0:
+        raise ValueError("min_role_extent must lie in [0, 1]")
+    if int(boundary_radius) < 0:
+        raise ValueError("boundary_radius must be non-negative")
+
+    probabilities = PosteriorResidualFlowRouter._resize_roles(
+        roles, spatial_size, torch.float32, roles.object.device
+    )
+    object_probability = probabilities[:, :, 0]
+    contact_probability = probabilities[:, :, 1]
+    hand_probability = probabilities[:, :, 2]
+    background_probability = probabilities[:, :, 3]
+    expected_prefix = object_probability.shape[:2]
+    for name, value in (
+        ("owner_weight", owner_weight),
+        ("owner_support", owner_support),
+        ("hard_hand_exclusion", hard_hand_exclusion),
+    ):
+        if value.ndim != 4 or value.shape[:2] != expected_prefix:
+            raise ValueError(f"{name} must align with roles on [B,T]")
+
+    def resize(value, mode):
+        batch, frames = value.shape[:2]
+        kwargs = {}
+        if mode == "bilinear":
+            kwargs["align_corners"] = False
+        return F.interpolate(
+            value.float().reshape(batch * frames, 1, *value.shape[-2:]),
+            size=spatial_size,
+            mode=mode,
+            **kwargs,
+        ).reshape(batch, frames, *spatial_size).to(
+            device=roles.object.device
+        )
+
+    owner_confidence = resize(owner_weight, "bilinear").clamp(0.0, 1.0)
+    verified_owner = resize(owner_support, "nearest") > 0.5
+    hard_hand = resize(hard_hand_exclusion, "nearest") > 0.5
+    role_extent_probability = (
+        object_probability + contact_probability
+    ).clamp(0.0, 1.0)
+    role_authorized = (
+        (role_extent_probability >= float(min_role_extent))
+        & (role_extent_probability >= background_probability)
+    )
+    owner_neighborhood = _dilate(
+        verified_owner,
+        int(boundary_radius),
+    )
+    boundary_ring = (
+        owner_neighborhood
+        & ~verified_owner
+        & role_authorized
+    )
+    hand_safe = (
+        (hand_probability <= float(max_hand_probability))
+        & ~hard_hand
+    )
+    canonical_write = (
+        ((verified_owner & role_authorized) | boundary_ring)
+        & hand_safe
+    )
+
+    entropy = -(
+        probabilities * probabilities.clamp_min(1e-6).log()
+    ).sum(dim=2) / torch.log(probabilities.new_tensor(4.0))
+    role_read = (
+        object_probability
+        + float(contact_read_weight) * contact_probability
+    ).clamp(0.0, 1.0) * (1.0 - entropy.clamp(0.0, 1.0))
+    canonical_read = torch.maximum(
+        role_read,
+        owner_confidence * role_authorized.float(),
+    ) * role_authorized.float()
+    canonical_read = (
+        canonical_read
+        * (1.0 - hand_probability)
+        * (~hard_hand).float()
+    )
+    canonical_read = canonical_read.clamp(0.0, 1.0)
+    return canonical_read, canonical_write, {
+        "m2_canonical_owner_confidence": owner_confidence,
+        "m2_canonical_verified_owner": verified_owner.float(),
+        "m2_canonical_boundary_ring": boundary_ring.float(),
+        "m2_canonical_role_authorized": role_authorized.float(),
+        "m2_canonical_hand_safe": hand_safe.float(),
+        "m2_canonical_read_gate": canonical_read,
+        "m2_canonical_write_gate": canonical_write.float(),
     }
 
 

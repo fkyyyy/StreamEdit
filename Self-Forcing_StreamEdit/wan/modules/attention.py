@@ -53,7 +53,60 @@ __all__ = [
     'counterfactual_replace_attention_segment',
     'immutable_delta_v_memory_attention',
     'closed_loop_delta_v_memory_attention',
+    'materialize_closed_loop_delta_v_value',
+    'resolve_s1m2_attention_features',
+    'blend_s1m2_spatial_qk',
 ]
+
+
+def resolve_s1m2_attention_features(mode):
+    """Return the independently testable spatial-Q/K and M2 switches."""
+    features = {
+        "legacy": (False, False),
+        "m2": (False, True),
+        "spatial": (True, False),
+        "full": (True, True),
+    }
+    try:
+        return features[str(mode)]
+    except KeyError as error:
+        raise ValueError(
+            "S1+M2 attention mode must be legacy, m2, spatial, or full"
+        ) from error
+
+
+def blend_s1m2_spatial_qk(
+    target_query,
+    source_query,
+    target_key,
+    source_key,
+    spatial_blender,
+):
+    """Blend current target/source Q and K with one rate per token.
+
+    The native history and all value payloads stay unchanged. Inputs may be
+    ``[L,H,D]`` or ``[B,L,H,D]``; ``spatial_blender`` must match the leading
+    dimensions before heads and channels.
+    """
+    if (
+        target_query.shape != source_query.shape
+        or target_key.shape != source_key.shape
+        or target_query.shape != target_key.shape
+    ):
+        raise ValueError("S1+M2 target/source Q/K tensors must align")
+    expected_rate_shape = target_query.shape[:-2]
+    if spatial_blender.shape != expected_rate_shape:
+        raise ValueError(
+            "S1+M2 spatial blender must align with current Q/K tokens"
+        )
+    rate = spatial_blender.to(
+        device=target_query.device,
+        dtype=target_query.dtype,
+    )
+    rate = rate[..., None, None]
+    query = target_query * rate + source_query * (1.0 - rate)
+    key = target_key * rate + source_key * (1.0 - rate)
+    return query, key
 
 
 def route_source_background_kv(
@@ -477,6 +530,7 @@ def closed_loop_delta_v_memory_attention(
     strength=0.20,
     max_error_ratio=1.0,
     eps=1e-8,
+    return_maps=False,
 ):
     """Correct only the missing part of a frozen target-source delta.
 
@@ -572,6 +626,15 @@ def closed_loop_delta_v_memory_attention(
         assignment_peak = owner.new_zeros(owner.shape)
         assignment_margin = owner.new_zeros(owner.shape)
         matched = torch.zeros_like(owner, dtype=torch.bool)
+        topk_index = torch.full(
+            (batch, query_count, candidate_count),
+            -1,
+            dtype=torch.long,
+            device=native_output.device,
+        )
+        topk_similarity = owner.new_full(
+            (batch, query_count, candidate_count), -torch.inf
+        )
 
         for batch_index in range(batch):
             active_query = torch.nonzero(
@@ -596,6 +659,10 @@ def closed_loop_delta_v_memory_attention(
                 selected_valid = (
                     torch.isfinite(selected_similarity)
                     & (selected_similarity >= float(min_similarity))
+                )
+                topk_index[batch_index, query_index] = selected_index
+                topk_similarity[batch_index, query_index] = (
+                    selected_similarity
                 )
                 query_best = selected_similarity[:, 0]
                 query_matched = (
@@ -653,12 +720,13 @@ def closed_loop_delta_v_memory_attention(
 
         return (
             response, matched, best_similarity, assignment_margin,
-            assignment_entropy, assignment_peak,
+            assignment_entropy, assignment_peak, topk_index,
+            topk_similarity,
         )
 
     desired, desired_matched, desired_similarity, desired_margin, (
         desired_entropy
-    ), desired_peak = retrieve_response(
+    ), desired_peak, desired_topk_index, desired_topk_similarity = retrieve_response(
         canonical_source_key,
         canonical_delta_value,
         canonical_support,
@@ -673,7 +741,7 @@ def closed_loop_delta_v_memory_attention(
     current_support = owner > 0.0
     current_delta, current_matched, current_similarity, current_margin, (
         current_entropy
-    ), current_peak = retrieve_response(
+    ), current_peak, current_topk_index, current_topk_similarity = retrieve_response(
         current_source_key, current_value_delta, current_support
     )
     admitted = desired_matched & current_matched
@@ -750,7 +818,7 @@ def closed_loop_delta_v_memory_attention(
         count = mask.float().sum().clamp_min(1.0)
         return (value * mask.float()).sum() / count
 
-    return output, {
+    diagnostics = {
         "owner_gated_coverage": owner_any.float().mean().detach(),
         "owner_confident_coverage": owner_confident.float().mean().detach(),
         "owner_high_coverage": owner_high.float().mean().detach(),
@@ -818,6 +886,76 @@ def closed_loop_delta_v_memory_attention(
         ),
         "mean_owner_value": owner.mean().detach(),
     }
+    if not return_maps:
+        return output, diagnostics
+    maps = {
+        "admitted": admitted.float().detach(),
+        "gate": gate.detach(),
+        "correction_rms": correction_rms.detach(),
+        "native_rms": native_rms.detach(),
+        "joint_similarity": torch.where(
+            torch.isfinite(joint_similarity),
+            joint_similarity,
+            torch.full_like(joint_similarity, -1.0),
+        ).detach(),
+        "reference_response_rms": desired_rms.detach(),
+        "current_response_rms": current_rms.detach(),
+        "response_discrepancy_rms": error_rms.detach(),
+        "reference_topk_index": desired_topk_index.detach(),
+        "reference_topk_similarity": torch.where(
+            torch.isfinite(desired_topk_similarity),
+            desired_topk_similarity,
+            torch.full_like(desired_topk_similarity, -1.0),
+        ).detach(),
+        "current_topk_index": current_topk_index.detach(),
+        "current_topk_similarity": torch.where(
+            torch.isfinite(current_topk_similarity),
+            current_topk_similarity,
+            torch.full_like(current_topk_similarity, -1.0),
+        ).detach(),
+    }
+    return output, diagnostics, maps
+
+
+def materialize_closed_loop_delta_v_value(
+    *,
+    current_source_query,
+    current_source_key,
+    current_source_value,
+    current_target_value,
+    canonical_source_key,
+    canonical_delta_value,
+    canonical_support,
+    owner_gate,
+    topk=8,
+    min_similarity=0.35,
+    strength=0.50,
+    max_error_ratio=1.0,
+    eps=1e-8,
+):
+    """Write the closed-loop canonical response into a clean target V.
+
+    This uses the exact M2 retrieval and abstention contract, but treats the
+    freshly written target value as the native tensor being corrected. The
+    caller can persist the result in its KV cache while leaving current K,
+    non-owner tokens, and unmatched tokens bit-exact.
+    """
+    return closed_loop_delta_v_memory_attention(
+        native_output=current_target_value,
+        current_source_query=current_source_query,
+        current_source_key=current_source_key,
+        current_source_value=current_source_value,
+        current_target_value=current_target_value,
+        canonical_source_key=canonical_source_key,
+        canonical_delta_value=canonical_delta_value,
+        canonical_support=canonical_support,
+        owner_gate=owner_gate,
+        topk=topk,
+        min_similarity=min_similarity,
+        strength=strength,
+        max_error_ratio=max_error_ratio,
+        eps=eps,
+    )
 
 
 def _evenly_spaced_mask_indices(mask, max_samples):

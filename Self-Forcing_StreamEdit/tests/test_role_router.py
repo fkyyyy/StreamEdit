@@ -279,12 +279,268 @@ def test_posterior_router_explicit_role_residual_policy():
         contact_residual_strength=0.35,
     )
 
-    expected = torch.tensor([[[[[10.4, 11.4], [12.0, 12.0]]]]])
+    expected = torch.tensor([[[[[10.4, 11.4], [12.0, 8.5]]]]])
     expected_weight = torch.tensor([[[[[0.10, 0.35], [1.0, 1.0]]]]])
     assert torch.allclose(routed, expected)
     assert torch.allclose(
         debug["residual_expert_weight"], expected_weight
     )
+
+
+def test_posterior_router_explicit_policy_bounds_global_target_leakage():
+    target = torch.full((1, 1, 1, 1, 2), 10.0)
+    source = torch.full_like(target, 3.0)
+    source_reconstruction = torch.full_like(target, 5.0)
+    zero = torch.zeros((1, 1, 1, 2))
+    roles = role_router.RoleState(
+        object=torch.tensor([[[[1.0, 0.0]]]]),
+        boundary=zero,
+        hand=zero,
+        background=torch.tensor([[[[0.0, 1.0]]]]),
+    )
+
+    routed, _ = role_router.PosteriorResidualFlowRouter()(
+        target_velocity=target,
+        source_velocity=source,
+        source_reconstruction_velocity=source_reconstruction,
+        roles=roles,
+        editable_source_residual=torch.zeros_like(target),
+        object_residual_strength=0.0,
+        contact_residual_strength=0.0,
+    )
+
+    assert routed[..., 0].item() == pytest.approx(10.0)
+    assert routed[..., 1].item() == pytest.approx(8.5)
+
+
+@pytest.mark.parametrize(
+    ("anchor_strength", "expected_background"),
+    ((0.0, 12.0), (0.5, 8.5), (1.0, 5.0)),
+)
+def test_posterior_router_background_anchor_strength_is_bounded(
+    anchor_strength,
+    expected_background,
+):
+    target = torch.full((1, 1, 1, 1, 1), 10.0)
+    source = torch.full_like(target, 3.0)
+    source_reconstruction = torch.full_like(target, 5.0)
+    zero = torch.zeros((1, 1, 1, 1))
+    roles = role_router.RoleState(
+        object=zero,
+        boundary=zero,
+        hand=zero,
+        background=torch.ones_like(zero),
+    )
+
+    routed, debug = role_router.PosteriorResidualFlowRouter()(
+        target_velocity=target,
+        source_velocity=source,
+        source_reconstruction_velocity=source_reconstruction,
+        roles=roles,
+        editable_source_residual=torch.zeros_like(target),
+        object_residual_strength=0.0,
+        contact_residual_strength=0.0,
+        background_anchor_strength=anchor_strength,
+    )
+
+    assert routed.item() == pytest.approx(expected_background)
+    assert debug["background_anchor_weight"].item() == pytest.approx(
+        anchor_strength
+    )
+
+
+def test_background_anchor_abstains_on_strong_target_change():
+    target = torch.full((1, 1, 1, 1, 2), 10.0)
+    source = torch.full_like(target, 3.0)
+    source_reconstruction = torch.full_like(target, 5.0)
+    zero = torch.zeros((1, 1, 1, 2))
+    roles = role_router.RoleState(
+        object=zero,
+        boundary=zero,
+        hand=zero,
+        background=torch.ones_like(zero),
+    )
+
+    routed, debug = role_router.PosteriorResidualFlowRouter()(
+        target_velocity=target,
+        source_velocity=source,
+        source_reconstruction_velocity=source_reconstruction,
+        roles=roles,
+        editable_source_residual=torch.zeros_like(target),
+        object_residual_strength=0.0,
+        contact_residual_strength=0.0,
+        background_anchor_strength=1.0,
+        # First token is weak/background-like; second is a strong edit even
+        # though the imperfect role posterior labels it as background.
+        background_anchor_gate=torch.tensor([[[[[1.0, 0.0]]]]]),
+    )
+
+    assert routed[..., 0].item() == pytest.approx(5.0)
+    # A strong target response must disable both exact anchoring and the
+    # background source residual; otherwise streaming repeatedly washes the
+    # target appearance back toward the source.
+    assert routed[..., 1].item() == pytest.approx(10.0)
+    assert torch.equal(
+        debug["background_residual_weight"],
+        torch.tensor([[[[[1.0, 0.0]]]]]),
+    )
+    assert torch.equal(
+        debug["background_anchor_weight"],
+        torch.tensor([[[[[1.0, 0.0]]]]]),
+    )
+
+
+def test_background_response_gate_does_not_disable_hand_preservation():
+    target = torch.full((1, 1, 1, 1, 2), 10.0)
+    source = torch.full_like(target, 3.0)
+    source_reconstruction = torch.full_like(target, 5.0)
+    zero = torch.zeros((1, 1, 1, 2))
+    roles = role_router.RoleState(
+        object=zero,
+        boundary=zero,
+        hand=torch.tensor([[[[1.0, 0.0]]]]),
+        background=torch.tensor([[[[0.0, 1.0]]]]),
+    )
+
+    routed, debug = role_router.PosteriorResidualFlowRouter()(
+        target_velocity=target,
+        source_velocity=source,
+        source_reconstruction_velocity=source_reconstruction,
+        roles=roles,
+        editable_source_residual=torch.zeros_like(target),
+        object_residual_strength=0.0,
+        contact_residual_strength=0.0,
+        background_anchor_strength=1.0,
+        background_anchor_gate=torch.zeros((1, 1, 1, 1, 2)),
+    )
+
+    assert routed[..., 0].item() == pytest.approx(12.0)
+    assert routed[..., 1].item() == pytest.approx(10.0)
+    assert debug["residual_expert_weight"][..., 0].item() == pytest.approx(1.0)
+    assert debug["residual_expert_weight"][..., 1].item() == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize(
+    ("gate", "expected"),
+    ((0.0, 10.0), (0.5, 9.5), (1.0, 8.5)),
+)
+def test_background_response_gate_controls_both_source_paths(gate, expected):
+    target = torch.full((1, 1, 1, 1, 1), 10.0)
+    source = torch.full_like(target, 3.0)
+    source_reconstruction = torch.full_like(target, 5.0)
+    zero = torch.zeros((1, 1, 1, 1))
+    roles = role_router.RoleState(
+        object=zero,
+        boundary=zero,
+        hand=zero,
+        background=torch.ones_like(zero),
+    )
+
+    routed, debug = role_router.PosteriorResidualFlowRouter()(
+        target_velocity=target,
+        source_velocity=source,
+        source_reconstruction_velocity=source_reconstruction,
+        roles=roles,
+        editable_source_residual=torch.zeros_like(target),
+        object_residual_strength=0.0,
+        contact_residual_strength=0.0,
+        background_anchor_strength=0.5,
+        background_anchor_gate=torch.full_like(target, gate),
+    )
+
+    assert routed.item() == pytest.approx(expected)
+    assert debug["background_preservation_gate"].item() == pytest.approx(gate)
+    assert debug["background_residual_weight"].item() == pytest.approx(gate)
+    assert debug["background_anchor_weight"].item() == pytest.approx(0.5 * gate)
+
+
+def test_missing_background_gate_matches_all_one_gate():
+    target = torch.full((1, 1, 1, 1, 1), 10.0)
+    source = torch.full_like(target, 3.0)
+    source_reconstruction = torch.full_like(target, 5.0)
+    zero = torch.zeros((1, 1, 1, 1))
+    roles = role_router.RoleState(
+        object=zero,
+        boundary=zero,
+        hand=zero,
+        background=torch.ones_like(zero),
+    )
+    kwargs = dict(
+        target_velocity=target,
+        source_velocity=source,
+        source_reconstruction_velocity=source_reconstruction,
+        roles=roles,
+        editable_source_residual=torch.zeros_like(target),
+        object_residual_strength=0.0,
+        contact_residual_strength=0.0,
+        background_anchor_strength=0.5,
+    )
+
+    without_gate, _ = role_router.PosteriorResidualFlowRouter()(**kwargs)
+    with_one_gate, _ = role_router.PosteriorResidualFlowRouter()(
+        **kwargs,
+        background_anchor_gate=torch.ones_like(target),
+    )
+
+    assert torch.equal(without_gate, with_one_gate)
+
+
+def test_source_anchored_velocity_has_exact_endpoints():
+    target = torch.full((1, 1, 1, 1, 3), 10.0)
+    source_reconstruction = torch.full_like(target, 4.0)
+    preservation = torch.tensor([[[[[0.0, 0.5, 1.0]]]]])
+
+    routed = role_router.source_anchored_velocity(
+        target,
+        source_reconstruction,
+        preservation,
+    )
+
+    assert torch.equal(
+        routed,
+        torch.tensor([[[[[10.0, 7.0, 4.0]]]]]),
+    )
+
+
+def test_background_owner_veto_is_soft_and_local():
+    response_gate = torch.ones((1, 1, 1, 1, 3))
+    owner_confidence = torch.tensor([[[[[0.0, 0.5, 1.0]]]]])
+
+    effective = role_router.apply_background_owner_veto(
+        response_gate,
+        owner_confidence,
+        strength=0.75,
+    )
+
+    assert torch.allclose(
+        effective,
+        torch.tensor([[[[[1.0, 0.625, 0.25]]]]]),
+    )
+
+
+def test_background_owner_veto_zero_strength_is_backward_compatible():
+    response_gate = torch.tensor([[[[[0.2, 0.8]]]]])
+    owner_confidence = torch.ones_like(response_gate)
+
+    effective = role_router.apply_background_owner_veto(
+        response_gate,
+        owner_confidence,
+        strength=0.0,
+    )
+
+    assert torch.equal(effective, response_gate)
+
+
+def test_background_owner_veto_validates_inputs():
+    gate = torch.ones((1, 1, 1, 1, 1))
+    with pytest.raises(ValueError, match="strength must lie"):
+        role_router.apply_background_owner_veto(gate, gate, strength=1.1)
+    with pytest.raises(ValueError, match="same shape"):
+        role_router.apply_background_owner_veto(
+            gate,
+            torch.ones((1, 1, 1, 1, 2)),
+            strength=0.5,
+        )
 
 
 def test_role_memory_gates_read_contact_but_write_object_core_only():
@@ -302,6 +558,80 @@ def test_role_memory_gates_read_contact_but_write_object_core_only():
         write, torch.tensor([[[[True, False], [False, False]]]])
     )
     assert torch.equal(debug["role_memory_write_gate"], write.float())
+
+
+def test_canonical_m2_gates_cover_verified_owner_and_local_boundary():
+    roles = role_router.RoleState(
+        object=torch.tensor([[[[0.0, 0.8, 0.3, 0.0]]]]),
+        boundary=torch.tensor([[[[0.0, 0.1, 0.5, 0.0]]]]),
+        hand=torch.tensor([[[[0.0, 0.0, 0.0, 0.0]]]]),
+        background=torch.tensor([[[[1.0, 0.1, 0.2, 1.0]]]]),
+    )
+    owner_weight = torch.tensor([[[[0.0, 0.9, 0.0, 0.0]]]])
+    owner_support = owner_weight > 0.0
+    hard_hand = torch.zeros_like(owner_support)
+
+    read, write, debug = role_router.build_canonical_m2_gates(
+        roles,
+        spatial_size=(1, 4),
+        owner_weight=owner_weight,
+        owner_support=owner_support,
+        hard_hand_exclusion=hard_hand,
+    )
+
+    assert torch.equal(
+        write,
+        torch.tensor([[[[False, True, True, False]]]]),
+    )
+    assert read[0, 0, 0, 1] >= 0.9
+    assert debug["m2_canonical_boundary_ring"][0, 0, 0, 2] == 1.0
+
+
+def test_canonical_m2_gates_exclude_persistent_hand():
+    roles = role_router.RoleState(
+        object=torch.tensor([[[[0.8, 0.3]]]]),
+        boundary=torch.tensor([[[[0.1, 0.5]]]]),
+        hand=torch.zeros((1, 1, 1, 2)),
+        background=torch.tensor([[[[0.1, 0.2]]]]),
+    )
+    owner_weight = torch.tensor([[[[1.0, 0.0]]]])
+    owner_support = owner_weight > 0.0
+    hard_hand = torch.tensor([[[[True, False]]]])
+
+    read, write, _ = role_router.build_canonical_m2_gates(
+        roles,
+        spatial_size=(1, 2),
+        owner_weight=owner_weight,
+        owner_support=owner_support,
+        hard_hand_exclusion=hard_hand,
+    )
+
+    assert not write[0, 0, 0, 0]
+    assert read[0, 0, 0, 0] == 0.0
+
+
+def test_canonical_m2_gates_reject_background_dominant_owner():
+    roles = role_router.RoleState(
+        object=torch.tensor([[[[0.35]]]]),
+        boundary=torch.tensor([[[[0.05]]]]),
+        hand=torch.tensor([[[[0.0]]]]),
+        background=torch.tensor([[[[0.60]]]]),
+    )
+    owner_weight = torch.ones((1, 1, 1, 1))
+    owner_support = torch.ones((1, 1, 1, 1), dtype=torch.bool)
+    hard_hand = torch.zeros_like(owner_support)
+
+    read, write, debug = role_router.build_canonical_m2_gates(
+        roles,
+        spatial_size=(1, 1),
+        owner_weight=owner_weight,
+        owner_support=owner_support,
+        hard_hand_exclusion=hard_hand,
+    )
+
+    assert read.item() == 0.0
+    assert not write.item()
+    assert debug["m2_canonical_role_authorized"].item() == 0.0
 
 
 def test_role_memory_gates_abstain_on_high_entropy_tokens():
@@ -536,3 +866,25 @@ def test_residual_router_rejects_invalid_contact_weight(weight):
             roles=_roles(),
             contact_target_weight=weight,
         )
+
+
+def test_merge_interface_into_object_preserves_mass_and_other_roles():
+    roles = role_router.RoleState(
+        object=torch.tensor([[[[0.20, 0.10]]]]),
+        boundary=torch.tensor([[[[0.30, 0.40]]]]),
+        hand=torch.tensor([[[[0.10, 0.20]]]]),
+        background=torch.tensor([[[[0.40, 0.30]]]]),
+    )
+
+    merged = role_router.merge_interface_into_object(roles)
+
+    torch.testing.assert_close(
+        merged.object, roles.object + roles.boundary
+    )
+    torch.testing.assert_close(
+        merged.boundary, torch.zeros_like(roles.boundary)
+    )
+    torch.testing.assert_close(merged.hand, roles.hand)
+    torch.testing.assert_close(merged.background, roles.background)
+    total = sum(merged.as_dict().values())
+    torch.testing.assert_close(total, torch.ones_like(total))

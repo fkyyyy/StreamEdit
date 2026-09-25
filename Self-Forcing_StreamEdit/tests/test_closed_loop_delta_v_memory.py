@@ -20,6 +20,9 @@ def load_attention_module():
 closed_loop_delta_v_memory_attention = (
     load_attention_module().closed_loop_delta_v_memory_attention
 )
+materialize_closed_loop_delta_v_value = (
+    load_attention_module().materialize_closed_loop_delta_v_value
+)
 
 
 def run_closed_loop(
@@ -152,3 +155,37 @@ def test_closed_loop_error_is_rms_clipped():
     torch.testing.assert_close(
         diagnostics["clipped_error_rms"], torch.tensor(5.0)
     )
+
+
+def test_canonical_materialization_updates_only_owner_target_value():
+    query = torch.tensor([[[[1.0, 0.0]], [[0.0, 1.0]]]])
+    source = torch.zeros_like(query)
+    current_target = torch.tensor(
+        [[[[0.5, 0.0]], [[0.0, 0.5]]]]
+    )
+    canonical_delta = torch.tensor(
+        [[[[2.0, 0.0]], [[0.0, 3.0]]]]
+    )
+    owner = torch.tensor([[1.0, 0.0]])
+
+    materialized, diagnostics = materialize_closed_loop_delta_v_value(
+        current_source_query=query,
+        current_source_key=query,
+        current_source_value=source,
+        current_target_value=current_target,
+        canonical_source_key=query,
+        canonical_delta_value=canonical_delta,
+        canonical_support=torch.ones((1, 2), dtype=torch.bool),
+        owner_gate=owner,
+        topk=1,
+        min_similarity=0.0,
+        strength=0.5,
+        max_error_ratio=10.0,
+    )
+
+    torch.testing.assert_close(
+        materialized[:, 0],
+        torch.tensor([[[1.25, 0.0]]]),
+    )
+    assert torch.equal(materialized[:, 1], current_target[:, 1])
+    assert diagnostics["applied_correction_rms"] > 0.0
