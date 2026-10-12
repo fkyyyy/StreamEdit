@@ -1,0 +1,72 @@
+{
+  "ablation_flag": "--ablation_no_attention_control",
+  "artifacts": {
+    "output": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/main_ablation/videos/B3_no_attention_control/edited.mp4",
+    "resolved_config": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/main_ablation/configs/B3_no_attention_control.txt",
+    "roles": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/main_ablation/videos/B3_no_attention_control/roles",
+    "run_log": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/main_ablation/logs/B3_no_attention_control.log"
+  },
+  "case_id": "08_wooden_spoon_to_iron_black_spatula",
+  "checkpoint": "/mnt/bn/public-lf4/fky/checkpoints/checkpoints/self_forcing_dmd.pt",
+  "chunk_size": 21,
+  "command": "python /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/inference_edit_streamedit.py --data_path /mnt/bn/public-lf4/fky/resources/case2/08_wooden_spoon_b5a69994a99b4d01e4d6c306ac011477.mp4 --hand_mask_video /mnt/bn/public-lf4/fky/wooden_spoon_hand/mask.mp4 --save_path /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/main_ablation/videos/B3_no_attention_control/edited.mp4 --save_role_dir /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/main_ablation/videos/B3_no_attention_control/roles --config_path /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/configs/self_forcing_dmd.yaml --checkpoint_path /mnt/bn/public-lf4/fky/checkpoints/checkpoints/self_forcing_dmd.pt --routing_mode hand_role_factorized_causal_owner_kv --contact_graph_mode no_graph --hand_query_layers 8 12 16 20 --hand_field_update_mode posterior --mask_white_threshold 245 --hand_mask_mode overlay_white --hand_mask_overlay_diff_threshold 24 --hand_causal_evidence --hand_persistent_occupancy 1.0 --hand_connected_hysteresis --hand_connected_growth_steps 6 --hand_connected_candidate_ratio 0.65 --hand_max_object_coverage 0.18 --soft_region_modulation --soft_region_blend_strength 1.0 --role_object_residual_strength 0.10 --role_contact_residual_strength 0.35 --role_background_anchor_strength 0.50 --role_background_owner_veto_strength 0.0 --factorized_native_target_history --s1m2_attention_mode full --role_memory_contact_read_weight 0.50 --role_memory_min_read_probability 0.20 --role_memory_object_write_threshold 0.50 --immutable_delta_v_bank --closed_loop_delta_v_error --m2_canonical_identity_commit --m2_canonical_commit_strength 0.50 --immutable_delta_v_layers 8 12 16 20 --immutable_delta_v_topk 8 --immutable_delta_v_min_similarity 0.35 --immutable_delta_v_strength 0.20 --immutable_delta_v_max_rms_ratio 1.0 --closed_loop_delta_v_max_error_ratio 1.0 --src_prompt a\\ person\\ is\\ cooking\\ with\\ a\\ wooden\\ spoon. --trg_prompt a\\ person\\ is\\ cooking\\ with\\ a\\ iron\\ black\\ spatula --src_word wooden\\ spoon --trg_word iron\\ black\\ spatula --fg_boost_factor 4 --blend_power 2 --step 15 --seed 0 --rollout_chunk_size 21 --rollout_overlap_block_num 1 --ablation_no_attention_control",
+  "commit": "5e0608f83872def34c460295b2839a9a82ab12cc",
+  "config_hash": "sha256:cf7a2927cc3d2c571a578d850661ff4942647482763ec4144bc2933ef0b444af",
+  "config_hash_source": "canonical_run_config_and_full_runner",
+  "ended_at": "2026-09-24T17:13:18Z",
+  "exit_code": 0,
+  "full_runner_sha256": "sha256:d4e49424368e35d67d0ca6b2e33fde7249c9da57f434b699265b7c3d8c9d7f8a",
+  "hand_mask": "/mnt/bn/public-lf4/fky/wooden_spoon_hand/mask.mp4",
+  "output_validation": {
+    "checks": {
+      "frame_count_matches": true,
+      "resolution_matches": true
+    },
+    "expected_structure": {
+      "frames": 81,
+      "height": 480,
+      "width": 832
+    },
+    "path": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/main_ablation/videos/B3_no_attention_control/edited.mp4",
+    "size_bytes": 588769,
+    "status": "valid",
+    "valid": true,
+    "video_stream": {
+      "codec_name": "h264",
+      "duration_seconds": 5.0625,
+      "height": 480,
+      "nb_frames": 81,
+      "width": 832
+    }
+  },
+  "overlap": 1,
+  "runtime_seconds": 218.0,
+  "schema_version": 2,
+  "seed": 0,
+  "smoke_checks": {
+    "checks": {
+      "appearance_anchor": 1,
+      "attention_control": true,
+      "base_scalar": 1,
+      "immutable_delta_v_freeze": true,
+      "immutable_delta_v_read": true,
+      "numeric_nan_inf_absent": true,
+      "spatial_qk": 0,
+      "velocity_update": 1
+    },
+    "errors": [],
+    "status": "passed",
+    "valid": true
+  },
+  "source_prompt": "a person is cooking with a wooden spoon.",
+  "source_video": "/mnt/bn/public-lf4/fky/resources/case2/08_wooden_spoon_b5a69994a99b4d01e4d6c306ac011477.mp4",
+  "source_word": "wooden spoon",
+  "started_at": "2026-09-24T17:09:40Z",
+  "status": "success",
+  "steps": 15,
+  "target_prompt": "a person is cooking with a iron black spatula",
+  "target_word": "iron black spatula",
+  "variant": "B3",
+  "variant_name": "no_attention_control",
+  "wan_root": "/mnt/bn/public-lf4/fky/checkpoints/wan_models"
+}

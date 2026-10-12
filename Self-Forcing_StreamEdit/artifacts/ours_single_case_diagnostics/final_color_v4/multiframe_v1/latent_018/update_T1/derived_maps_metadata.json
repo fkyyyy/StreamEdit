@@ -1,0 +1,14 @@
+{
+  "formulas": {
+    "conflict_score": "max(-cosine_similarity(rho, v_trg - v_src), 0); zero when either norm is zero",
+    "controlled_velocity_change": "||v_controlled - v_trg||_2 over velocity channels",
+    "removed_component": "||rho - rho_safe||_2 over velocity channels",
+    "role_allocated_correction": "||rho_role||_2 over velocity channels",
+    "safe_residual_norm": "||rho_safe||_2 over velocity channels",
+    "source_residual_norm": "||rho||_2 over velocity channels"
+  },
+  "pca_inclusion": false,
+  "prediction": "prediction_001",
+  "source": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_single_case_diagnostics/capture_v4/responsibility/block_006.pt:velocity_predictions.prediction_001",
+  "update_label": "T1"
+}

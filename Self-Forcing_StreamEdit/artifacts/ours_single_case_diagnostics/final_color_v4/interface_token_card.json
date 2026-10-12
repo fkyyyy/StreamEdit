@@ -1,0 +1,36 @@
+{
+  "block_index": 6,
+  "latent_frame_index": 19,
+  "local_frame_index": 1,
+  "selection_rule": "argmax q_interface within selected block/frame and valid_token & connected_object_support & hand_evidence>0",
+  "spatial_shape": [
+    30,
+    52
+  ],
+  "token_column": 36,
+  "token_row": 19,
+  "values": {
+    "appearance_access": 0.9977746605873108,
+    "d_magnitude": 0.24544011056423187,
+    "effective_background_gated_coefficient": 0.00379180908203125,
+    "field_observation": 0.0,
+    "field_score": 1.0,
+    "full_residual_coefficient": 0.00379180908203125,
+    "hand_occupancy": 1.0,
+    "initial_object_posterior": 1.0,
+    "object_posterior": 1.0,
+    "object_posterior_prior": 1.0,
+    "q_background": 0.0,
+    "q_hand": 0.003792243078351021,
+    "q_interface": 0.9962077736854553,
+    "q_object": 0.0,
+    "reference_read_gate": 0.48912909626960754,
+    "reference_write_gate": 0.0,
+    "removed_magnitude": 0.0,
+    "rho_magnitude": 1.2265167236328125,
+    "rho_role_magnitude": 0.43545207381248474,
+    "rho_safe_magnitude": 1.2265167236328125,
+    "role_entropy": 0.01611328125,
+    "safe_residual_coefficient": 0.3486328125
+  }
+}

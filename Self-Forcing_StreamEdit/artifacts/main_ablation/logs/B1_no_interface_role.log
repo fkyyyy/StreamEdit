@@ -1,0 +1,422 @@
+/usr/local/lib/python3.11/dist-packages/requests/__init__.py:113: RequestsDependencyWarning: urllib3 (1.26.20) or chardet (7.6.0)/charset_normalizer (3.4.4) doesn't match a supported version!
+  warnings.warn(
+Free VRAM 78.9140625 GB
+KV inference with 3 frames per block
+81 1440 1920
+MASK_TEMPORAL_ALIGNMENT mode=causal_first_frame_then_stride pixel_frames=81 latent_frames=21 temporal_stride=4
+HAND_ROLE_INPUT hand_pixel=0.0469 hand_latent=0.0668 causal_evidence=1 occupancy=0.0465 persistent=0.0251 hand_mode=overlay_white artifact=/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/main_ablation/videos/B1_no_interface_role/edited.hand_role_input.npz
+HAND_ROLE_ADAPTIVE online_radius=True online_visibility=True online_temporal=True online_threshold=True online_field_reliability=True
+FACTORIZED_BAYES_BRIDGE roles=object,boundary,hand,background,unknown provenance=source,target,unknown operators=source_key,source_value,source_residual,target_memory attention=asymmetric_qk_value unknown=native_streamgve
+CAUSAL_OBJECT_OWNERSHIP ignition=text_hand_interaction transport=clean_source_query provenance=target_value_target_residual absence=no_write_keep_reassociation_state
+NATIVE_TARGET_HISTORY_MODE attention=native_streamgve_dense_clean_target factorized_attention=counterfactual_only immutable_kv_write=disabled owner_source_block=0
+[[6, 7, 8]] [[6, 7, 8, 9]]
+IMMUTABLE_DELTA_V_CONFIG mode=M2_closed_loop_error layers=(8, 12, 16, 20) topk=8 min_similarity=0.350 strength=0.200 max_rms_ratio=1.000 address=current_clean_source_pre_rope_qk payload=first_block_clean_target_v_minus_source_v max_error_ratio=1.000 owner=automatic_sog write=once native_attention=unchanged
+  0%|          | 0/7 [00:00<?, ?it/s]ABLATION_INTERFACE_ROLE block=0 interface_mass_before=387.520264 interface_mass_after=0.000000 role_sum_max_error=1.192e-07
+CAUSAL_OWNER_FLOW block=0 observation=0.0384 transport=0.0386 owner=0.0312 support=0.0387 source=tracked_source_features visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=0 edit_tokens=0.0806 visible=1.0000 temporal=0.0068 adaptive=1 object=0.0596 boundary=0.0000 hand=0.0249 background=0.9155 radius=3.667 attention_reliability=0.862 threshold=0.521 budget=0.149
+FACTORIZED_OPERATOR block=0 source_key=0.7067 source_value=0.6340 source_residual=0.6340 target_memory=0.0727 unknown=0.2933
+CAUSAL_OWNER_OPERATOR block=0 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+IMMUTABLE_DELTA_V_READ block=0 state=bootstrap native_exact=1
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:03<00:50,  3.60s/it][A
+ 13%|█▎        | 2/15 [00:04<00:22,  1.72s/it][A
+ 20%|██        | 3/15 [00:04<00:13,  1.12s/it][A
+ 27%|██▋       | 4/15 [00:04<00:09,  1.20it/s][A
+ 33%|███▎      | 5/15 [00:05<00:06,  1.47it/s][A
+ 40%|████      | 6/15 [00:05<00:05,  1.71it/s][A
+ 47%|████▋     | 7/15 [00:06<00:04,  1.91it/s][A
+ 53%|█████▎    | 8/15 [00:06<00:03,  2.04it/s][A
+ 60%|██████    | 9/15 [00:06<00:02,  2.14it/s][A
+ 67%|██████▋   | 10/15 [00:07<00:02,  2.19it/s][A
+ 73%|███████▎  | 11/15 [00:07<00:01,  2.24it/s][A
+ 80%|████████  | 12/15 [00:08<00:01,  2.28it/s][A
+ 87%|████████▋ | 13/15 [00:08<00:00,  2.31it/s][A
+ 93%|█████████▎| 14/15 [00:08<00:00,  2.32it/s][A
+100%|██████████| 15/15 [00:09<00:00,  2.33it/s][A
+                                               [A 14%|█▍        | 1/7 [00:10<01:05, 10.84s/it]S1M2_ATTENTION block=0 step=0 t=1.0000 mode=full native=30 spatial_requested=30 spatial=0 spatial_missing_rate=30 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+NATIVE_TARGET_HISTORY block=0 selected=1 dense_read=1.0000 counterfactual_factorized_read=1.0000 owner_output_gap=0.0652 owner_coverage=0.0387 owner_source_block=0
+HAND_ROLE_FIELD block=0 mode=adaptive applied=1 edit_tokens=0.0806 field=0.1833 observation=0.0001 reliability=0.0031
+CAUSAL_CONTROL_BELIEF block=0 edit=0.0607 preserve=0.9199 edit_precision=0.4887 preserve_precision=0.8378 conflict=0.0365 uncertainty=0.1484
+ROLE_AWARE_S1M2 block=0 blend_strength=1.00 region_coverage=0.0406 bg_mask_mean=0.7695 source_suppression=0.2500 effective_residual=0.7500 background_anchor=0.3535 owner_veto=0.0000 background_gate=0.7695 background_residual=0.7070  memory_read=0.0406 memory_write=0.0047 memory_write_raw=0.0429 memory_write_preconsensus=0.0115 connected_support=0.0716 area_budget=0.0714 object=0.0607 contact=0.0000 hand=0.0245 background=0.9148
+FACTORIZED_FLOW block=0 source_residual=0.7695 unknown=0.0000 native_fallback=0.7695 effective=0.7500 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=0 blocked=0 fallback=0.0000 raw_residual=0.7070 blocked_residual=0.0000 outside_native=0.0000
+S1M2_ATTENTION block=0 step=1 t=0.9330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=2 t=0.8660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=3 t=0.8000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=4 t=0.7330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=5 t=0.6660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=6 t=0.6000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=7 t=0.5330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=8 t=0.4660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=9 t=0.4000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=10 t=0.3330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=11 t=0.2660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=12 t=0.2000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=13 t=0.1330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+S1M2_ATTENTION block=0 step=14 t=0.0660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=0 m2_bank_unavailable=4 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=0 bank_frozen=0
+IMMUTABLE_DELTA_V_FREEZE block=0 write_once=1 native_kv_unchanged=1 layers=4 support=0.0417 support_tokens=195.0 bank_slots=195 delta_v_rms=0.876045
+NATIVE_TARGET_KV_COMMIT block=0 owner_tokens=181 owner_key_cosine=0.9712 owner_value_cosine=0.8496 immutable_write=0
+ABLATION_INTERFACE_ROLE block=1 interface_mass_before=429.989197 interface_mass_after=0.000000 role_sum_max_error=1.192e-07
+CAUSAL_OWNER_FLOW block=1 observation=0.0512 transport=0.0799 owner=0.0491 support=0.0594 source=tracked_source_features visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=1 edit_tokens=0.1118 visible=1.0000 temporal=0.0083 adaptive=1 object=0.0706 boundary=0.0000 hand=0.0327 background=0.8967 radius=4.667 attention_reliability=0.855 threshold=0.575 budget=0.177
+FACTORIZED_OPERATOR block=1 source_key=0.6918 source_value=0.5859 source_residual=0.5859 target_memory=0.1059 unknown=0.3082
+CAUSAL_OWNER_OPERATOR block=1 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:03<00:53,  3.84s/it][A
+ 13%|█▎        | 2/15 [00:04<00:24,  1.92s/it][A
+ 20%|██        | 3/15 [00:04<00:15,  1.31s/it][A
+ 27%|██▋       | 4/15 [00:05<00:11,  1.02s/it][A
+ 33%|███▎      | 5/15 [00:06<00:08,  1.17it/s][A
+ 40%|████      | 6/15 [00:06<00:06,  1.31it/s][A
+ 47%|████▋     | 7/15 [00:07<00:05,  1.43it/s][A
+ 53%|█████▎    | 8/15 [00:07<00:04,  1.51it/s][A
+ 60%|██████    | 9/15 [00:08<00:03,  1.55it/s][A
+ 67%|██████▋   | 10/15 [00:09<00:03,  1.59it/s][A
+ 73%|███████▎  | 11/15 [00:09<00:02,  1.62it/s][A
+ 80%|████████  | 12/15 [00:10<00:01,  1.63it/s][A
+ 87%|████████▋ | 13/15 [00:10<00:01,  1.65it/s][AS1M2_ATTENTION block=1 step=0 t=1.0000 mode=full native=30 spatial_requested=30 spatial=0 spatial_missing_rate=30 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=0 t=1.0000 rows=4 owner_coverage=0.0765 matched=0.0765 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477193 current_rms=0.245285 error_rms=0.537230 error_to_native=1.0001 cosine=0.0412 correction_rms=0.021441 gate=0.0452 capped=0.9644
+NATIVE_TARGET_HISTORY block=1 selected=1 dense_read=1.0000 counterfactual_factorized_read=0.9998 owner_output_gap=0.0286 owner_coverage=0.0594 owner_source_block=0
+HAND_ROLE_FIELD block=1 mode=adaptive applied=1 edit_tokens=0.1118 field=0.1553 observation=0.0047 reliability=0.0812
+CAUSAL_CONTROL_BELIEF block=1 edit=0.0693 preserve=0.8781 edit_precision=0.5593 preserve_precision=0.8239 conflict=0.0395 uncertainty=0.1598
+ROLE_AWARE_S1M2 block=1 blend_strength=1.00 region_coverage=0.0447 bg_mask_mean=0.9219 source_suppression=0.1045 effective_residual=0.8945 background_anchor=0.4199 owner_veto=0.0000 background_gate=0.9219 background_residual=0.8398  memory_read=0.0447 memory_write=0.0053 memory_write_raw=0.0462 memory_write_preconsensus=0.0132 connected_support=0.0831 area_budget=0.0829 object=0.0693 contact=0.0000 hand=0.0331 background=0.8976
+FACTORIZED_FLOW block=1 source_residual=0.9219 unknown=0.0000 native_fallback=0.9219 effective=0.8945 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=1 blocked=0 fallback=0.0000 raw_residual=0.7969 blocked_residual=0.0000 outside_native=0.0000
+S1M2_ATTENTION block=1 step=1 t=0.9330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=1 t=0.9330 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.275340 error_rms=0.528354 error_to_native=0.8928 cosine=0.1130 correction_rms=0.020888 gate=0.0443 capped=0.8813
+S1M2_ATTENTION block=1 step=2 t=0.8660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=2 t=0.8660 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.302630 error_rms=0.525614 error_to_native=0.8421 cosine=0.1585 correction_rms=0.020866 gate=0.0443 capped=0.8357
+S1M2_ATTENTION block=1 step=3 t=0.8000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=3 t=0.8000 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.328297 error_rms=0.524176 error_to_native=0.8041 cosine=0.1927 correction_rms=0.020881 gate=0.0443 capped=0.8315
+S1M2_ATTENTION block=1 step=4 t=0.7330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=4 t=0.7330 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.365484 error_rms=0.534093 error_to_native=0.8029 cosine=0.2091 correction_rms=0.021066 gate=0.0443 capped=0.7978
+S1M2_ATTENTION block=1 step=5 t=0.6660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=5 t=0.6660 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.375615 error_rms=0.536074 error_to_native=0.7946 cosine=0.2110 correction_rms=0.020974 gate=0.0443 capped=0.8237
+S1M2_ATTENTION block=1 step=6 t=0.6000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=6 t=0.6000 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.374609 error_rms=0.523437 error_to_native=0.7791 cosine=0.2439 correction_rms=0.020852 gate=0.0443 capped=0.7465
+S1M2_ATTENTION block=1 step=7 t=0.5330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=7 t=0.5330 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.408827 error_rms=0.530584 error_to_native=0.7928 cosine=0.2669 correction_rms=0.021067 gate=0.0443 capped=0.7493
+S1M2_ATTENTION block=1 step=8 t=0.4660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=8 t=0.4660 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.420212 error_rms=0.536206 error_to_native=0.7950 cosine=0.2662 correction_rms=0.021400 gate=0.0443 capped=0.7725
+S1M2_ATTENTION block=1 step=9 t=0.4000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=9 t=0.4000 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.420875 error_rms=0.531618 error_to_native=0.7851 cosine=0.2778 correction_rms=0.021277 gate=0.0443 capped=0.7205
+S1M2_ATTENTION block=1 step=10 t=0.3330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=10 t=0.3330 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.435623 error_rms=0.534383 error_to_native=0.7926 cosine=0.2870 correction_rms=0.021507 gate=0.0443 capped=0.6994
+S1M2_ATTENTION block=1 step=11 t=0.2660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=11 t=0.2660 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.445075 error_rms=0.537457 error_to_native=0.7997 cosine=0.2947 correction_rms=0.021706 gate=0.0443 capped=0.6966
+S1M2_ATTENTION block=1 step=12 t=0.2000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=12 t=0.2000 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.446599 error_rms=0.535600 error_to_native=0.7954 cosine=0.3034 correction_rms=0.021674 gate=0.0443 capped=0.6889
+S1M2_ATTENTION block=1 step=13 t=0.1330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+
+ 93%|█████████▎| 14/15 [00:11<00:00,  1.66it/s][A
+100%|██████████| 15/15 [00:12<00:00,  1.66it/s][A
+                                               [A 29%|██▊       | 2/7 [00:24<01:02, 12.42s/it]CLOSED_LOOP_DELTA_V_READ block=1 step=13 t=0.1330 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.461046 error_rms=0.537328 error_to_native=0.7950 cosine=0.3159 correction_rms=0.021852 gate=0.0443 capped=0.6629
+S1M2_ATTENTION block=1 step=14 t=0.0660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=1 step=14 t=0.0660 rows=4 owner_coverage=0.0761 matched=0.0761 desired_similarity=0.5899 current_similarity=0.6172 desired_rms=0.477213 current_rms=0.462960 error_rms=0.539214 error_to_native=0.7983 cosine=0.3122 correction_rms=0.021872 gate=0.0443 capped=0.6671
+M2_CANONICAL_KV_COMMIT block=1 strength=0.500 matched=0.0568 raw_error_rms=0.526410 correction_rms=0.061384 residual_error_rms=0.465068 mean_gate=0.1235
+NATIVE_TARGET_KV_COMMIT block=1 owner_tokens=278 owner_key_cosine=0.9679 owner_value_cosine=0.8728 immutable_write=1
+ABLATION_INTERFACE_ROLE block=2 interface_mass_before=494.893433 interface_mass_after=0.000000 role_sum_max_error=1.192e-07
+CAUSAL_OWNER_FLOW block=2 observation=0.0582 transport=0.0904 owner=0.0617 support=0.0791 source=tracked_source_features visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=2 edit_tokens=0.1363 visible=1.0000 temporal=0.0151 adaptive=1 object=0.0795 boundary=0.0000 hand=0.0286 background=0.8919 radius=4.000 attention_reliability=0.906 threshold=0.416 budget=0.180
+FACTORIZED_OPERATOR block=2 source_key=0.7652 source_value=0.6298 source_residual=0.6298 target_memory=0.1354 unknown=0.2348
+CAUSAL_OWNER_OPERATOR block=2 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:03<00:55,  3.96s/it][A
+ 13%|█▎        | 2/15 [00:04<00:26,  2.04s/it][A
+ 20%|██        | 3/15 [00:05<00:17,  1.42s/it][A
+ 27%|██▋       | 4/15 [00:06<00:12,  1.13s/it][A
+ 33%|███▎      | 5/15 [00:06<00:09,  1.03it/s][A
+ 40%|████      | 6/15 [00:07<00:07,  1.14it/s][A
+ 47%|████▋     | 7/15 [00:08<00:06,  1.23it/s][A
+ 53%|█████▎    | 8/15 [00:08<00:05,  1.28it/s][A
+ 60%|██████    | 9/15 [00:09<00:04,  1.32it/s][A
+ 67%|██████▋   | 10/15 [00:10<00:03,  1.34it/s][A
+ 73%|███████▎  | 11/15 [00:10<00:02,  1.36it/s][A
+ 80%|████████  | 12/15 [00:11<00:02,  1.37it/s][A
+ 87%|████████▋ | 13/15 [00:12<00:01,  1.38it/s][AS1M2_ATTENTION block=2 step=0 t=1.0000 mode=full native=30 spatial_requested=30 spatial=0 spatial_missing_rate=30 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=0 t=1.0000 rows=4 owner_coverage=0.0872 matched=0.0871 desired_similarity=0.5892 current_similarity=0.6242 desired_rms=0.492169 current_rms=0.241108 error_rms=0.546703 error_to_native=1.0046 cosine=0.0383 correction_rms=0.021990 gate=0.0447 capped=0.9835
+NATIVE_TARGET_HISTORY block=2 selected=1 dense_read=1.0000 counterfactual_factorized_read=0.9999 owner_output_gap=0.0256 owner_coverage=0.0791 owner_source_block=0
+HAND_ROLE_FIELD block=2 mode=adaptive applied=1 edit_tokens=0.1363 field=0.1581 observation=0.0125 reliability=0.2149
+CAUSAL_CONTROL_BELIEF block=2 edit=0.0756 preserve=0.8891 edit_precision=0.4999 preserve_precision=0.8658 conflict=0.0432 uncertainty=0.1162
+ROLE_AWARE_S1M2 block=2 blend_strength=1.00 region_coverage=0.0490 bg_mask_mean=0.9141 source_suppression=0.1133 effective_residual=0.8867 background_anchor=0.4160 owner_veto=0.0000 background_gate=0.9141 background_residual=0.8320  memory_read=0.0490 memory_write=0.0090 memory_write_raw=0.0509 memory_write_preconsensus=0.0152 connected_support=0.0947 area_budget=0.0945 object=0.0756 contact=0.0000 hand=0.0299 background=0.8944
+FACTORIZED_FLOW block=2 source_residual=0.9141 unknown=0.0000 native_fallback=0.9141 effective=0.8867 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=2 blocked=0 fallback=0.0000 raw_residual=0.7734 blocked_residual=0.0000 outside_native=0.0000
+S1M2_ATTENTION block=2 step=1 t=0.9330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=1 t=0.9330 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.322159 error_rms=0.555484 error_to_native=0.9237 cosine=0.1328 correction_rms=0.021528 gate=0.0434 capped=0.8885
+S1M2_ATTENTION block=2 step=2 t=0.8660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=2 t=0.8660 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.321560 error_rms=0.534569 error_to_native=0.8749 cosine=0.1877 correction_rms=0.021218 gate=0.0434 capped=0.7776
+S1M2_ATTENTION block=2 step=3 t=0.8000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=3 t=0.8000 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.358014 error_rms=0.550929 error_to_native=0.8578 cosine=0.1831 correction_rms=0.021483 gate=0.0434 capped=0.8362
+S1M2_ATTENTION block=2 step=4 t=0.7330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=4 t=0.7330 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.369797 error_rms=0.542202 error_to_native=0.8508 cosine=0.2166 correction_rms=0.021259 gate=0.0434 capped=0.7682
+S1M2_ATTENTION block=2 step=5 t=0.6660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=5 t=0.6660 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.387813 error_rms=0.548380 error_to_native=0.8453 cosine=0.2261 correction_rms=0.021592 gate=0.0434 capped=0.7511
+S1M2_ATTENTION block=2 step=6 t=0.6000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=6 t=0.6000 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.383965 error_rms=0.543074 error_to_native=0.8286 cosine=0.2328 correction_rms=0.021282 gate=0.0434 capped=0.7694
+S1M2_ATTENTION block=2 step=7 t=0.5330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=7 t=0.5330 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.404511 error_rms=0.548166 error_to_native=0.8245 cosine=0.2451 correction_rms=0.021435 gate=0.0434 capped=0.7467
+S1M2_ATTENTION block=2 step=8 t=0.4660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=8 t=0.4660 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.401717 error_rms=0.544045 error_to_native=0.8268 cosine=0.2515 correction_rms=0.021443 gate=0.0434 capped=0.7247
+S1M2_ATTENTION block=2 step=9 t=0.4000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=9 t=0.4000 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.420298 error_rms=0.546413 error_to_native=0.8261 cosine=0.2690 correction_rms=0.021452 gate=0.0434 capped=0.6919
+S1M2_ATTENTION block=2 step=10 t=0.3330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=10 t=0.3330 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.423353 error_rms=0.548757 error_to_native=0.8243 cosine=0.2656 correction_rms=0.021673 gate=0.0434 capped=0.6938
+S1M2_ATTENTION block=2 step=11 t=0.2660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=11 t=0.2660 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.431425 error_rms=0.549855 error_to_native=0.8245 cosine=0.2710 correction_rms=0.021614 gate=0.0434 capped=0.6925
+S1M2_ATTENTION block=2 step=12 t=0.2000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=12 t=0.2000 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.438278 error_rms=0.551770 error_to_native=0.8290 cosine=0.2759 correction_rms=0.021753 gate=0.0434 capped=0.6704
+S1M2_ATTENTION block=2 step=13 t=0.1330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+
+ 93%|█████████▎| 14/15 [00:13<00:00,  1.39it/s][A
+100%|██████████| 15/15 [00:13<00:00,  1.39it/s][A
+                                               [A 43%|████▎     | 3/7 [00:39<00:55, 13.77s/it]CLOSED_LOOP_DELTA_V_READ block=2 step=13 t=0.1330 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.447969 error_rms=0.554755 error_to_native=0.8252 cosine=0.2792 correction_rms=0.021859 gate=0.0434 capped=0.6761
+S1M2_ATTENTION block=2 step=14 t=0.0660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=2 step=14 t=0.0660 rows=4 owner_coverage=0.0848 matched=0.0848 desired_similarity=0.5897 current_similarity=0.6246 desired_rms=0.493561 current_rms=0.444160 error_rms=0.550724 error_to_native=0.8243 cosine=0.2843 correction_rms=0.021794 gate=0.0434 capped=0.6698
+M2_CANONICAL_KV_COMMIT block=2 strength=0.500 matched=0.0603 raw_error_rms=0.553573 correction_rms=0.063722 residual_error_rms=0.489887 mean_gate=0.1244
+NATIVE_TARGET_KV_COMMIT block=2 owner_tokens=370 owner_key_cosine=0.9739 owner_value_cosine=0.8882 immutable_write=1
+ABLATION_INTERFACE_ROLE block=3 interface_mass_before=574.673340 interface_mass_after=0.000000 role_sum_max_error=1.192e-07
+CAUSAL_OWNER_FLOW block=3 observation=0.0557 transport=0.0782 owner=0.0562 support=0.0827 source=tracked_source_features visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=3 edit_tokens=0.1536 visible=1.0000 temporal=0.0138 adaptive=1 object=0.0865 boundary=0.0000 hand=0.0245 background=0.8891 radius=4.000 attention_reliability=0.903 threshold=0.437 budget=0.180
+FACTORIZED_OPERATOR block=3 source_key=0.7794 source_value=0.6376 source_residual=0.6376 target_memory=0.1418 unknown=0.2206
+CAUSAL_OWNER_OPERATOR block=3 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:04<00:56,  4.07s/it][A
+ 13%|█▎        | 2/15 [00:04<00:27,  2.14s/it][A
+ 20%|██        | 3/15 [00:05<00:18,  1.53s/it][A
+ 27%|██▋       | 4/15 [00:06<00:13,  1.24s/it][A
+ 33%|███▎      | 5/15 [00:07<00:10,  1.08s/it][A
+ 40%|████      | 6/15 [00:08<00:08,  1.02it/s][A
+ 47%|████▋     | 7/15 [00:08<00:07,  1.09it/s][A
+ 53%|█████▎    | 8/15 [00:09<00:06,  1.13it/s][A
+ 60%|██████    | 9/15 [00:10<00:05,  1.16it/s][A
+ 67%|██████▋   | 10/15 [00:11<00:04,  1.17it/s][A
+ 73%|███████▎  | 11/15 [00:12<00:03,  1.19it/s][A
+ 80%|████████  | 12/15 [00:12<00:02,  1.20it/s][A
+ 87%|████████▋ | 13/15 [00:13<00:01,  1.20it/s][AS1M2_ATTENTION block=3 step=0 t=1.0000 mode=full native=30 spatial_requested=30 spatial=0 spatial_missing_rate=30 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=0 t=1.0000 rows=4 owner_coverage=0.0966 matched=0.0964 desired_similarity=0.5752 current_similarity=0.6269 desired_rms=0.487444 current_rms=0.226174 error_rms=0.538547 error_to_native=0.9879 cosine=0.0292 correction_rms=0.018751 gate=0.0383 capped=0.9751
+NATIVE_TARGET_HISTORY block=3 selected=1 dense_read=1.0000 counterfactual_factorized_read=0.9999 owner_output_gap=0.0224 owner_coverage=0.0827 owner_source_block=0
+HAND_ROLE_FIELD block=3 mode=adaptive applied=1 edit_tokens=0.1536 field=0.1433 observation=0.0114 reliability=0.2235
+CAUSAL_CONTROL_BELIEF block=3 edit=0.0799 preserve=0.9030 edit_precision=0.4936 preserve_precision=0.8661 conflict=0.0481 uncertainty=0.1183
+ROLE_AWARE_S1M2 block=3 blend_strength=1.00 region_coverage=0.0463 bg_mask_mean=0.9414 source_suppression=0.0918 effective_residual=0.9102 background_anchor=0.4277 owner_veto=0.0000 background_gate=0.9414 background_residual=0.8555  memory_read=0.0463 memory_write=0.0083 memory_write_raw=0.0498 memory_write_preconsensus=0.0143 connected_support=0.1053 area_budget=0.1049 object=0.0799 contact=0.0000 hand=0.0270 background=0.8931
+FACTORIZED_FLOW block=3 source_residual=0.9414 unknown=0.0000 native_fallback=0.9414 effective=0.9102 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=3 blocked=0 fallback=0.0000 raw_residual=0.8281 blocked_residual=0.0000 outside_native=0.0000
+S1M2_ATTENTION block=3 step=1 t=0.9330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=1 t=0.9330 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.308039 error_rms=0.543449 error_to_native=0.8920 cosine=0.1438 correction_rms=0.018865 gate=0.0380 capped=0.8539
+S1M2_ATTENTION block=3 step=2 t=0.8660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=2 t=0.8660 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.343396 error_rms=0.543144 error_to_native=0.8751 cosine=0.1819 correction_rms=0.018935 gate=0.0380 capped=0.8163
+S1M2_ATTENTION block=3 step=3 t=0.8000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=3 t=0.8000 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.368678 error_rms=0.552943 error_to_native=0.8878 cosine=0.1857 correction_rms=0.019440 gate=0.0380 capped=0.8132
+S1M2_ATTENTION block=3 step=4 t=0.7330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=4 t=0.7330 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.370456 error_rms=0.547683 error_to_native=0.8726 cosine=0.2044 correction_rms=0.019404 gate=0.0380 capped=0.7792
+S1M2_ATTENTION block=3 step=5 t=0.6660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=5 t=0.6660 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.405273 error_rms=0.560899 error_to_native=0.8775 cosine=0.2102 correction_rms=0.019836 gate=0.0380 capped=0.7792
+S1M2_ATTENTION block=3 step=6 t=0.6000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=6 t=0.6000 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.417517 error_rms=0.563736 error_to_native=0.8805 cosine=0.2208 correction_rms=0.019982 gate=0.0380 capped=0.7730
+S1M2_ATTENTION block=3 step=7 t=0.5330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=7 t=0.5330 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.439129 error_rms=0.579739 error_to_native=0.8795 cosine=0.2063 correction_rms=0.020225 gate=0.0380 capped=0.7940
+S1M2_ATTENTION block=3 step=8 t=0.4660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=8 t=0.4660 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.430589 error_rms=0.568236 error_to_native=0.8685 cosine=0.2227 correction_rms=0.019992 gate=0.0380 capped=0.7853
+S1M2_ATTENTION block=3 step=9 t=0.4000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=9 t=0.4000 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.443156 error_rms=0.569769 error_to_native=0.8606 cosine=0.2356 correction_rms=0.020167 gate=0.0380 capped=0.7612
+S1M2_ATTENTION block=3 step=10 t=0.3330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=10 t=0.3330 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.442111 error_rms=0.571099 error_to_native=0.8648 cosine=0.2315 correction_rms=0.020210 gate=0.0380 capped=0.7618
+S1M2_ATTENTION block=3 step=11 t=0.2660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=11 t=0.2660 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.441571 error_rms=0.572128 error_to_native=0.8668 cosine=0.2307 correction_rms=0.020305 gate=0.0380 capped=0.7656
+S1M2_ATTENTION block=3 step=12 t=0.2000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=12 t=0.2000 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.440774 error_rms=0.570707 error_to_native=0.8656 cosine=0.2345 correction_rms=0.020278 gate=0.0380 capped=0.7644
+S1M2_ATTENTION block=3 step=13 t=0.1330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+
+ 93%|█████████▎| 14/15 [00:14<00:00,  1.21it/s][A
+100%|██████████| 15/15 [00:15<00:00,  1.21it/s][A
+                                               [A 57%|█████▋    | 4/7 [00:56<00:45, 15.08s/it]CLOSED_LOOP_DELTA_V_READ block=3 step=13 t=0.1330 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.448887 error_rms=0.574378 error_to_native=0.8677 cosine=0.2365 correction_rms=0.020395 gate=0.0380 capped=0.7594
+S1M2_ATTENTION block=3 step=14 t=0.0660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=3 step=14 t=0.0660 rows=4 owner_coverage=0.0868 matched=0.0866 desired_similarity=0.5769 current_similarity=0.6268 desired_rms=0.492693 current_rms=0.444606 error_rms=0.570182 error_to_native=0.8660 cosine=0.2390 correction_rms=0.020230 gate=0.0380 capped=0.7649
+M2_CANONICAL_KV_COMMIT block=3 strength=0.500 matched=0.0513 raw_error_rms=0.613239 correction_rms=0.068936 residual_error_rms=0.544338 mean_gate=0.1190
+NATIVE_TARGET_KV_COMMIT block=3 owner_tokens=387 owner_key_cosine=0.9702 owner_value_cosine=0.8741 immutable_write=1
+ABLATION_INTERFACE_ROLE block=4 interface_mass_before=408.284180 interface_mass_after=0.000000 role_sum_max_error=1.192e-07
+CAUSAL_OWNER_FLOW block=4 observation=0.0551 transport=0.0741 owner=0.0571 support=0.0912 source=tracked_source_features visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=4 edit_tokens=0.1558 visible=1.0000 temporal=0.0074 adaptive=1 object=0.0771 boundary=0.0000 hand=0.0125 background=0.9104 radius=3.667 attention_reliability=0.937 threshold=0.457 budget=0.149
+FACTORIZED_OPERATOR block=4 source_key=0.8231 source_value=0.6743 source_residual=0.6743 target_memory=0.1488 unknown=0.1769
+CAUSAL_OWNER_OPERATOR block=4 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:04<00:57,  4.13s/it][A
+ 13%|█▎        | 2/15 [00:05<00:29,  2.23s/it][A
+ 20%|██        | 3/15 [00:05<00:19,  1.63s/it][A
+ 27%|██▋       | 4/15 [00:06<00:14,  1.34s/it][A
+ 33%|███▎      | 5/15 [00:07<00:11,  1.18s/it][A
+ 40%|████      | 6/15 [00:08<00:09,  1.09s/it][A
+ 47%|████▋     | 7/15 [00:09<00:08,  1.03s/it][A
+ 53%|█████▎    | 8/15 [00:10<00:06,  1.01it/s][A
+ 60%|██████    | 9/15 [00:11<00:05,  1.03it/s][A
+ 67%|██████▋   | 10/15 [00:12<00:04,  1.04it/s][A
+ 73%|███████▎  | 11/15 [00:13<00:03,  1.05it/s][A
+ 80%|████████  | 12/15 [00:14<00:02,  1.06it/s][A
+ 87%|████████▋ | 13/15 [00:15<00:01,  1.06it/s][AS1M2_ATTENTION block=4 step=0 t=1.0000 mode=full native=30 spatial_requested=30 spatial=0 spatial_missing_rate=30 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=0 t=1.0000 rows=4 owner_coverage=0.0923 matched=0.0923 desired_similarity=0.5771 current_similarity=0.6245 desired_rms=0.446833 current_rms=0.224237 error_rms=0.497998 error_to_native=0.8740 cosine=0.0343 correction_rms=0.017243 gate=0.0381 capped=0.9780
+NATIVE_TARGET_HISTORY block=4 selected=1 dense_read=1.0000 counterfactual_factorized_read=0.9999 owner_output_gap=0.0209 owner_coverage=0.0912 owner_source_block=0
+HAND_ROLE_FIELD block=4 mode=adaptive applied=1 edit_tokens=0.1558 field=0.1164 observation=0.0131 reliability=0.3019
+CAUSAL_CONTROL_BELIEF block=4 edit=0.0705 preserve=0.9196 edit_precision=0.4634 preserve_precision=0.8955 conflict=0.0396 uncertainty=0.0908
+ROLE_AWARE_S1M2 block=4 blend_strength=1.00 region_coverage=0.0430 bg_mask_mean=0.9492 source_suppression=0.0786 effective_residual=0.9219 background_anchor=0.4414 owner_veto=0.0000 background_gate=0.9492 background_residual=0.8828  memory_read=0.0430 memory_write=0.0073 memory_write_raw=0.0500 memory_write_preconsensus=0.0145 connected_support=0.0994 area_budget=0.0991 object=0.0705 contact=0.0000 hand=0.0149 background=0.9146
+FACTORIZED_FLOW block=4 source_residual=0.9492 unknown=0.0000 native_fallback=0.9492 effective=0.9219 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=4 blocked=0 fallback=0.0000 raw_residual=0.8398 blocked_residual=0.0000 outside_native=0.0000
+S1M2_ATTENTION block=4 step=1 t=0.9330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=1 t=0.9330 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.292724 error_rms=0.522797 error_to_native=0.8313 cosine=0.0681 correction_rms=0.016347 gate=0.0352 capped=0.9681
+S1M2_ATTENTION block=4 step=2 t=0.8660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=2 t=0.8660 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.312011 error_rms=0.525488 error_to_native=0.8168 cosine=0.0930 correction_rms=0.016658 gate=0.0352 capped=0.9570
+S1M2_ATTENTION block=4 step=3 t=0.8000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=3 t=0.8000 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.336190 error_rms=0.530324 error_to_native=0.8061 cosine=0.1114 correction_rms=0.016866 gate=0.0352 capped=0.9189
+S1M2_ATTENTION block=4 step=4 t=0.7330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=4 t=0.7330 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.356973 error_rms=0.538003 error_to_native=0.8065 cosine=0.1287 correction_rms=0.017310 gate=0.0352 capped=0.9097
+S1M2_ATTENTION block=4 step=5 t=0.6660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=5 t=0.6660 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.343346 error_rms=0.525814 error_to_native=0.7862 cosine=0.1396 correction_rms=0.016990 gate=0.0352 capped=0.8900
+S1M2_ATTENTION block=4 step=6 t=0.6000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=6 t=0.6000 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.363627 error_rms=0.538305 error_to_native=0.7859 cosine=0.1280 correction_rms=0.017231 gate=0.0352 capped=0.8925
+S1M2_ATTENTION block=4 step=7 t=0.5330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=7 t=0.5330 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.371653 error_rms=0.532790 error_to_native=0.7833 cosine=0.1629 correction_rms=0.017223 gate=0.0352 capped=0.8716
+S1M2_ATTENTION block=4 step=8 t=0.4660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=8 t=0.4660 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.390325 error_rms=0.547393 error_to_native=0.7921 cosine=0.1454 correction_rms=0.017473 gate=0.0352 capped=0.8698
+S1M2_ATTENTION block=4 step=9 t=0.4000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=9 t=0.4000 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.395948 error_rms=0.547614 error_to_native=0.7913 cosine=0.1590 correction_rms=0.017629 gate=0.0352 capped=0.8520
+S1M2_ATTENTION block=4 step=10 t=0.3330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=10 t=0.3330 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.397313 error_rms=0.549795 error_to_native=0.7897 cosine=0.1557 correction_rms=0.017689 gate=0.0352 capped=0.8612
+S1M2_ATTENTION block=4 step=11 t=0.2660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=11 t=0.2660 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.391686 error_rms=0.539067 error_to_native=0.7831 cosine=0.1729 correction_rms=0.017462 gate=0.0352 capped=0.8311
+S1M2_ATTENTION block=4 step=12 t=0.2000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=12 t=0.2000 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.391661 error_rms=0.539054 error_to_native=0.7837 cosine=0.1754 correction_rms=0.017511 gate=0.0352 capped=0.8323
+S1M2_ATTENTION block=4 step=13 t=0.1330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+
+ 93%|█████████▎| 14/15 [00:16<00:00,  1.07it/s][A
+100%|██████████| 15/15 [00:16<00:00,  1.07it/s][A
+                                               [A 71%|███████▏  | 5/7 [01:15<00:32, 16.37s/it]CLOSED_LOOP_DELTA_V_READ block=4 step=13 t=0.1330 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.397890 error_rms=0.540857 error_to_native=0.7836 cosine=0.1832 correction_rms=0.017630 gate=0.0352 capped=0.8342
+S1M2_ATTENTION block=4 step=14 t=0.0660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=4 step=14 t=0.0660 rows=4 owner_coverage=0.0870 matched=0.0870 desired_similarity=0.5781 current_similarity=0.6245 desired_rms=0.448960 current_rms=0.393928 error_rms=0.537471 error_to_native=0.7855 cosine=0.1855 correction_rms=0.017577 gate=0.0352 capped=0.8342
+M2_CANONICAL_KV_COMMIT block=4 strength=0.500 matched=0.0573 raw_error_rms=0.573293 correction_rms=0.055857 residual_error_rms=0.517483 mean_gate=0.1055
+NATIVE_TARGET_KV_COMMIT block=4 owner_tokens=427 owner_key_cosine=0.9758 owner_value_cosine=0.9070 immutable_write=1
+ABLATION_INTERFACE_ROLE block=5 interface_mass_before=421.770386 interface_mass_after=0.000000 role_sum_max_error=1.192e-07
+CAUSAL_OWNER_FLOW block=5 observation=0.0442 transport=0.0776 owner=0.0588 support=0.0955 source=tracked_source_features visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=5 edit_tokens=0.1496 visible=1.0000 temporal=0.0061 adaptive=1 object=0.0691 boundary=0.0000 hand=0.0089 background=0.9220 radius=3.333 attention_reliability=0.869 threshold=0.535 budget=0.142
+FACTORIZED_OPERATOR block=5 source_key=0.7732 source_value=0.6315 source_residual=0.6315 target_memory=0.1417 unknown=0.2268
+CAUSAL_OWNER_OPERATOR block=5 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:04<00:59,  4.23s/it][A
+ 13%|█▎        | 2/15 [00:05<00:30,  2.34s/it][A
+ 20%|██        | 3/15 [00:06<00:20,  1.73s/it][A
+ 27%|██▋       | 4/15 [00:07<00:15,  1.45s/it][A
+ 33%|███▎      | 5/15 [00:08<00:12,  1.29s/it][A
+ 40%|████      | 6/15 [00:09<00:10,  1.20s/it][A
+ 47%|████▋     | 7/15 [00:10<00:09,  1.14s/it][A
+ 53%|█████▎    | 8/15 [00:11<00:07,  1.10s/it][A
+ 60%|██████    | 9/15 [00:12<00:06,  1.08s/it][A
+ 67%|██████▋   | 10/15 [00:13<00:05,  1.07s/it][A
+ 73%|███████▎  | 11/15 [00:14<00:04,  1.06s/it][A
+ 80%|████████  | 12/15 [00:15<00:03,  1.05s/it][A
+ 87%|████████▋ | 13/15 [00:16<00:02,  1.05s/it][AS1M2_ATTENTION block=5 step=0 t=1.0000 mode=full native=30 spatial_requested=30 spatial=0 spatial_missing_rate=30 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=0 t=1.0000 rows=4 owner_coverage=0.0838 matched=0.0837 desired_similarity=0.5706 current_similarity=0.6272 desired_rms=0.418857 current_rms=0.204022 error_rms=0.473132 error_to_native=0.8354 cosine=0.0029 correction_rms=0.016229 gate=0.0394 capped=0.9923
+NATIVE_TARGET_HISTORY block=5 selected=1 dense_read=1.0000 counterfactual_factorized_read=1.0000 owner_output_gap=0.0211 owner_coverage=0.0955 owner_source_block=0
+HAND_ROLE_FIELD block=5 mode=adaptive applied=1 edit_tokens=0.1496 field=0.1491 observation=0.0034 reliability=0.0875
+CAUSAL_CONTROL_BELIEF block=5 edit=0.0685 preserve=0.9335 edit_precision=0.5610 preserve_precision=0.8368 conflict=0.0403 uncertainty=0.1477
+ROLE_AWARE_S1M2 block=5 blend_strength=1.00 region_coverage=0.0468 bg_mask_mean=0.9492 source_suppression=0.0845 effective_residual=0.9141 background_anchor=0.4414 owner_veto=0.0000 background_gate=0.9492 background_residual=0.8828  memory_read=0.0468 memory_write=0.0066 memory_write_raw=0.0549 memory_write_preconsensus=0.0150 connected_support=0.0897 area_budget=0.0895 object=0.0685 contact=0.0000 hand=0.0092 background=0.9223
+FACTORIZED_FLOW block=5 source_residual=0.9492 unknown=0.0000 native_fallback=0.9492 effective=0.9141 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=5 blocked=0 fallback=0.0000 raw_residual=0.8672 blocked_residual=0.0000 outside_native=0.0000
+S1M2_ATTENTION block=5 step=1 t=0.9330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=1 t=0.9330 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.253853 error_rms=0.486972 error_to_native=0.7981 cosine=0.0469 correction_rms=0.016169 gate=0.0387 capped=0.9519
+S1M2_ATTENTION block=5 step=2 t=0.8660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=2 t=0.8660 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.265183 error_rms=0.496041 error_to_native=0.7601 cosine=0.0303 correction_rms=0.016173 gate=0.0387 capped=0.9734
+S1M2_ATTENTION block=5 step=3 t=0.8000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=3 t=0.8000 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.330290 error_rms=0.522052 error_to_native=0.7765 cosine=0.0694 correction_rms=0.017092 gate=0.0387 capped=0.9797
+S1M2_ATTENTION block=5 step=4 t=0.7330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=4 t=0.7330 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.341896 error_rms=0.530551 error_to_native=0.7708 cosine=0.0634 correction_rms=0.017066 gate=0.0387 capped=0.9816
+S1M2_ATTENTION block=5 step=5 t=0.6660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=5 t=0.6660 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.365037 error_rms=0.537250 error_to_native=0.7845 cosine=0.0910 correction_rms=0.017704 gate=0.0387 capped=0.9684
+S1M2_ATTENTION block=5 step=6 t=0.6000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=6 t=0.6000 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.388953 error_rms=0.547833 error_to_native=0.7938 cosine=0.0972 correction_rms=0.017989 gate=0.0387 capped=0.9443
+S1M2_ATTENTION block=5 step=7 t=0.5330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=7 t=0.5330 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.395475 error_rms=0.554419 error_to_native=0.7915 cosine=0.0964 correction_rms=0.018094 gate=0.0387 capped=0.9633
+S1M2_ATTENTION block=5 step=8 t=0.4660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=8 t=0.4660 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.382898 error_rms=0.541884 error_to_native=0.7879 cosine=0.1072 correction_rms=0.017884 gate=0.0387 capped=0.9468
+S1M2_ATTENTION block=5 step=9 t=0.4000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=9 t=0.4000 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.381686 error_rms=0.544209 error_to_native=0.7809 cosine=0.0985 correction_rms=0.017697 gate=0.0387 capped=0.9487
+S1M2_ATTENTION block=5 step=10 t=0.3330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=10 t=0.3330 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.373258 error_rms=0.538726 error_to_native=0.7722 cosine=0.0969 correction_rms=0.017605 gate=0.0387 capped=0.9405
+S1M2_ATTENTION block=5 step=11 t=0.2660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=11 t=0.2660 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.372495 error_rms=0.537201 error_to_native=0.7735 cosine=0.1050 correction_rms=0.017617 gate=0.0387 capped=0.9392
+S1M2_ATTENTION block=5 step=12 t=0.2000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=12 t=0.2000 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.372918 error_rms=0.535607 error_to_native=0.7723 cosine=0.1107 correction_rms=0.017559 gate=0.0387 capped=0.9367
+S1M2_ATTENTION block=5 step=13 t=0.1330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+
+ 93%|█████████▎| 14/15 [00:17<00:01,  1.05s/it][A
+100%|██████████| 15/15 [00:18<00:00,  1.05s/it][A
+                                               [A 86%|████████▌ | 6/7 [01:35<00:17, 17.70s/it]CLOSED_LOOP_DELTA_V_READ block=5 step=13 t=0.1330 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.372762 error_rms=0.535187 error_to_native=0.7663 cosine=0.1106 correction_rms=0.017615 gate=0.0387 capped=0.9424
+S1M2_ATTENTION block=5 step=14 t=0.0660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=5 step=14 t=0.0660 rows=4 owner_coverage=0.0844 matched=0.0843 desired_similarity=0.5702 current_similarity=0.6272 desired_rms=0.418648 current_rms=0.371107 error_rms=0.532869 error_to_native=0.7690 cosine=0.1155 correction_rms=0.017637 gate=0.0387 capped=0.9373
+M2_CANONICAL_KV_COMMIT block=5 strength=0.500 matched=0.0596 raw_error_rms=0.541729 correction_rms=0.050050 residual_error_rms=0.491731 mean_gate=0.1057
+NATIVE_TARGET_KV_COMMIT block=5 owner_tokens=447 owner_key_cosine=0.9823 owner_value_cosine=0.9304 immutable_write=1
+ABLATION_INTERFACE_ROLE block=6 interface_mass_before=646.204773 interface_mass_after=0.000000 role_sum_max_error=1.192e-07
+CAUSAL_OWNER_FLOW block=6 observation=0.0485 transport=0.0817 owner=0.0605 support=0.0955 source=tracked_source_features visible=1.0000 occluded=0.0000 absent=0.0000 missing=0
+HAND_ROLE_FLOW block=6 edit_tokens=0.1697 visible=1.0000 temporal=0.0085 adaptive=1 object=0.0873 boundary=0.0000 hand=0.0137 background=0.8990 radius=3.667 attention_reliability=0.895 threshold=0.538 budget=0.170
+FACTORIZED_OPERATOR block=6 source_key=0.7879 source_value=0.6319 source_residual=0.6319 target_memory=0.1560 unknown=0.2121
+CAUSAL_OWNER_OPERATOR block=6 source_key=1.0000 source_value=0.0000 source_residual=0.0000 target_memory=1.0000 unknown=0.0000
+
+  0%|          | 0/15 [00:00<?, ?it/s][A
+  7%|▋         | 1/15 [00:04<01:03,  4.51s/it][A
+ 13%|█▎        | 2/15 [00:05<00:32,  2.52s/it][A
+ 20%|██        | 3/15 [00:06<00:22,  1.89s/it][A
+ 27%|██▋       | 4/15 [00:07<00:17,  1.59s/it][A
+ 33%|███▎      | 5/15 [00:09<00:14,  1.42s/it][A
+ 40%|████      | 6/15 [00:10<00:11,  1.32s/it][A
+ 47%|████▋     | 7/15 [00:11<00:10,  1.26s/it][A
+ 53%|█████▎    | 8/15 [00:12<00:08,  1.23s/it][A
+ 60%|██████    | 9/15 [00:13<00:07,  1.21s/it][A
+ 67%|██████▋   | 10/15 [00:14<00:05,  1.19s/it][A
+ 73%|███████▎  | 11/15 [00:15<00:04,  1.18s/it][A
+ 80%|████████  | 12/15 [00:17<00:03,  1.17s/it][A
+ 87%|████████▋ | 13/15 [00:18<00:02,  1.17s/it][AS1M2_ATTENTION block=6 step=0 t=1.0000 mode=full native=30 spatial_requested=30 spatial=0 spatial_missing_rate=30 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=0 t=1.0000 rows=4 owner_coverage=0.1041 matched=0.1039 desired_similarity=0.5789 current_similarity=0.6352 desired_rms=0.444303 current_rms=0.204744 error_rms=0.492689 error_to_native=0.8870 cosine=0.0197 correction_rms=0.016932 gate=0.0390 capped=0.9892
+NATIVE_TARGET_HISTORY block=6 selected=1 dense_read=1.0000 counterfactual_factorized_read=1.0000 owner_output_gap=0.0195 owner_coverage=0.0955 owner_source_block=0
+HAND_ROLE_FIELD block=6 mode=adaptive applied=1 edit_tokens=0.1697 field=0.1634 observation=0.0045 reliability=0.1016
+CAUSAL_CONTROL_BELIEF block=6 edit=0.0845 preserve=0.9196 edit_precision=0.5663 preserve_precision=0.8598 conflict=0.0560 uncertainty=0.1274
+ROLE_AWARE_S1M2 block=6 blend_strength=1.00 region_coverage=0.0541 bg_mask_mean=0.9453 source_suppression=0.0938 effective_residual=0.9062 background_anchor=0.4297 owner_veto=0.0000 background_gate=0.9453 background_residual=0.8594  memory_read=0.0541 memory_write=0.0051 memory_write_raw=0.0524 memory_write_preconsensus=0.0147 connected_support=0.1124 area_budget=0.1122 object=0.0845 contact=0.0000 hand=0.0144 background=0.9010
+FACTORIZED_FLOW block=6 source_residual=0.9453 unknown=0.0000 native_fallback=0.9453 effective=0.9062 paired_suppression=0.0000 verified_native_suppression=0.0000 orthogonal_geometry=0.0000 owner_source_fallback=0.0000
+OWNER_SOURCE_APPEARANCE block=6 blocked=0 fallback=0.0000 raw_residual=0.8750 blocked_residual=0.0000 outside_native=0.0000
+S1M2_ATTENTION block=6 step=1 t=0.9330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=1 t=0.9330 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.231329 error_rms=0.497625 error_to_native=0.8280 cosine=0.0410 correction_rms=0.016248 gate=0.0375 capped=0.9575
+S1M2_ATTENTION block=6 step=2 t=0.8660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=2 t=0.8660 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.218536 error_rms=0.485878 error_to_native=0.7854 cosine=0.0627 correction_rms=0.016154 gate=0.0375 capped=0.9399
+S1M2_ATTENTION block=6 step=3 t=0.8000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=3 t=0.8000 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.229647 error_rms=0.489437 error_to_native=0.7708 cosine=0.0712 correction_rms=0.016181 gate=0.0375 capped=0.9207
+S1M2_ATTENTION block=6 step=4 t=0.7330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=4 t=0.7330 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.261668 error_rms=0.501155 error_to_native=0.7574 cosine=0.0829 correction_rms=0.016316 gate=0.0375 capped=0.9166
+S1M2_ATTENTION block=6 step=5 t=0.6660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=5 t=0.6660 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.263176 error_rms=0.499530 error_to_native=0.7548 cosine=0.0849 correction_rms=0.016259 gate=0.0375 capped=0.9430
+S1M2_ATTENTION block=6 step=6 t=0.6000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=6 t=0.6000 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.275082 error_rms=0.496238 error_to_native=0.7522 cosine=0.1117 correction_rms=0.016331 gate=0.0375 capped=0.9005
+S1M2_ATTENTION block=6 step=7 t=0.5330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=7 t=0.5330 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.292386 error_rms=0.505440 error_to_native=0.7502 cosine=0.1108 correction_rms=0.016364 gate=0.0375 capped=0.9160
+S1M2_ATTENTION block=6 step=8 t=0.4660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=8 t=0.4660 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.297091 error_rms=0.500899 error_to_native=0.7466 cosine=0.1288 correction_rms=0.016337 gate=0.0375 capped=0.8709
+S1M2_ATTENTION block=6 step=9 t=0.4000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=9 t=0.4000 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.303951 error_rms=0.508462 error_to_native=0.7411 cosine=0.1155 correction_rms=0.016426 gate=0.0375 capped=0.9072
+S1M2_ATTENTION block=6 step=10 t=0.3330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=10 t=0.3330 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.295350 error_rms=0.503098 error_to_native=0.7414 cosine=0.1199 correction_rms=0.016379 gate=0.0375 capped=0.8979
+S1M2_ATTENTION block=6 step=11 t=0.2660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=11 t=0.2660 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.295050 error_rms=0.500410 error_to_native=0.7424 cosine=0.1283 correction_rms=0.016399 gate=0.0375 capped=0.8673
+S1M2_ATTENTION block=6 step=12 t=0.2000 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=12 t=0.2000 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.301053 error_rms=0.499668 error_to_native=0.7420 cosine=0.1388 correction_rms=0.016400 gate=0.0375 capped=0.8605
+S1M2_ATTENTION block=6 step=13 t=0.1330 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+
+ 93%|█████████▎| 14/15 [00:19<00:01,  1.16s/it][A
+100%|██████████| 15/15 [00:20<00:00,  1.16s/it][A
+                                               [A100%|██████████| 7/7 [01:58<00:00, 19.23s/it]100%|██████████| 7/7 [01:58<00:00, 16.88s/it]
+/home/tiger/.local/lib/python3.11/site-packages/torchvision/io/_video_deprecation_warning.py:5: UserWarning: The video decoding and encoding capabilities of torchvision are deprecated from version 0.22 and will be removed in version 0.24. We recommend that you migrate to TorchCodec, where we'll consolidate the future decoding/encoding capabilities of PyTorch: https://github.com/pytorch/torchcodec
+  warnings.warn(
+CLOSED_LOOP_DELTA_V_READ block=6 step=13 t=0.1330 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.307171 error_rms=0.503978 error_to_native=0.7392 cosine=0.1332 correction_rms=0.016494 gate=0.0375 capped=0.8719
+S1M2_ATTENTION block=6 step=14 t=0.0660 mode=full native=30 spatial_requested=30 spatial=30 spatial_missing_rate=0 m2_requested=4 m2=4 m2_bank_unavailable=0 m2_unmatched=0 m2_zero_error=0 m2_nonzero_correction=4 bank_frozen=1
+CLOSED_LOOP_DELTA_V_READ block=6 step=14 t=0.0660 rows=4 owner_coverage=0.1032 matched=0.1030 desired_similarity=0.5792 current_similarity=0.6352 desired_rms=0.444684 current_rms=0.306167 error_rms=0.503250 error_to_native=0.7436 cosine=0.1337 correction_rms=0.016485 gate=0.0375 capped=0.8751
+M2_CANONICAL_KV_COMMIT block=6 strength=0.500 matched=0.0566 raw_error_rms=0.485445 correction_rms=0.049535 residual_error_rms=0.435954 mean_gate=0.1139
+NATIVE_TARGET_KV_COMMIT block=6 owner_tokens=447 owner_key_cosine=0.9869 owner_value_cosine=0.9513 immutable_write=1

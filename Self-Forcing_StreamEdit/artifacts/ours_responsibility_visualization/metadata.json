@@ -1,0 +1,590 @@
+{
+  "anchor": {
+    "blocks": [
+      {
+        "anchor_initialization_chunk": 0,
+        "anchor_initialized_after_block": true,
+        "anchor_initialized_before_block": false,
+        "block_index": 0,
+        "retrieval_executed": false,
+        "retrieval_prediction_count": 0,
+        "selected_write_token_count": 320
+      },
+      {
+        "anchor_initialization_chunk": 0,
+        "anchor_initialized_after_block": true,
+        "anchor_initialized_before_block": true,
+        "block_index": 1,
+        "retrieval_executed": true,
+        "retrieval_prediction_count": 15,
+        "selected_write_token_count": 251
+      },
+      {
+        "anchor_initialization_chunk": 0,
+        "anchor_initialized_after_block": true,
+        "anchor_initialized_before_block": true,
+        "block_index": 2,
+        "retrieval_executed": true,
+        "retrieval_prediction_count": 15,
+        "selected_write_token_count": 155
+      },
+      {
+        "anchor_initialization_chunk": 0,
+        "anchor_initialized_after_block": true,
+        "anchor_initialized_before_block": true,
+        "block_index": 3,
+        "retrieval_executed": true,
+        "retrieval_prediction_count": 15,
+        "selected_write_token_count": 185
+      },
+      {
+        "anchor_initialization_chunk": 0,
+        "anchor_initialized_after_block": true,
+        "anchor_initialized_before_block": true,
+        "block_index": 4,
+        "retrieval_executed": true,
+        "retrieval_prediction_count": 15,
+        "selected_write_token_count": 226
+      },
+      {
+        "anchor_initialization_chunk": 0,
+        "anchor_initialized_after_block": true,
+        "anchor_initialized_before_block": true,
+        "block_index": 5,
+        "retrieval_executed": true,
+        "retrieval_prediction_count": 15,
+        "selected_write_token_count": 185
+      },
+      {
+        "anchor_initialization_chunk": 0,
+        "anchor_initialized_after_block": true,
+        "anchor_initialized_before_block": true,
+        "block_index": 6,
+        "retrieval_executed": true,
+        "retrieval_prediction_count": 15,
+        "selected_write_token_count": 180
+      }
+    ],
+    "correction_to_native_output_rms": 0.0671870054716595,
+    "initialization_chunk": 0,
+    "initialized": true,
+    "retrieval_match_rate_over_requested_tokens_and_predictions": 0.9998981410746116,
+    "retrieval_matched_token_observations": 19650,
+    "selected_write_token_count": 1502,
+    "write_token_object_or_interface_purity": 0.996005326231691
+  },
+  "artifact_files": [
+    "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/responsibility/block_000.pt",
+    "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/responsibility/block_001.pt",
+    "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/responsibility/block_002.pt",
+    "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/responsibility/block_003.pt",
+    "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/responsibility/block_004.pt",
+    "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/responsibility/block_005.pt",
+    "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/responsibility/block_006.pt"
+  ],
+  "blocks": [
+    {
+      "block_index": 0,
+      "hand_evidence_field": "hand_occupancy",
+      "latent_frame_indices": [
+        0,
+        1,
+        2
+      ],
+      "native_role_spatial_shape": [
+        60,
+        104
+      ],
+      "native_velocity_spatial_shape": [
+        60,
+        104
+      ],
+      "role_alignment": "PosteriorResidualFlowRouter_bilinear_align_corners_false_clamp_renormalize",
+      "spatial_shape": [
+        30,
+        52
+      ],
+      "velocity_alignment": "channel_RMS_then_area_to_common_token_grid"
+    },
+    {
+      "block_index": 1,
+      "hand_evidence_field": "hand_occupancy",
+      "latent_frame_indices": [
+        3,
+        4,
+        5
+      ],
+      "native_role_spatial_shape": [
+        60,
+        104
+      ],
+      "native_velocity_spatial_shape": [
+        60,
+        104
+      ],
+      "role_alignment": "PosteriorResidualFlowRouter_bilinear_align_corners_false_clamp_renormalize",
+      "spatial_shape": [
+        30,
+        52
+      ],
+      "velocity_alignment": "channel_RMS_then_area_to_common_token_grid"
+    },
+    {
+      "block_index": 2,
+      "hand_evidence_field": "hand_occupancy",
+      "latent_frame_indices": [
+        6,
+        7,
+        8
+      ],
+      "native_role_spatial_shape": [
+        60,
+        104
+      ],
+      "native_velocity_spatial_shape": [
+        60,
+        104
+      ],
+      "role_alignment": "PosteriorResidualFlowRouter_bilinear_align_corners_false_clamp_renormalize",
+      "spatial_shape": [
+        30,
+        52
+      ],
+      "velocity_alignment": "channel_RMS_then_area_to_common_token_grid"
+    },
+    {
+      "block_index": 3,
+      "hand_evidence_field": "hand_occupancy",
+      "latent_frame_indices": [
+        9,
+        10,
+        11
+      ],
+      "native_role_spatial_shape": [
+        60,
+        104
+      ],
+      "native_velocity_spatial_shape": [
+        60,
+        104
+      ],
+      "role_alignment": "PosteriorResidualFlowRouter_bilinear_align_corners_false_clamp_renormalize",
+      "spatial_shape": [
+        30,
+        52
+      ],
+      "velocity_alignment": "channel_RMS_then_area_to_common_token_grid"
+    },
+    {
+      "block_index": 4,
+      "hand_evidence_field": "hand_occupancy",
+      "latent_frame_indices": [
+        12,
+        13,
+        14
+      ],
+      "native_role_spatial_shape": [
+        60,
+        104
+      ],
+      "native_velocity_spatial_shape": [
+        60,
+        104
+      ],
+      "role_alignment": "PosteriorResidualFlowRouter_bilinear_align_corners_false_clamp_renormalize",
+      "spatial_shape": [
+        30,
+        52
+      ],
+      "velocity_alignment": "channel_RMS_then_area_to_common_token_grid"
+    },
+    {
+      "block_index": 5,
+      "hand_evidence_field": "hand_occupancy",
+      "latent_frame_indices": [
+        15,
+        16,
+        17
+      ],
+      "native_role_spatial_shape": [
+        60,
+        104
+      ],
+      "native_velocity_spatial_shape": [
+        60,
+        104
+      ],
+      "role_alignment": "PosteriorResidualFlowRouter_bilinear_align_corners_false_clamp_renormalize",
+      "spatial_shape": [
+        30,
+        52
+      ],
+      "velocity_alignment": "channel_RMS_then_area_to_common_token_grid"
+    },
+    {
+      "block_index": 6,
+      "hand_evidence_field": "hand_occupancy",
+      "latent_frame_indices": [
+        18,
+        19,
+        20
+      ],
+      "native_role_spatial_shape": [
+        60,
+        104
+      ],
+      "native_velocity_spatial_shape": [
+        60,
+        104
+      ],
+      "role_alignment": "PosteriorResidualFlowRouter_bilinear_align_corners_false_clamp_renormalize",
+      "spatial_shape": [
+        30,
+        52
+      ],
+      "velocity_alignment": "channel_RMS_then_area_to_common_token_grid"
+    }
+  ],
+  "causal_temporal_groups_source": "hand_role_input.npz:causal_temporal_groups",
+  "claimed_mixed_token_conclusion_supported": true,
+  "conclusion": "The strict argmax token is a mixed interface token and receives operation-specific permissions.",
+  "edited_video_copy": "byte-preserving copy of edited_video_input",
+  "edited_video_input": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/ours_edited_hook_output.mp4",
+  "edited_video_metadata": {
+    "fps": 16.0,
+    "frame_count": 81,
+    "height": 480,
+    "width": 832
+  },
+  "hand_role_input": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/ours_edited_hook_output.hand_role_input.npz",
+  "no_approximate_reconstruction": true,
+  "outputs": {
+    "diagnostics": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_diagnostics.npz",
+    "edited_video": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_edited_video.mp4",
+    "interface_crop": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_interface_crop.png",
+    "keyframes": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_keyframes.png",
+    "metadata": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/metadata.json",
+    "metrics": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/metrics.json",
+    "permission_maps": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_permission_maps.png",
+    "pipeline_pdf": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_responsibility_pipeline.pdf",
+    "pipeline_png": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_responsibility_pipeline.png",
+    "refinement": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_refinement.png",
+    "role_maps": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_role_maps.png",
+    "token_card": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_token_card.png",
+    "velocity_control": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/ours_velocity_control.png"
+  },
+  "real_variable_sources": {
+    "prediction_index_labels": {
+      "final": 14,
+      "first": 0,
+      "middle": 7
+    },
+    "source_variable_paths": {
+      "appearance_access": "causal_model actual_blender before attention",
+      "first_response.field_observation": "hand_role_debug['field_observation']",
+      "first_response.field_score": "hand_role_debug['field_score']",
+      "first_response.final_roles": "role_velocity_debug['role_probabilities']",
+      "first_response.object_posterior_prior": "hand_role_debug['object_posterior_prior']",
+      "first_response.refined_object_posterior": "hand_role_debug['object_posterior']",
+      "first_response.role_entropy": "role_velocity_debug['role_entropy']",
+      "initial.connected_support": "hand_role_debug['connected_object_support']",
+      "initial.hand_occupancy": "hand_role_debug['hand_occupancy']",
+      "initial.hand_proximity": "hand_role_debug['hand_proximity']",
+      "initial.object_posterior": "hand_role_debug['object_posterior']",
+      "initial.source_attention": "hand_role_debug['source_attention']",
+      "initial.temporal_confidence": "hand_role_debug['temporal_confidence']",
+      "initial.temporal_posterior": "hand_role_debug['temporal_posterior']",
+      "m2.final_attention_request": "role_object_posterior_tokens",
+      "m2.m2_canonical_read_gate": "hand_role_debug['m2_canonical_read_gate']",
+      "m2.m2_canonical_write_gate": "hand_role_debug['m2_canonical_write_gate']",
+      "m2.retrieval_maps": "closed_loop_delta_v_memory_attention maps",
+      "velocity_step0.d": "v_trg - v_src",
+      "velocity_step0.rho": "v_gt - v_src",
+      "velocity_step0.rho_role": "v_t - v_trg",
+      "velocity_step0.rho_safe": "safe_source_residual"
+    },
+    "variable_sources": {
+      "appearance_access": "actual causal-model Q/K blender consumed before each sampled prediction",
+      "first_response": "HandRoleInferencer.refine_with_field at prediction index 0",
+      "initial": "HandRoleInferencer initial debug before paired target-response refinement",
+      "m2.retrieval_maps": "closed_loop_delta_v_memory_attention maps aggregated over configured layers",
+      "velocity.d": "v_trg - v_src",
+      "velocity.effective_background_gated_coefficient": "q_hand + q_background*background_gate",
+      "velocity.full_residual_coefficient": "q_hand + q_background",
+      "velocity.rho": "v_gt - v_src",
+      "velocity.rho_role": "v_t - v_trg after uncertainty fallback and background anchoring",
+      "velocity.rho_safe": "remove_antagonistic_source_residual output",
+      "velocity.safe_residual_coefficient": "object_strength*q_object + contact_strength*q_interface"
+    }
+  },
+  "role_grid_alignment": {
+    "fallback": "exact PosteriorResidualFlowRouter._resize_roles: bilinear, align_corners=False, clamp_min(0), normalize roles with eps=1e-6",
+    "native_maps_preserved_in_diagnostics": true,
+    "preferred": "complete hook-saved q_*_token_grid tuple"
+  },
+  "role_visualization": {
+    "colors_rgb_0_255": {
+      "Background": [
+        132,
+        136,
+        143
+      ],
+      "Hand": [
+        255,
+        111,
+        97
+      ],
+      "Interface": [
+        157,
+        89,
+        255
+      ],
+      "Object Core": [
+        55,
+        126,
+        255
+      ]
+    },
+    "confidence_brightness": "0.25 + 0.75 * max_role_probability",
+    "dominant_rule": "argmax posterior soft role",
+    "mixed_interface_rule": "q_interface >= 0.2, q_interface < 1, and another role has nonzero probability",
+    "selection_is_independent_of_mixed_display": true
+  },
+  "run": {
+    "available": true,
+    "checkpoint": "/mnt/bn/public-lf4/fky/checkpoints/checkpoints/self_forcing_dmd.pt",
+    "config_path": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/ours_responsibility_inference_config.txt",
+    "configuration": {
+      "M2_base_write": "two_frame_consensus_recovery_read_only",
+      "M2_canonical_commit_strength": "0.50",
+      "M2_canonical_identity_commit": "1",
+      "M2_canonical_write": "verified_owner_plus_local_role_boundary",
+      "M2_enabled": "1",
+      "M2_strength": "0.20",
+      "S1": "hand_semantics_plus_model_native_counterfactual_velocity",
+      "attention_order": "scalar_or_spatial_qk_then_native_attention_then_optional_M2",
+      "background_anchor_strength": "0.50",
+      "background_owner_veto_strength": "0.0",
+      "background_residual_gate": "native_target_source_response",
+      "checkpoint_path": "/mnt/bn/public-lf4/fky/checkpoints/checkpoints/self_forcing_dmd.pt",
+      "command": "python /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/inference_edit_streamedit.py --data_path /mnt/bn/public-lf4/fky/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4 --hand_mask_video /mnt/bn/public-lf4/fky/mug_hand/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e_20260924_175331_321157/mask.mp4 --save_path /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/ours_edited_hook_output.mp4 --save_role_dir /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/roles --config_path /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/configs/self_forcing_dmd.yaml --checkpoint_path /mnt/bn/public-lf4/fky/checkpoints/checkpoints/self_forcing_dmd.pt --routing_mode hand_role_factorized_causal_owner_kv --contact_graph_mode no_graph --hand_query_layers 8 12 16 20 --hand_field_update_mode posterior --mask_white_threshold 245 --hand_mask_mode overlay_white --hand_mask_overlay_diff_threshold 24 --hand_causal_evidence --hand_persistent_occupancy 1.0 --hand_connected_hysteresis --hand_connected_growth_steps 6 --hand_connected_candidate_ratio 0.65 --hand_max_object_coverage 0.18 --soft_region_modulation --soft_region_blend_strength 1.0 --role_object_residual_strength 0.10 --role_contact_residual_strength 0.35 --role_background_anchor_strength 0.50 --role_background_owner_veto_strength 0.0 --factorized_native_target_history --s1m2_attention_mode full --role_memory_contact_read_weight 0.50 --role_memory_min_read_probability 0.20 --role_memory_object_write_threshold 0.50 --immutable_delta_v_bank --closed_loop_delta_v_error --m2_canonical_identity_commit --m2_canonical_commit_strength 0.50 --immutable_delta_v_layers 8 12 16 20 --immutable_delta_v_topk 8 --immutable_delta_v_min_similarity 0.35 --immutable_delta_v_strength 0.20 --immutable_delta_v_max_rms_ratio 1.0 --closed_loop_delta_v_max_error_ratio 1.0 --src_prompt A\\ person\\ is\\ washing\\ a\\ white\\ mug. --trg_prompt A\\ person\\ is\\ washing\\ a\\ red\\ plate. --src_word white\\ mug --trg_word red\\ plate --fg_boost_factor 4 --blend_power 2 --step 15 --seed 0 --rollout_chunk_size 21 --rollout_overlap_block_num 1 --responsibility_diagnostics_dir /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run",
+      "config_path": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/configs/self_forcing_dmd.yaml",
+      "connected_candidate_ratio": "0.65",
+      "connected_growth_steps": "6",
+      "contact_read_weight": "0.50",
+      "contact_residual_strength": "0.35",
+      "data_path": "/mnt/bn/public-lf4/fky/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4",
+      "edit": "metal_spatula_to_wooden_spatula",
+      "experiment": "cook_S1M2_reliability_adaptive",
+      "external_object_mask": "disabled",
+      "hand_mask": "/mnt/bn/public-lf4/fky/mug_hand/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e_20260924_175331_321157/mask.mp4",
+      "max_object_coverage": "0.18",
+      "min_read_probability": "0.20",
+      "non_owner_target_value": "native_unchanged",
+      "object_residual_strength": "0.10",
+      "object_write_threshold": "0.50",
+      "owner_extent": "reliability_adaptive_causal_area_budget",
+      "rgb_optical_flow": "disabled",
+      "roles": "object,contact,hand,background",
+      "s1m2_attention_mode": "full",
+      "spatial_qk_enabled": "1",
+      "target_key": "native_unchanged",
+      "target_value": "canonical_owner_only_when_enabled",
+      "uncertainty_policy": "native_velocity_fallback_and_memory_abstention",
+      "wan_models_root": "/mnt/bn/public-lf4/fky/checkpoints/wan_models"
+    },
+    "full_command": "python /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/inference_edit_streamedit.py --data_path /mnt/bn/public-lf4/fky/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4 --hand_mask_video /mnt/bn/public-lf4/fky/mug_hand/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e_20260924_175331_321157/mask.mp4 --save_path /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/ours_edited_hook_output.mp4 --save_role_dir /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run/roles --config_path /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/configs/self_forcing_dmd.yaml --checkpoint_path /mnt/bn/public-lf4/fky/checkpoints/checkpoints/self_forcing_dmd.pt --routing_mode hand_role_factorized_causal_owner_kv --contact_graph_mode no_graph --hand_query_layers 8 12 16 20 --hand_field_update_mode posterior --mask_white_threshold 245 --hand_mask_mode overlay_white --hand_mask_overlay_diff_threshold 24 --hand_causal_evidence --hand_persistent_occupancy 1.0 --hand_connected_hysteresis --hand_connected_growth_steps 6 --hand_connected_candidate_ratio 0.65 --hand_max_object_coverage 0.18 --soft_region_modulation --soft_region_blend_strength 1.0 --role_object_residual_strength 0.10 --role_contact_residual_strength 0.35 --role_background_anchor_strength 0.50 --role_background_owner_veto_strength 0.0 --factorized_native_target_history --s1m2_attention_mode full --role_memory_contact_read_weight 0.50 --role_memory_min_read_probability 0.20 --role_memory_object_write_threshold 0.50 --immutable_delta_v_bank --closed_loop_delta_v_error --m2_canonical_identity_commit --m2_canonical_commit_strength 0.50 --immutable_delta_v_layers 8 12 16 20 --immutable_delta_v_topk 8 --immutable_delta_v_min_similarity 0.35 --immutable_delta_v_strength 0.20 --immutable_delta_v_max_rms_ratio 1.0 --closed_loop_delta_v_max_error_ratio 1.0 --src_prompt A\\ person\\ is\\ washing\\ a\\ white\\ mug. --trg_prompt A\\ person\\ is\\ washing\\ a\\ red\\ plate. --src_word white\\ mug --trg_word red\\ plate --fg_boost_factor 4 --blend_power 2 --step 15 --seed 0 --rollout_chunk_size 21 --rollout_overlap_block_num 1 --responsibility_diagnostics_dir /opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_responsibility_visualization/run",
+    "hand_mask": "/mnt/bn/public-lf4/fky/mug_hand/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e_20260924_175331_321157/mask.mp4",
+    "inference_steps": 15,
+    "rollout_chunk_size": 21,
+    "runner": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/inference_edit_streamedit.py",
+    "seed": 0,
+    "source_prompt": "A person is washing a white mug.",
+    "source_video": "/mnt/bn/public-lf4/fky/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4",
+    "target_prompt": "A person is washing a red plate.",
+    "wan_models_root": "/mnt/bn/public-lf4/fky/checkpoints/wan_models"
+  },
+  "schema_version": "ours-responsibility-v1",
+  "selected_interface_token": {
+    "block_index": 5,
+    "candidate_count": 536,
+    "connected_object_support": true,
+    "latent_frame_index": 17,
+    "local_frame_index": 2,
+    "maximum_q_interface_tie_count": 1,
+    "selection_rule": "argmax q_interface within valid_token & connected_object_support & hand_evidence>0",
+    "spatial_shape": [
+      30,
+      52
+    ],
+    "tie_break": "block order, then local frame, row, column",
+    "token_column": 33,
+    "token_row": 7,
+    "valid_token": true,
+    "values": {
+      "appearance_access": 0.9970068335533142,
+      "d_magnitude": 0.7378766536712646,
+      "effective_background_gated_coefficient": 0.0887451171875,
+      "field_observation": 0.0,
+      "field_score": 1.0,
+      "full_residual_coefficient": 0.09014892578125,
+      "hand_occupancy": 0.9599609375,
+      "initial_object_posterior": 0.9595603346824646,
+      "object_posterior": 0.9595603346824646,
+      "object_posterior_prior": 0.9595603346824646,
+      "q_background": 0.0020935668144375086,
+      "q_hand": 0.08817509561777115,
+      "q_interface": 0.8717942237854004,
+      "q_object": 0.03793712705373764,
+      "reference_read_gate": 0.3128710687160492,
+      "reference_write_gate": 0.0,
+      "removed_magnitude": 0.0,
+      "rho_magnitude": 1.0974657535552979,
+      "rho_role_magnitude": 0.42592480778694153,
+      "rho_safe_magnitude": 1.0974657535552979,
+      "role_entropy": 0.314453125,
+      "safe_residual_coefficient": 0.30859375
+    }
+  },
+  "selected_interface_token_is_mixed": true,
+  "selected_keyframe_pixel_indices": [
+    0,
+    18,
+    38,
+    66,
+    78
+  ],
+  "selected_pixel_crop": {
+    "edited_xyxy": [
+      480,
+      64,
+      592,
+      176
+    ],
+    "pixel_frame_index": 66,
+    "radius_tokens": 3,
+    "source_xyxy": [
+      636,
+      110,
+      786,
+      306
+    ]
+  },
+  "source_video": "/mnt/bn/public-lf4/fky/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4",
+  "source_video_metadata": {
+    "fps": 15.0,
+    "frame_count": 81,
+    "height": 832,
+    "width": 1104
+  },
+  "velocity_scaling": {
+    "raw_statistics": {
+      "by_field": {
+        "d_magnitude": {
+          "count": 131040,
+          "max": 1.2233643531799316,
+          "mean": 0.11297264528442037,
+          "min": 0.007928052917122841,
+          "quantiles": {
+            "p00": 0.007928052917122841,
+            "p05": 0.01775357313454151,
+            "p100": 1.2233643531799316,
+            "p25": 0.02698499523103237,
+            "p50": 0.04156954027712345,
+            "p75": 0.09657050296664238,
+            "p90": 0.3390919953584673,
+            "p95": 0.515113371610641,
+            "p99": 0.792650516629219
+          }
+        },
+        "removed_magnitude": {
+          "count": 131040,
+          "max": 1.5594247579574585,
+          "mean": 0.06453348344040216,
+          "min": 0.0,
+          "quantiles": {
+            "p00": 0.0,
+            "p05": 0.0,
+            "p100": 1.5594247579574585,
+            "p25": 0.0,
+            "p50": 0.0,
+            "p75": 0.08610068075358868,
+            "p90": 0.21481474637985237,
+            "p95": 0.31410186737775797,
+            "p99": 0.5375608199834824
+          }
+        },
+        "rho_magnitude": {
+          "count": 131040,
+          "max": 2.5365116596221924,
+          "mean": 0.5737766897765679,
+          "min": 0.014478588476777077,
+          "quantiles": {
+            "p00": 0.014478588476777077,
+            "p05": 0.15213958248496057,
+            "p100": 2.5365116596221924,
+            "p25": 0.3197273686528206,
+            "p50": 0.5033849477767944,
+            "p75": 0.7528149336576462,
+            "p90": 1.0519479513168335,
+            "p95": 1.2513866662979116,
+            "p99": 1.6572085559368133
+          }
+        },
+        "rho_role_magnitude": {
+          "count": 131040,
+          "max": 2.137356996536255,
+          "mean": 0.5338859343066256,
+          "min": 0.013445477932691574,
+          "quantiles": {
+            "p00": 0.013445477932691574,
+            "p05": 0.11625188030302526,
+            "p100": 2.137356996536255,
+            "p25": 0.2922791466116905,
+            "p50": 0.4679751992225647,
+            "p75": 0.6982617080211639,
+            "p90": 0.9907475411891937,
+            "p95": 1.1905592560768123,
+            "p99": 1.6036214292049409
+          }
+        },
+        "rho_safe_magnitude": {
+          "count": 131040,
+          "max": 2.5365116596221924,
+          "mean": 0.5600687091261823,
+          "min": 0.01357956975698471,
+          "quantiles": {
+            "p00": 0.01357956975698471,
+            "p05": 0.1467844270169735,
+            "p100": 2.5365116596221924,
+            "p25": 0.3091875910758972,
+            "p50": 0.4887131303548813,
+            "p75": 0.7338637560606003,
+            "p90": 1.0314659595489506,
+            "p95": 1.2332583963871002,
+            "p99": 1.6451363825798035
+          }
+        }
+      },
+      "pooled": {
+        "count": 655200,
+        "max": 2.5365116596221924,
+        "mean": 0.3690474923868397,
+        "min": 0.0,
+        "quantiles": {
+          "p00": 0.0,
+          "p05": 0.0,
+          "p100": 2.5365116596221924,
+          "p25": 0.04565715417265892,
+          "p50": 0.2907959669828415,
+          "p75": 0.5665923953056335,
+          "p90": 0.8647314786911008,
+          "p95": 1.0818706870079031,
+          "p99": 1.5298371601104739
+        }
+      }
+    },
+    "rule": "one pooled p99 over native magnitudes, all blocks, and all five velocity fields",
+    "shared_robust_p99": 1.5298371601104739
+  }
+}

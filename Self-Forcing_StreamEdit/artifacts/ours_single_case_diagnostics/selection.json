@@ -1,0 +1,53 @@
+{
+  "selection_rule": "maximum hand occupancy times connected-support area; no edited-output inspection",
+  "source_artifact": "/opt/tiger/CausalForcing/StreamEdit/Self-Forcing_StreamEdit/artifacts/ours_single_case_diagnostics/baseline/responsibility/block_006.pt",
+  "block_index": 6,
+  "global_latent_frame": 19,
+  "local_frame": 1,
+  "token_grid": [
+    30,
+    52
+  ],
+  "hand_object_overlap_mass": 77.1572265625,
+  "queries": {
+    "interface_query": {
+      "query_index": 2584,
+      "local_frame": 1,
+      "row": 19,
+      "column": 36,
+      "score": 0.9962077736854553,
+      "q_object": 0.0,
+      "q_interface": 0.9962077736854553,
+      "q_hand": 0.003792243078351021,
+      "q_background": 0.0
+    },
+    "object_query": {
+      "query_index": 2418,
+      "local_frame": 1,
+      "row": 16,
+      "column": 26,
+      "score": 0.997115969657898,
+      "q_object": 0.997115969657898,
+      "q_interface": 0.0,
+      "q_hand": 0.0,
+      "q_background": 0.0028840431477874517
+    },
+    "hand_query": {
+      "query_index": 2933,
+      "local_frame": 1,
+      "row": 26,
+      "column": 21,
+      "score": 0.8646799921989441,
+      "q_object": 0.0,
+      "q_interface": 0.13531997799873352,
+      "q_hand": 0.8646799921989441,
+      "q_background": 0.0
+    }
+  },
+  "query_indices": [
+    2584,
+    2418,
+    2933
+  ],
+  "role_sum_max_error": 1.1920928955078125e-07
+}

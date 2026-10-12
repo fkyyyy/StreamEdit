@@ -1,0 +1,10 @@
+# Main ablation table
+
+| variant | ablation | status | successful_cases | total_cases | output_validation_status | smoke_status | target_edit_score | source_appearance_removal | hand_fidelity | interaction_consistency | background_preservation | long_term_appearance_consistency | historical_rows_merged | historical_exclusion_reason |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| B1 | no_interface_role | success | 1 | 1 | valid | passed |  |  |  |  |  |  | false | historical_full_baseline_metadata_mismatch |
+| B2 | no_direction_filtering | success | 1 | 1 | valid | passed |  |  |  |  |  |  | false | historical_full_baseline_metadata_mismatch |
+| B3 | no_attention_control | success | 1 | 1 | valid | passed |  |  |  |  |  |  | false | historical_full_baseline_metadata_mismatch |
+| B4 | no_appearance_anchor | success | 1 | 1 | valid | passed |  |  |  |  |  |  | false | historical_full_baseline_metadata_mismatch |
+
+> Historical Full/baseline results were not merged because their metadata does not match this main-ablation run contract.

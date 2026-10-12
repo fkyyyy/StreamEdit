@@ -1,0 +1,15 @@
+{
+  "causal_claim": "not sufficient by itself to attribute differences to diagnostics",
+  "comparison_scope": "two independent seeded GPU executions",
+  "decoded_shape": [
+    81,
+    480,
+    832,
+    3
+  ],
+  "different_channel_values": 68376423,
+  "exact_decoded_match": false,
+  "max_abs_channel_difference": 63,
+  "mean_abs_channel_difference": 1.7986237238841405,
+  "rmse_channel_difference": 2.7580223090679303
+}

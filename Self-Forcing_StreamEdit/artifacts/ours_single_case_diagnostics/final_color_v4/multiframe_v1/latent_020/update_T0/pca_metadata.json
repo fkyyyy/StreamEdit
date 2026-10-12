@@ -1,0 +1,136 @@
+{
+  "arrows": "per-token joint-PCA v_trg to v_controlled",
+  "block_index": 6,
+  "channel_count": 16,
+  "component_count": 3,
+  "components": [
+    [
+      0.10648803392671899,
+      -0.18607386445695392,
+      0.35881466823369546,
+      0.3069749504540046,
+      -0.09873076269962516,
+      0.31804567695643493,
+      -0.3119694945645287,
+      0.02798791827939754,
+      -0.3343787062471081,
+      -0.28013250879719,
+      0.281977529672268,
+      0.004197882717946926,
+      -0.3496796435065942,
+      -0.2935374104097221,
+      0.1541343590226595,
+      0.14154987759809634
+    ],
+    [
+      -0.015281615619782299,
+      0.381319025081941,
+      0.17122215099495997,
+      0.24243618510992962,
+      -0.15482664923468167,
+      -0.2955531476372041,
+      0.1721098677333973,
+      -0.24139452615632775,
+      -0.07291742955734332,
+      -0.03921458025370893,
+      -0.008214913398122659,
+      0.4937728990187334,
+      0.22527487320095219,
+      -0.04681742060794261,
+      0.3125302525805956,
+      0.4070677740625776
+    ],
+    [
+      -0.25694841905049715,
+      -0.012330717943890356,
+      0.23996289079198338,
+      -0.003729969512522208,
+      0.5046916519564779,
+      0.2411214190354526,
+      -0.058588284190667125,
+      -0.4066891465888659,
+      -0.07772813649170447,
+      -0.3946843740361421,
+      -0.10480026347726448,
+      0.04101282032653165,
+      0.4105756315863558,
+      0.050126255681818555,
+      -0.09048242821537526,
+      -0.2019724854999652
+    ]
+  ],
+  "dominant_role_counts": {
+    "q_background": 5583,
+    "q_hand": 64,
+    "q_interface": 228,
+    "q_object": 365
+  },
+  "excluded_inputs": [
+    "role probabilities",
+    "permission maps",
+    "attention maps",
+    "source_residual_norm",
+    "conflict_score",
+    "removed_component",
+    "safe_residual_norm",
+    "role_allocated_correction",
+    "controlled_velocity_change"
+  ],
+  "explained_variance_ratio": [
+    0.1879925681901152,
+    0.14573808175161282,
+    0.07417076771153229
+  ],
+  "fit_input": "concatenated per-token raw velocity_predictions vectors for all six fields",
+  "input_fields": [
+    "v_src",
+    "v_trg",
+    "rho",
+    "rho_safe",
+    "rho_role",
+    "v_controlled"
+  ],
+  "interface_mapping": "exact integer subdivision of the selected attention token; all covered velocity cells highlighted",
+  "interface_velocity_flat_indices": [
+    4028,
+    4029,
+    4132,
+    4133
+  ],
+  "latent_frame_index": 20,
+  "magnitude_shared_p99": 3.768601417541504,
+  "mean": [
+    0.1296024757891129,
+    -0.09529825646398414,
+    -0.09493918023579634,
+    -0.027966693707574635,
+    -0.12551323118754942,
+    -0.08074329029291104,
+    -0.004003373649703641,
+    0.179619035217115,
+    -0.05881814377175437,
+    0.08685113245732765,
+    0.10226635798557192,
+    -0.030685728527287133,
+    0.08268045139236328,
+    -0.24410436964697307,
+    0.05696206876100638,
+    -0.01508979229336111
+  ],
+  "noise_level": 1.0,
+  "prediction": "prediction_000",
+  "role_coloring": "argmax dominant role; no interpolation",
+  "role_colors": {
+    "q_background": "#9d9da1",
+    "q_hand": "#f5857a",
+    "q_interface": "#9c6ade",
+    "q_object": "#4c78a8"
+  },
+  "role_source": "first_response soft role probabilities on the exact native velocity grid",
+  "sample_count": 37440,
+  "spatial_shape": [
+    60,
+    104
+  ],
+  "update_label": "T0"
+}

@@ -1,0 +1,41 @@
+{
+  "layers": {
+    "layer_08": [
+      {
+        "correction_rms": 0.577845573425293,
+        "stored_token_chunk_index": 0,
+        "stored_token_count": 213,
+        "stored_token_index_max": 212,
+        "stored_token_index_min": 0
+      }
+    ],
+    "layer_12": [
+      {
+        "correction_rms": 0.6307125687599182,
+        "stored_token_chunk_index": 0,
+        "stored_token_count": 213,
+        "stored_token_index_max": 212,
+        "stored_token_index_min": 0
+      }
+    ],
+    "layer_16": [
+      {
+        "correction_rms": 0.5985671877861023,
+        "stored_token_chunk_index": 0,
+        "stored_token_count": 213,
+        "stored_token_index_max": 212,
+        "stored_token_index_min": 0
+      }
+    ],
+    "layer_20": [
+      {
+        "correction_rms": 0.4438614249229431,
+        "stored_token_chunk_index": 0,
+        "stored_token_count": 213,
+        "stored_token_index_max": 212,
+        "stored_token_index_min": 0
+      }
+    ]
+  },
+  "projection": "High-dimensional key/value/query tensors are not spatially reconstructed. Reported values are exact RMS reductions over their trailing head/channel dimensions."
+}
