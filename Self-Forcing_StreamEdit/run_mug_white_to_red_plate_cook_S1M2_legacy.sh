@@ -2,14 +2,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ICLR_CASES_ROOT="${ICLR_CASES_ROOT:-/mnt/bn/public-lf4/fky/files/iclr_cases}"
 
 # Reproduce the original cook S1M2 execution semantics on the mug input.
 # In that historical path the factorized native-target branch did not consume
 # spatial Q/K or the M2 attention correction, although the delta-V bank was
 # still constructed. Keep every later stabilization mechanism disabled so
 # this remains a useful baseline rather than another full-method variant.
-export DATA_PATH="${DATA_PATH:-/mnt/bn/public-lf4/fky/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4}"
-export HAND_MASK="${HAND_MASK:-/mnt/bn/public-lf4/fky/mug_hand/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e_20260924_175331_321157/mask.mp4}"
+export DATA_PATH="${DATA_PATH:-$ICLR_CASES_ROOT/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4}"
+export HAND_MASK="${HAND_MASK:-$ICLR_CASES_ROOT/mug_hand/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e_20260924_175331_321157/mask.mp4}"
 export OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/mug_white_to_red_plate_cook_S1M2_legacy_washing}"
 export OUTPUT_NAME="${OUTPUT_NAME:-mug-white-to-red-plate-cook-S1M2-legacy-washing.mp4}"
 export CONFIG_NAME="${CONFIG_NAME:-mug_white_to_red_plate_cook_S1M2_legacy_washing_config.txt}"

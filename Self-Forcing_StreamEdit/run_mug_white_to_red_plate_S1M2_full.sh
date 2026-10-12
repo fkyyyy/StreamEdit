@@ -2,9 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ICLR_CASES_ROOT="${ICLR_CASES_ROOT:-/mnt/bn/public-lf4/fky/files/iclr_cases}"
 
-export DATA_PATH="${DATA_PATH:-/mnt/bn/public-lf4/fky/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4}"
-export HAND_MASK="${HAND_MASK:-/mnt/bn/public-lf4/fky/mug_hand/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e_20260924_175331_321157/mask.mp4}"
+export DATA_PATH="${DATA_PATH:-$ICLR_CASES_ROOT/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4}"
+export HAND_MASK="${HAND_MASK:-$ICLR_CASES_ROOT/mug_hand/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e_20260924_175331_321157/mask.mp4}"
 export OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/mug_white_to_red_plate_S1M2_full}"
 export OUTPUT_NAME="${OUTPUT_NAME:-mug-white-to-red-plate-S1M2-full.mp4}"
 export CONFIG_NAME="${CONFIG_NAME:-mug_white_to_red_plate_S1M2_config.txt}"

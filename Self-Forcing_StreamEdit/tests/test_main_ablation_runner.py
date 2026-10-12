@@ -154,8 +154,8 @@ printf '%s\\n' '{"streams":[{"codec_name":"h264","width":832,"height":480,"durat
         name = finalizer.VARIANTS[index][1]
         slug = f"{variant}_{name}"
         assert fields[1] == str(artifact_root / "videos" / slug)
-        assert fields[2] == "/mnt/bn/public-lf4/fky/resources/case2/08_wooden_spoon_b5a69994a99b4d01e4d6c306ac011477.mp4"
-        assert fields[3] == "/mnt/bn/public-lf4/fky/wooden_spoon_hand/mask.mp4"
+        assert fields[2] == "/mnt/bn/public-lf4/fky/files/iclr_cases/resources/case2/08_wooden_spoon_b5a69994a99b4d01e4d6c306ac011477.mp4"
+        assert fields[3] == "/mnt/bn/public-lf4/fky/files/iclr_cases/wooden_spoon_hand/mask.mp4"
         assert fields[4] == "/mnt/bn/public-lf4/fky/checkpoints/checkpoints/self_forcing_dmd.pt"
         assert fields[5] == "/mnt/bn/public-lf4/fky/checkpoints/wan_models"
         metadata = json.loads(

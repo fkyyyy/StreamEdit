@@ -323,6 +323,7 @@ def test_run_script_uses_full_cook_runner_with_fixed_mug_sample():
     assert "/mnt/bn/public-lf4/fky/checkpoints/checkpoints/self_forcing_dmd.pt" in text
     assert "STEP=15" in text
     assert "S1M2_ATTENTION_MODE=full" in text
+    assert "/mnt/bn/public-lf4/fky/files/iclr_cases" in text
     assert 'CUDA_DEVICE="${CUDA_DEVICE:-1}"' in text
     assert '--artifacts "$RESPONSIBILITY_DIR"' in text
     assert '--output-dir "$ARTIFACT_ROOT"' in text

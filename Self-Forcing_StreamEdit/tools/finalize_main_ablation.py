@@ -12,6 +12,7 @@ import argparse
 import csv
 import hashlib
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,13 +21,22 @@ from typing import Any, Iterable
 
 SCHEMA_VERSION = 2
 CASE_ID = "08_wooden_spoon_to_iron_black_spatula"
+ICLR_CASES_ROOT = Path(
+    os.environ.get(
+        "ICLR_CASES_ROOT",
+        "/mnt/bn/public-lf4/fky/files/iclr_cases",
+    )
+)
 RUN_CONFIG = {
     "seed": 0,
     "steps": 15,
     "chunk_size": 21,
     "overlap": 1,
-    "source_video": "/mnt/bn/public-lf4/fky/resources/case2/08_wooden_spoon_b5a69994a99b4d01e4d6c306ac011477.mp4",
-    "hand_mask": "/mnt/bn/public-lf4/fky/wooden_spoon_hand/mask.mp4",
+    "source_video": str(
+        ICLR_CASES_ROOT
+        / "resources/case2/08_wooden_spoon_b5a69994a99b4d01e4d6c306ac011477.mp4"
+    ),
+    "hand_mask": str(ICLR_CASES_ROOT / "wooden_spoon_hand/mask.mp4"),
     "source_prompt": "a person is cooking with a wooden spoon.",
     "target_prompt": "a person is cooking with a iron black spatula",
     "source_word": "wooden spoon",

@@ -11,9 +11,10 @@ set -euo pipefail
 # copying its inference configuration.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ICLR_CASES_ROOT="${ICLR_CASES_ROOT:-/mnt/bn/public-lf4/fky/files/iclr_cases}"
 
-DATA_PATH="${DATA_PATH:-/mnt/bn/public-lf4/fky/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4}"
-HAND_MASK="${HAND_MASK:-/mnt/bn/public-lf4/fky/mug_hand/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e_20260924_175331_321157/mask.mp4}"
+DATA_PATH="${DATA_PATH:-$ICLR_CASES_ROOT/resources/CASE8/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e.mp4}"
+HAND_MASK="${HAND_MASK:-$ICLR_CASES_ROOT/mug_hand/09_mug_white_0cf372ad96ca71749a1a81bfd330d77e_20260924_175331_321157/mask.mp4}"
 SRC_PROMPT="${SRC_PROMPT:-A person is washing a white mug.}"
 TRG_PROMPT="${TRG_PROMPT:-A person is washing a red plate.}"
 SRC_WORD="${SRC_WORD:-white mug}"

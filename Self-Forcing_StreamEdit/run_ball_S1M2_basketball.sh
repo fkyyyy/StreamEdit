@@ -7,9 +7,10 @@ set -euo pipefail
 # M2: adaptive two-frame consensus + closed-loop delta-V error correction.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ICLR_CASES_ROOT="${ICLR_CASES_ROOT:-/mnt/bn/public-lf4/fky/files/iclr_cases}"
 
-DATA_PATH="${DATA_PATH:-/root/CASE8/01_ball_ivory_stress_0da77f69400be699d452104ef5fe301c.mp4}"
-HAND_MASK="${HAND_MASK:-$SCRIPT_DIR/hand_mask_ball.mp4}"
+DATA_PATH="${DATA_PATH:-$ICLR_CASES_ROOT/resources/CASE8/01_ball_ivory_stress_0da77f69400be699d452104ef5fe301c.mp4}"
+HAND_MASK="${HAND_MASK:-$ICLR_CASES_ROOT/resources/CASE8/01_ball_hand_mask.mp4}"
 OUTDIR="${OUTDIR:-$SCRIPT_DIR/outputs/ball_S1M2_basketball}"
 OUTPUT_NAME="${OUTPUT_NAME:-ball-S1M2-ivory-to-basketball.mp4}"
 PYTHON_BIN="${PYTHON_BIN:-python}"

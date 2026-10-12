@@ -12,8 +12,10 @@ ARTIFACT_ROOT="${MAIN_ABLATION_ROOT:-$SCRIPT_DIR/artifacts/main_ablation}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 FFPROBE_BIN="${FFPROBE_BIN:-ffprobe}"
 
-readonly DATA_PATH="/mnt/bn/public-lf4/fky/resources/case2/08_wooden_spoon_b5a69994a99b4d01e4d6c306ac011477.mp4"
-readonly HAND_MASK="/mnt/bn/public-lf4/fky/wooden_spoon_hand/mask.mp4"
+readonly ICLR_CASES_ROOT="${ICLR_CASES_ROOT:-/mnt/bn/public-lf4/fky/files/iclr_cases}"
+export ICLR_CASES_ROOT
+readonly DATA_PATH="$ICLR_CASES_ROOT/resources/case2/08_wooden_spoon_b5a69994a99b4d01e4d6c306ac011477.mp4"
+readonly HAND_MASK="$ICLR_CASES_ROOT/wooden_spoon_hand/mask.mp4"
 readonly CHECKPOINT_PATH="/mnt/bn/public-lf4/fky/checkpoints/checkpoints/self_forcing_dmd.pt"
 readonly WAN_MODELS_ROOT="/mnt/bn/public-lf4/fky/checkpoints/wan_models"
 readonly SRC_PROMPT='a person is cooking with a wooden spoon.'
